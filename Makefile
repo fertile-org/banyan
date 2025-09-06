@@ -1,8 +1,13 @@
 .PHONY: setup run lint test build clean
 
 # Development setup (run once)
-setup: install-tools
+setup: install-tools setup-hooks
 	@echo "Development environment ready!"
+
+# Install git hooks
+setup-hooks:
+	git config core.hooksPath .githooks
+	@echo "Git hooks configured!"
 
 # Install development tools
 install-tools:

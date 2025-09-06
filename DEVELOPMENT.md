@@ -25,7 +25,7 @@ banyan/
 ## Quick Start
 
 ```bash
-# One-time setup
+# One-time setup (includes pre-commit hooks)
 make setup
 
 # Development workflow
@@ -33,6 +33,8 @@ make lint-fix    # Format and fix issues
 make test        # Run tests
 make run-cli     # Test your changes
 ```
+
+**Note**: `make setup` configures Git pre-commit hooks that automatically run `make lint` and `make test` before each commit.
 
 ## Development Commands
 

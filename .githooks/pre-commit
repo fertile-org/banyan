@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# Pre-commit hook for Banyan Go project
+# Runs linting and tests before commit
+
+set -e
+
+echo "Running pre-commit checks..."
+
+# Run linter
+echo "🔍 Running linter..."
+if ! make lint; then
+    echo "❌ Linting failed. Run 'make lint-fix' to fix issues."
+    exit 1
+fi
+
+# Run tests
+echo "🧪 Running tests..."
+if ! make test; then
+    echo "❌ Tests failed. Please fix failing tests."
+    exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"

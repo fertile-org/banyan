@@ -4,26 +4,19 @@ import (
 	"testing"
 
 	"github.com/fertile-org/banyan/internal/common"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestVersion(t *testing.T) {
 	version := common.Version
-	if version == "" {
-		t.Fatal("Version should not be empty")
-	}
 	
-	if version != "0.1.0-dev" {
-		t.Errorf("Expected version '0.1.0-dev', got '%s'", version)
-	}
+	assert.NotEmpty(t, version, "Version should not be empty")
+	assert.Equal(t, "0.1.0-dev", version, "Expected version to be '0.1.0-dev'")
 }
 
 func TestInitLogger(t *testing.T) {
 	// Should not panic
-	defer func() {
-		if r := recover(); r != nil {
-			t.Errorf("InitLogger panicked: %v", r)
-		}
-	}()
-	
-	common.InitLogger()
+	assert.NotPanics(t, func() {
+		common.InitLogger()
+	}, "InitLogger should not panic")
 }

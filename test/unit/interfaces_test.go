@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/fertile-org/banyan/pkg/interfaces"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestDeploymentStatus_States(t *testing.T) {
@@ -15,17 +16,7 @@ func TestDeploymentStatus_States(t *testing.T) {
 		State: "running",
 	}
 
-	// Test state validation
-	found := false
-	for _, validState := range validStates {
-		if status.State == validState {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("State '%s' is not in valid states", status.State)
-	}
+	assert.Contains(t, validStates, status.State, "State should be in valid states list")
 }
 
 // Mock agent for testing
@@ -47,24 +38,22 @@ func (m *mockAgent) HealthCheck(ctx context.Context) error {
 func TestMockAgent(t *testing.T) {
 	agent := &mockAgent{id: "test-agent"}
 
-	// Test execution with valid config
-	err := agent.Execute(context.Background(), interfaces.DeploymentConfig{
-		ID:   "test-123",
-		Name: "test-deployment",
+	t.Run("Execute with valid config", func(t *testing.T) {
+		err := agent.Execute(context.Background(), interfaces.DeploymentConfig{
+			ID:   "test-123",
+			Name: "test-deployment",
+		})
+		assert.NoError(t, err, "Execute should not return error for valid config")
 	})
-	if err != nil {
-		t.Errorf("Expected no execution error, got: %v", err)
-	}
 
-	// Test execution with invalid config
-	err = agent.Execute(context.Background(), interfaces.DeploymentConfig{})
-	if err == nil {
-		t.Error("Expected execution error for empty config")
-	}
+	t.Run("Execute with invalid config", func(t *testing.T) {
+		err := agent.Execute(context.Background(), interfaces.DeploymentConfig{})
+		assert.Error(t, err, "Execute should return error for empty config")
+		assert.Equal(t, interfaces.ErrMissingDeploymentID, err, "Should return specific missing ID error")
+	})
 
-	// Test health check
-	err = agent.HealthCheck(context.Background())
-	if err != nil {
-		t.Errorf("Expected no health check error, got: %v", err)
-	}
+	t.Run("HealthCheck", func(t *testing.T) {
+		err := agent.HealthCheck(context.Background())
+		assert.NoError(t, err, "HealthCheck should not return error")
+	})
 }

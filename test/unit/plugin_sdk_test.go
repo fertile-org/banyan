@@ -3,20 +3,15 @@ package unit
 import (
 	"testing"
 
-	"github.com/fertile-org/banyan/pkg/interfaces"
 	"github.com/fertile-org/banyan/pkg/plugin-sdk"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestPluginSDK(t *testing.T) {
 	plugin := sdk.NewPlugin("test-plugin", "1.0.0")
 
-	if plugin.Name() != "test-plugin" {
-		t.Errorf("Expected name 'test-plugin', got '%s'", plugin.Name())
-	}
-
-	if plugin.Version() != "1.0.0" {
-		t.Errorf("Expected version '1.0.0', got '%s'", plugin.Version())
-	}
+	assert.Equal(t, "test-plugin", plugin.Name(), "Plugin name should match")
+	assert.Equal(t, "1.0.0", plugin.Version(), "Plugin version should match")
 }
 
 func TestSDKErrors(t *testing.T) {
@@ -30,11 +25,9 @@ func TestSDKErrors(t *testing.T) {
 	}
 
 	for i, err := range errors {
-		if err == nil {
-			t.Errorf("Error %d should not be nil", i)
-		}
-		if err.Error() == "" {
-			t.Errorf("Error %d should have a message", i)
-		}
+		t.Run(err.Error(), func(t *testing.T) {
+			assert.NotNil(t, err, "Error %d should not be nil", i)
+			assert.NotEmpty(t, err.Error(), "Error %d should have a message", i)
+		})
 	}
 }

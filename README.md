@@ -80,16 +80,15 @@ services:
         path: "/health"
         interval: 30s
     plugins:
-        - alb:
-            plugin_name: application_load_balancer
-            parameters:
-                listener_port: 443
-                dest_port: 8080
-                ssl:
-                    auto: true
+        - plugin_name: application_load_balancer
+          parameters:
+            listener_port: 443
+            dest_port: 8080
+            ssl:
+                auto: true
     network:
         vpc: default_vpc
-        inbound:
+        inbound_rules:
             - rule: allow_access_from_internet_to_alb
               source_protocal: tcp
               source: 
@@ -104,7 +103,7 @@ services:
         interval: 30s
     network:
         vpc: default_vpc
-        inbound:
+        inbound_rules:
             - rule: allow_access_from_web_server
               source_protocal: tcp
               source: 
@@ -113,11 +112,11 @@ services:
               dest_to_port: 5433
     plugins:
         - backup:
-            plugin_name: database_backup
-            parameters:
-                schedule: "0 2 * * *"
-                retention: 7d
-                location: s3://...
+          plugin_name: database_backup
+          parameters:
+            schedule: "0 2 * * *"
+            retention: 7d
+            location: s3://...
 
 
 networks:

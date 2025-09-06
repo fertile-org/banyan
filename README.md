@@ -111,8 +111,7 @@ services:
               dest_from_port: 5433
               dest_to_port: 5433
     plugins:
-        - backup:
-          plugin_name: database_backup
+        - plugin_name: database_backup
           parameters:
             schedule: "0 2 * * *"
             retention: 7d

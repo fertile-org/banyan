@@ -43,6 +43,10 @@ lint-fix:
 
 # Run tests
 test:
+	go test ./test/unit/...
+
+# Run tests without logs
+test-verbose:
 	go test -v ./test/unit/...
 
 # Run tests with coverage

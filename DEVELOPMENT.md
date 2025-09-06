@@ -52,7 +52,8 @@ make lint        # Check code quality
 make lint-fix    # Auto-fix formatting and issues
 
 # Testing
-make test        # Run unit tests
+make test          # Run unit tests
+make test-verbose  # Run unit tests with verbose logging
 make test-coverage # Run tests with coverage
 
 # Build

@@ -1,0 +1,10 @@
+go 1.21
+
+use (
+	./cmd/agent
+	./cmd/cli
+	./cmd/engine
+	./internal/common
+	./pkg/interfaces
+	./pkg/plugin-sdk
+)

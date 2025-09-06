@@ -9,10 +9,13 @@ banyan/
 │   ├── engine/        # Engine binary (orchestrator server)
 │   └── agent/         # Agent binary (target servers)
 ├── pkg/
-│   ├── common/        # Shared utilities/types
-│   └── plugins/       # Plugin system
-└── internal/
-    └── version/
+│   ├── interfaces/    # Public interfaces (Engine, Agent)
+│   └── plugin-sdk/    # Plugin SDK for community developers
+├── internal/
+│   └── common/        # Private shared utilities/types
+└── test/
+    ├── unit/          # Unit tests
+    └── integration/   # Integration tests (future)
 ```
 
 ## Requirements
@@ -29,8 +32,10 @@ go work sync
 go mod tidy -C cmd/cli
 go mod tidy -C cmd/engine  
 go mod tidy -C cmd/agent
-go mod tidy -C pkg/common
-go mod tidy -C pkg/plugins
+go mod tidy -C internal/common
+go mod tidy -C pkg/interfaces
+go mod tidy -C pkg/plugin-sdk
+go mod tidy -C test
 ```
 
 ## Run Commands
@@ -52,6 +57,16 @@ go run cmd/agent/main.go
 go build -o bin/banyan-cli cmd/cli/main.go
 go build -o bin/banyan-engine cmd/engine/main.go
 go build -o bin/banyan-agent cmd/agent/main.go
+```
+
+## Test Commands
+
+```bash
+# Run tests with verbose output
+go test -v ./test/unit/...
+
+# Run tests with coverage
+go test -cover ./test/unit/...
 ```
 
 ## Workspace

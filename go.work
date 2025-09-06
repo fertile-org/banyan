@@ -7,4 +7,5 @@ use (
 	./internal/common
 	./pkg/interfaces
 	./pkg/plugin-sdk
+	./test
 )

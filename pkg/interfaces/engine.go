@@ -2,8 +2,8 @@ package interfaces
 
 import "context"
 
-// Orchestrator defines the interface for the deployment orchestrator
-type Orchestrator interface {
+// Engine defines the interface for the deployment engine
+type Engine interface {
 	// Deploy schedules a deployment across agents
 	Deploy(ctx context.Context, request DeploymentRequest) error
 	
@@ -21,9 +21,14 @@ type Agent interface {
 	
 	// HealthCheck returns agent health status
 	HealthCheck(ctx context.Context) error
-	
-	// GetCapabilities returns what this agent can deploy
-	GetCapabilities() AgentCapabilities
+}
+
+// DeploymentConfig represents deployment configuration
+type DeploymentConfig struct {
+	ID          string            `json:"id"`
+	Name        string            `json:"name"`
+	Image       string            `json:"image,omitempty"`
+	Environment map[string]string `json:"environment,omitempty"`
 }
 
 // DeploymentRequest represents a deployment request from CLI to Engine
@@ -32,14 +37,14 @@ type DeploymentRequest struct {
 	Targets []string `json:"targets"` // List of agent IDs or hostnames
 }
 
+// DeploymentStatus represents deployment status
+type DeploymentStatus struct {
+	ID    string `json:"id"`
+	State string `json:"state"` // running, stopped, failed, pending
+}
+
 // AgentStatus represents status from a specific agent
 type AgentStatus struct {
 	AgentID    string           `json:"agent_id"`
 	Deployment DeploymentStatus `json:"deployment"`
-}
-
-// AgentCapabilities represents what an agent can deploy
-type AgentCapabilities struct {
-	Providers []string `json:"providers"` // docker, kubernetes, etc.
-	Version   string   `json:"version"`
 }

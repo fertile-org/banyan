@@ -28,25 +28,13 @@ func (p *PluginSDK) Version() string {
 	return p.version
 }
 
-// BaseProvider provides common functionality for providers
-type BaseProvider struct {
-	*PluginSDK
-}
-
-// NewBaseProvider creates a base provider with SDK utilities
-func NewBaseProvider(name, version string) *BaseProvider {
-	return &BaseProvider{
-		PluginSDK: NewPlugin(name, version),
-	}
-}
-
 // ValidateConfig provides common validation for deployment configs
-func (bp *BaseProvider) ValidateConfig(config interfaces.DeploymentConfig) error {
+func ValidateConfig(config interfaces.DeploymentConfig) error {
 	if config.ID == "" {
-		return ErrMissingDeploymentID
+		return interfaces.ErrMissingDeploymentID
 	}
 	if config.Name == "" {
-		return ErrMissingDeploymentName
+		return interfaces.ErrMissingDeploymentName
 	}
 	return nil
 }

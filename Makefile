@@ -1,7 +1,7 @@
 .PHONY: setup run lint test build clean
 
 # Development setup (run once)
-setup: install-tools setup-hooks
+setup: install-dependencies setup-hooks
 	@echo "Development environment ready!"
 
 # Install git hooks
@@ -9,9 +9,10 @@ setup-hooks:
 	git config core.hooksPath .githooks
 	@echo "Git hooks configured!"
 
-# Install development tools
-install-tools:
+# Install development dependencies
+install-dependencies:
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+	go work sync
 
 # Run applications
 run-cli:

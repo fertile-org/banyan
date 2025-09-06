@@ -1,6 +1,6 @@
 # Banyan Monorepo
 
-Banyan is a solution that will allow us to deploy the docker-compose yaml file into various cloud and on-premises servers, include production-ready CICD and system monitoring.
+Banyan is an infrastructure layer for docker-compose, which will allow us to deploy the docker-compose yaml file into various cloud and on-premises servers, include production-ready CICD and system monitoring.
 
 ### 1. Components Architecture
 
@@ -101,6 +101,12 @@ services:
     health:
         path: "/health"
         interval: 30s
+    plugins:
+        - plugin_name: database_backup
+          parameters:
+            schedule: "0 2 * * *"
+            retention: 7d
+            location: s3://...
     network:
         vpc: default_vpc
         inbound_rules:
@@ -110,12 +116,6 @@ services:
                 sg: !service web.sg
               dest_from_port: 5433
               dest_to_port: 5433
-    plugins:
-        - plugin_name: database_backup
-          parameters:
-            schedule: "0 2 * * *"
-            retention: 7d
-            location: s3://...
 
 
 networks:

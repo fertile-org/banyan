@@ -5,18 +5,55 @@
 
 set -e
 
+# Ensure we're in the right directory
+cd "$(git rev-parse --show-toplevel)"
+
+# Find Go binary - check common locations
+GO_BINARY=""
+for path in "/usr/local/go/bin/go" "/usr/bin/go" "$HOME/go/bin/go" "$(which go 2>/dev/null)"; do
+    if [ -x "$path" ]; then
+        GO_BINARY="$path"
+        break
+    fi
+done
+
+if [ -z "$GO_BINARY" ]; then
+    echo "❌ Go not found. Please ensure Go is installed and in PATH."
+    exit 1
+fi
+
+# Set up environment
+export GOPATH="$($GO_BINARY env GOPATH)"
+export GOROOT="$($GO_BINARY env GOROOT)"
+export PATH="$GOPATH/bin:$GOROOT/bin:$PATH"
+
 echo "Running pre-commit checks..."
 
-# Run linter
+# Check if golangci-lint exists
+if [ ! -f "$GOPATH/bin/golangci-lint" ]; then
+    echo "❌ golangci-lint not found. Run 'make setup' first."
+    exit 1
+fi
+
+# Run linter directly without make to avoid PATH issues
 echo "🔍 Running linter..."
-if ! make lint; then
+failed=0
+
+for module in cmd/cli cmd/engine cmd/agent pkg/interfaces pkg/plugin-sdk internal/common; do
+    echo "Linting $module..."
+    if ! (cd "$module" && "$GOPATH/bin/golangci-lint" run); then
+        failed=1
+    fi
+done
+
+if [ $failed -eq 1 ]; then
     echo "❌ Linting failed. Run 'make lint-fix' to fix issues."
     exit 1
 fi
 
 # Run tests
 echo "🧪 Running tests..."
-if ! make test; then
+if ! "$GO_BINARY" test ./test/unit/...; then
     echo "❌ Tests failed. Please fix failing tests."
     exit 1
 fi

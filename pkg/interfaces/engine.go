@@ -6,10 +6,10 @@ import "context"
 type Engine interface {
 	// Deploy schedules a deployment across agents
 	Deploy(ctx context.Context, request DeploymentRequest) error
-	
+
 	// GetStatus retrieves deployment status from all agents
 	GetStatus(ctx context.Context, deploymentID string) ([]AgentStatus, error)
-	
+
 	// Cancel cancels an ongoing deployment
 	Cancel(ctx context.Context, deploymentID string) error
 }
@@ -18,17 +18,17 @@ type Engine interface {
 type Agent interface {
 	// Execute runs a deployment on this agent
 	Execute(ctx context.Context, config DeploymentConfig) error
-	
+
 	// HealthCheck returns agent health status
 	HealthCheck(ctx context.Context) error
 }
 
 // DeploymentConfig represents deployment configuration
 type DeploymentConfig struct {
+	Environment map[string]string `json:"environment,omitempty"`
 	ID          string            `json:"id"`
 	Name        string            `json:"name"`
 	Image       string            `json:"image,omitempty"`
-	Environment map[string]string `json:"environment,omitempty"`
 }
 
 // DeploymentRequest represents a deployment request from CLI to Engine

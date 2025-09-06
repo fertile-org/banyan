@@ -22,51 +22,40 @@ banyan/
 
 - Go 1.21+
 
-## Install Dependencies
+## Quick Start
 
 ```bash
-# Install all dependencies across workspace
-go work sync
+# One-time setup
+make setup
 
-# Or install per module
-go mod tidy -C cmd/cli
-go mod tidy -C cmd/engine  
-go mod tidy -C cmd/agent
-go mod tidy -C internal/common
-go mod tidy -C pkg/interfaces
-go mod tidy -C pkg/plugin-sdk
-go mod tidy -C test
+# Development workflow
+make lint-fix    # Format and fix issues
+make test        # Run tests
+make run-cli     # Test your changes
 ```
 
-## Run Commands
+## Development Commands
 
 ```bash
-# Run CLI
-go run cmd/cli/main.go
+# Setup (run once)
+make setup
 
-# Run Engine
-go run cmd/engine/main.go
+# Run applications
+make run-cli
+make run-engine  
+make run-agent
 
-# Run Agent
-go run cmd/agent/main.go
-```
+# Run linter
+make lint        # Check code quality
+make lint-fix    # Auto-fix formatting and issues
 
-## Build Commands
+# Testing
+make test        # Run unit tests
+make test-coverage # Run tests with coverage
 
-```bash
-go build -o bin/banyan-cli cmd/cli/main.go
-go build -o bin/banyan-engine cmd/engine/main.go
-go build -o bin/banyan-agent cmd/agent/main.go
-```
-
-## Test Commands
-
-```bash
-# Run tests with verbose output
-go test -v ./test/unit/...
-
-# Run tests with coverage
-go test -cover ./test/unit/...
+# Build
+make build       # Build all binaries
+make clean       # Clean build artifacts
 ```
 
 ## Workspace

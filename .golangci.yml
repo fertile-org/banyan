@@ -1,0 +1,65 @@
+run:
+  timeout: 3m
+  go: "1.21"
+
+linters-settings:
+  gofmt:
+    simplify: true
+  goimports:
+    local-prefixes: github.com/fertile-org/banyan
+  govet:
+    enable-all: true
+  staticcheck:
+    checks: ["all"]
+  gosec:
+    severity: medium
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - unnamedResult
+      - whyNoLint
+
+linters:
+  disable-all: true
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gofmt         # Format code
+    - goimports     # Fix imports
+    - govet         # Go vet examiner
+    - ineffassign   # Unused assignments
+    - staticcheck   # Advanced static analysis
+    - typecheck     # Type checking
+    - unused        # Unused code
+    - gosimple      # Simplify code
+    - gosec         # Security issues
+    - gocritic      # Go critic
+    - misspell      # Misspelled words
+    - unconvert     # Unnecessary type conversions
+    - unparam       # Unused function parameters
+
+issues:
+  exclude-dirs:
+    - bin
+    - vendor
+  exclude-files:
+    - ".*_test.go"
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gosec
+        - gocritic
+    # Exclude specific issues in test files
+    - path: test/
+      linters:
+        - errcheck
+        - gosec
+
+output:
+  formats:
+    - format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true

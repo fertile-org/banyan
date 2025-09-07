@@ -1,11 +1,16 @@
 {
-  "servers": {
+  "mcpServers": {
     "serena": {
-      "command": "npx",
-      "args": ["@oraios/serena-mcp-server"],
-      "env": {
-        "SERENA_PROJECT_PATH": "."
-      }
+      "type": "stdio",
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena.git",
+        "serena",
+        "project",
+        "index"
+      ],
+      "env": {}
     }
   }
 }

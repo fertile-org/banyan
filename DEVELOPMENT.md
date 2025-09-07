@@ -64,3 +64,25 @@ make clean       # Clean build artifacts
 ## Workspace
 
 This project uses Go workspaces. Dependencies are managed via `go.work`.
+
+## Troubleshooting
+
+### Go PATH and Tools Issues
+
+If you encounter "Go is not installed" or "gopls is not installed" errors when using MCP tools (like Serena), even though Go is installed, it's likely a PATH issue. To resolve this:
+
+```bash
+# Install gopls (Go language server)
+go install golang.org/x/tools/gopls@latest
+
+# Add Go bin directory to PATH permanently
+echo 'export PATH=$PATH:$(go env GOPATH)/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# Optional: Create symlinks to make Go available system-wide
+sudo ln -sf /usr/local/go/bin/* /usr/bin/
+```
+
+This ensures gopls is installed and the Go bin directory is in your PATH for all sessions. The symlink step creates symbolic links from the Go installation (typically `/usr/local/go/bin/`) to the system binaries directory (`/usr/bin/`), making Go accessible to all processes including MCP servers.
+
+**Note**: This assumes Go is installed in the standard location `/usr/local/go/`. Adjust the path if your Go installation is elsewhere.

@@ -1,0 +1,11 @@
+{
+  "servers": {
+    "serena": {
+      "command": "npx",
+      "args": ["@oraios/serena-mcp-server"],
+      "env": {
+        "SERENA_PROJECT_PATH": "."
+      }
+    }
+  }
+}

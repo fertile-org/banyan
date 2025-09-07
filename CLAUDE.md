@@ -2,113 +2,35 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Project Overview
+## **IMPORTANT: Development Rules**
 
-Banyan is a Docker Compose deployment orchestrator that allows deploying docker-compose.yaml files to various cloud and on-premises servers with production-ready CI/CD and monitoring. The project uses a multi-binary architecture with three main components:
+**When working on this repository, you MUST follow these critical guidelines:**
 
-- **CLI**: User interface for deployment commands (runs on user's machine/CI)
-- **Engine**: Orchestrator server that manages deployments across multiple agents
-- **Agent**: Lightweight deployment agent that runs on target servers
+- **Follow standard Go coding conventions.** All changes must be linted to ensure no broken code.
 
-## Architecture
+- **Always choose the simplest approach.** If there are 3 design patterns that can solve the problem, choose the simple but extensible pattern. Avoid over-engineering.
 
-The project follows a modular Go workspace structure with clear separation of concerns:
+- **NEVER duplicate files, functions, or documentation.** Always update the original file directly. Don't create duplicates as backups - we don't need backups.
 
-```
-banyan/
-├── cmd/                    # Binary entry points
-│   ├── cli/               # CLI binary (user's machine/CI)  
-│   ├── engine/            # Engine binary (orchestrator server)
-│   └── agent/             # Agent binary (target servers)
-├── pkg/                   # Public APIs
-│   ├── interfaces/        # Core interfaces (Engine, Agent)
-│   └── plugin-sdk/        # Plugin SDK for community developers
-├── internal/              # Private shared code
-│   └── common/           # Shared utilities and types
-└── test/                 # Test suites
-    ├── unit/             # Unit tests
-    └── integration/      # Integration tests (future)
-```
+- **Always think deeply when working in this repository.** Tokens are not a problem - don't perform quick fixes based on small pieces of knowledge.
 
-### Key Interfaces
+- **Always think like a senior software engineer** who knows what to do and what constitutes over-engineering.
 
-- **Engine Interface**: Defines deployment orchestration (Deploy, GetStatus, Cancel)
-- **Agent Interface**: Defines remote execution (Execute, HealthCheck)
-- **DeploymentConfig**: Core deployment configuration structure
-- **Plugin SDK**: Extensibility framework for custom providers and strategies
+- **All functions in this repository need unit tests.** When adding new functions or updating existing ones, you MUST review and update the corresponding unit tests.
 
-## Development Commands
+- **When writing unit tests, make them simple and easy to understand.** Don't over-engineer unit tests.
 
-### Setup and Dependencies
-```bash
-# Install all dependencies across workspace
-go work sync
+- **ALWAYS use Serena MCP server for codebase understanding.** Before starting any task, use the Serena tools to understand the current codebase structure and context. This ensures you have complete, up-to-date knowledge of the project.
 
-# Or install per module
-go mod tidy -C cmd/cli
-go mod tidy -C cmd/engine  
-go mod tidy -C cmd/agent
-go mod tidy -C internal/common
-go mod tidy -C pkg/interfaces
-go mod tidy -C pkg/plugin-sdk
-go mod tidy -C test
-```
+## Codebase Context
 
-### Running Components
-```bash
-# Run CLI (development)
-go run cmd/cli/main.go
+**MANDATORY**: Before working on any task, you MUST use the Serena MCP server to understand the current codebase:
 
-# Run Engine (development)
-go run cmd/engine/main.go
+- Use Serena tools to get file summaries and project structure
+- Check related files and dependencies before making changes
+- Understand the complete context before implementing solutions
+- Use Serena to validate your changes don't break existing functionality
 
-# Run Agent (development)
-go run cmd/agent/main.go
-```
+## Project Information
 
-### Building Binaries
-```bash
-go build -o bin/banyan-cli cmd/cli/main.go
-go build -o bin/banyan-engine cmd/engine/main.go
-go build -o bin/banyan-agent cmd/agent/main.go
-```
-
-### Testing
-```bash
-# Run unit tests with verbose output
-go test -v ./test/unit/...
-
-# Run tests with coverage
-go test -cover ./test/unit/...
-```
-
-## Code Patterns and Conventions
-
-### Module Dependencies
-- All modules depend on `internal/common` for shared utilities
-- The workspace uses Go 1.21+ with local module replacements
-- Dependencies are managed via go.work across all modules
-- Uses testify for unit testing and logrus with JSON formatting
-
-### Interface Design
-- Clean interface separation between Engine and Agent components
-- Context-aware operations with proper cancellation support
-- Structured error handling with domain-specific error types
-- JSON serialization for deployment configurations and status
-
-### Plugin Architecture
-- Plugin SDK provides validation utilities and common patterns
-- Extensible design for cloud providers, deployment strategies, and monitoring
-- Version-aware plugin system with name/version identification
-
-## Current Implementation Status
-
-The project is in early development (v0.1.0-dev) with basic structure in place:
-- ✅ Module structure and workspace configuration
-- ✅ Core interfaces defined
-- ✅ Basic plugin SDK framework
-- ✅ Unit test structure with testify
-- 🚧 CLI, Engine, and Agent implementations (stubs only)
-- 🚧 Docker Compose parsing
-- 🚧 Cloud provider integrations
-- 🚧 Monitoring and observability features
+For detailed project overview, architecture, development commands, and implementation status, see [DEVELOPMENT.md](./DEVELOPMENT.md).

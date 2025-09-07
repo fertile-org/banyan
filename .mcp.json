@@ -7,8 +7,9 @@
         "--from",
         "git+https://github.com/oraios/serena.git",
         "serena",
-        "project",
-        "index"
+        "start-mcp-server",
+        "--context",
+        "ide-assistant"
       ],
       "env": {}
     }

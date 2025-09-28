@@ -50,3 +50,6 @@ logs/
 # Temporary files
 tmp/
 temp/
+
+# Serena
+.serena

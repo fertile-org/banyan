@@ -4,8 +4,10 @@ use (
 	./cmd/agent
 	./cmd/cli
 	./cmd/engine
+	./cmd/vpc-cli
 	./internal/common
 	./pkg/interfaces
 	./pkg/plugin-sdk
+	./pkg/vpc
 	./test
 )

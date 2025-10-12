@@ -98,7 +98,8 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 
 	// Auto-create network namespace if it doesn't exist
 	netnsPath := fmt.Sprintf("/var/run/netns/%s", containerID)
-	if _, err := os.Stat(netnsPath); os.IsNotExist(err) {
+	// Use Lstat to check if symlink or file exists (without following symlink)
+	if _, err := os.Lstat(netnsPath); os.IsNotExist(err) {
 		// Create /var/run/netns directory if needed
 		if err := os.MkdirAll("/var/run/netns", 0755); err != nil {
 			return fmt.Errorf("failed to create netns directory: %w", err)

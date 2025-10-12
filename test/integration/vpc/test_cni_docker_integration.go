@@ -75,7 +75,8 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Step("Building vpc-cli")
 
 	projectRoot := getProjectRoot()
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", vpcCLIPath, "./cmd/vpc-cli/")
+	// Use -a flag to force rebuild (ignore cache)
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-a", "-o", vpcCLIPath, "./cmd/vpc-cli/")
 	buildCmd.Dir = projectRoot
 
 	if output, err := buildCmd.CombinedOutput(); err != nil {

@@ -72,13 +72,6 @@ else
 	cd $(MODULE) && go test ./...
 endif
 
-# VPC-specific test shortcuts
-test-vpc-network:
-	cd pkg/vpc && go test -v ./network/
-
-test-vpc-all:
-	cd pkg/vpc && go test ./...
-
 # Build all binaries
 build:
 	go build -o bin/banyan-cli cmd/cli/main.go

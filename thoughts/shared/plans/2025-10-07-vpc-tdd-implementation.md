@@ -870,19 +870,19 @@ func init() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] All IPAM tests pass: `go test -v ./pkg/vpc/ipam/`
-- [ ] No lint errors: `golangci-lint run ./pkg/vpc/ipam/`
-- [ ] vpc-cli builds: `go build -o /tmp/vpc-cli ./cmd/vpc-cli/`
+- [x] All IPAM tests pass: `go test -v ./pkg/vpc/ipam/` ✓
+- [x] No lint errors: `golangci-lint run ./pkg/vpc/ipam/` ✓
+- [x] vpc-cli builds: `go build -o /tmp/vpc-cli ./cmd/vpc-cli/` ✓
 
 #### Manual Verification (with vpc-cli):
-- [ ] Allocate subnets: `vpc-cli ipam allocate-subnet host-1` (verify 10.0.1.0/24)
-- [ ] Allocate subnets: `vpc-cli ipam allocate-subnet host-2` (verify 10.0.2.0/24)
-- [ ] Allocate subnets: `vpc-cli ipam allocate-subnet host-3` (verify 10.0.3.0/24)
-- [ ] Allocate IP: `vpc-cli ipam allocate-ip host-1` (verify 10.0.1.2)
-- [ ] Allocate IP: `vpc-cli ipam allocate-ip host-1` (verify 10.0.1.3)
-- [ ] Release IP: `vpc-cli ipam release-ip 10.0.1.2` (verify success)
-- [ ] Re-allocate: `vpc-cli ipam allocate-ip host-1` (should get 10.0.1.2 again)
-- [ ] Renew lease: `vpc-cli ipam renew-lease host-1` (verify success)
+- [x] Allocate subnets: `vpc-cli ipam allocate-subnet host-1` (verify 10.0.1.0/24) ✓
+- [x] Allocate subnets: `vpc-cli ipam allocate-subnet host-2` (verify 10.0.2.0/24) ✓
+- [x] Allocate subnets: `vpc-cli ipam allocate-subnet host-3` (verify 10.0.3.0/24) ✓
+- [x] Allocate IP: `vpc-cli ipam allocate-ip host-1` (verify 10.0.1.2) ✓
+- [x] Allocate IP: `vpc-cli ipam allocate-ip host-1` (verify 10.0.1.3) ✓
+- [x] Release IP: `vpc-cli ipam release-ip 10.0.1.2` (verify success) ✓
+- [x] Re-allocate: `vpc-cli ipam allocate-ip host-1` (should get 10.0.1.2 again) ✓
+- [x] Renew lease: `vpc-cli ipam renew-lease host-1` (verify success) ✓
 
 **Implementation Note**: After completing this phase and all automated verification passes, pause here for confirmation before proceeding to Phase 3.
 

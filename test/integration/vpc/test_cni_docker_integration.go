@@ -88,6 +88,9 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	// Step 3: Create Docker container
 	p.Step("Creating Docker container without networking")
 
+	// Clean up any existing container with same name first
+	helpers.CleanupContainer(ctx, containerName)
+
 	container, err := helpers.CreateTestContainer(ctx, containerName)
 	if err != nil {
 		p.Error(fmt.Sprintf("Failed to create container: %v", err))

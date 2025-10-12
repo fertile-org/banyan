@@ -78,16 +78,30 @@ Quick reference for Banyan VPC networking implementation. This document summariz
   - Translate high-level ops → CNI ADD/DEL commands
   - Track container network attachments
   - Manage plugin configuration
+  - **Auto-create network namespaces** for containers
+  - **Auto-cleanup namespaces** on removal
 
 **2. CNI Setup Tool** (`cmd/vpc-cli/cmd/setup.go`)
 - **Purpose**: Automate CNI plugin installation
 - **Installs**:
   - Standard CNI plugins (v1.8.0): bridge, host-local, portmap
   - Flannel CNI plugin (v1.7.1-flannel1): VXLAN overlay
+  - **Flannel daemon (flanneld v0.25.4)**: Background process for VXLAN management
+- **Smart Installation**: Detects and installs only missing components
 
-**3. Flannel Plugin**
+**3. Automatic Daemon Management** (`cmd/vpc-cli/cmd/cni.go`)
+- **Purpose**: Handle Flannel daemon lifecycle automatically
+- **Responsibilities**:
+  - **Auto-start flanneld** during plugin setup
+  - Detect if daemon already running
+  - Create subnet configuration (/run/flannel/subnet.env)
+  - Track daemon PID (/var/run/flanneld.pid)
+  - Log daemon output (/var/log/flanneld.log)
+
+**4. Flannel Plugin**
 - **Purpose**: Enable cross-host container communication
 - **How it works**: VXLAN overlay encapsulates container traffic for routing between hosts
+- **Automation**: Banyan handles everything - no manual daemon or namespace management required
 
 ---
 

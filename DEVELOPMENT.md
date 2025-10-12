@@ -63,6 +63,49 @@ make build       # Build all binaries
 make clean       # Clean build artifacts
 ```
 
+## VPC Networking Setup
+
+For VPC networking features (Phase 3+), you need CNI plugins installed on your system.
+
+### Automated Installation (Recommended)
+
+```bash
+# Build vpc-cli
+make build
+
+# Install CNI plugins automatically (requires sudo)
+sudo bin/vpc-cli setup cni
+```
+
+This installs:
+- **Standard CNI plugins** (v1.8.0): bridge, host-local, portmap, vlan, etc.
+- **Flannel CNI plugin** (v1.7.1): VXLAN overlay networking
+
+Installation directory: `/opt/cni/bin/`
+
+### Manual Installation
+
+If you prefer manual installation:
+
+```bash
+# Install standard CNI plugins
+sudo mkdir -p /opt/cni/bin
+curl -L https://github.com/containernetworking/plugins/releases/download/v1.8.0/cni-plugins-linux-amd64-v1.8.0.tgz | \
+  sudo tar -C /opt/cni/bin -xz
+
+# Install Flannel CNI plugin
+sudo curl -L https://github.com/flannel-io/cni-plugin/releases/download/v1.7.1-flannel1/flannel-amd64 \
+  -o /opt/cni/bin/flannel
+sudo chmod +x /opt/cni/bin/flannel
+```
+
+### Verify Installation
+
+```bash
+ls -lh /opt/cni/bin/
+# Should show: flannel, bridge, host-local, portmap, and others
+```
+
 ## Workspace
 
 This project uses Go workspaces. Dependencies are managed via `go.work`.

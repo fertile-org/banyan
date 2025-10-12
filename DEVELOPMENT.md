@@ -52,9 +52,11 @@ make lint        # Check code quality
 make lint-fix    # Auto-fix formatting and issues
 
 # Testing
-make test          # Run unit tests
-make test-verbose  # Run unit tests with verbose logging
-make test-coverage # Run tests with coverage
+make test                                    # Run unit tests
+make test-verbose                            # Run unit tests with verbose logging
+make test-coverage                           # Run tests with coverage
+make test-module MODULE=pkg/vpc/network      # Test specific module
+make test-module MODULE=pkg/vpc/network VERBOSE=1  # Test module with verbose output
 
 # Build
 make build       # Build all binaries

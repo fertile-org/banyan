@@ -133,17 +133,18 @@ func PingFromContainer(ctx context.Context, containerID, target string) error {
 
 // CreateNetnsSymlink creates a symlink from /var/run/netns to container netns
 func CreateNetnsSymlink(container *DockerContainer) error {
-	// Ensure /var/run/netns exists
-	if err := os.MkdirAll("/var/run/netns", 0755); err != nil {
-		return fmt.Errorf("failed to create /var/run/netns: %w", err)
+	symlinkPath := fmt.Sprintf("/var/run/netns/%s", container.Name)
+
+	// Use sudo to create the symlink (requires root privileges)
+	mkdirCmd := exec.Command("sudo", "mkdir", "-p", "/var/run/netns")
+	if err := mkdirCmd.Run(); err != nil {
+		return fmt.Errorf("failed to create /var/run/netns directory: %w", err)
 	}
 
-	// Create symlink
-	symlinkPath := fmt.Sprintf("/var/run/netns/%s", container.Name)
-	if err := os.Symlink(container.NetnsPath, symlinkPath); err != nil {
-		if !os.IsExist(err) {
-			return fmt.Errorf("failed to create symlink: %w", err)
-		}
+	// Create symlink with sudo
+	lnCmd := exec.Command("sudo", "ln", "-sf", container.NetnsPath, symlinkPath)
+	if output, err := lnCmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to create symlink: %w\n%s", err, output)
 	}
 
 	return nil
@@ -152,11 +153,13 @@ func CreateNetnsSymlink(container *DockerContainer) error {
 // RemoveNetnsSymlink removes the netns symlink
 func RemoveNetnsSymlink(containerName string) error {
 	symlinkPath := fmt.Sprintf("/var/run/netns/%s", containerName)
-	if err := os.Remove(symlinkPath); err != nil {
-		if !os.IsNotExist(err) {
-			return fmt.Errorf("failed to remove symlink: %w", err)
-		}
+
+	// Use sudo to remove the symlink
+	rmCmd := exec.Command("sudo", "rm", "-f", symlinkPath)
+	if err := rmCmd.Run(); err != nil {
+		return fmt.Errorf("failed to remove symlink: %w", err)
 	}
+
 	return nil
 }
 

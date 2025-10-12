@@ -70,6 +70,10 @@ func (r *Runtime) SetupPlugin(ctx context.Context, plugin string, config []byte)
 }
 
 func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID string, ip net.IP) error {
+	// NOTE: The ip parameter is currently not used when using Flannel CNI plugin.
+	// Flannel automatically assigns IPs from its configured subnet range.
+	// TODO: Support explicit IP assignment for plugins that support it (e.g., host-local IPAM)
+
 	// Validate inputs
 	if containerID == "" {
 		return fmt.Errorf("containerID cannot be empty")
@@ -114,16 +118,16 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 		}
 	}
 
-	// Create CNI input
+	// Create CNI input for Flannel
+	// Flannel reads subnet info from /run/flannel/subnet.env
+	// We specify the delegate configuration for the bridge plugin
 	cniInput := map[string]interface{}{
 		"cniVersion": "0.4.0",
 		"name":       networkID,
 		"type":       "flannel",
-		"ipam": map[string]interface{}{
-			"type": "host-local",
-			"ranges": [][]map[string]string{
-				{{"subnet": ip.String() + "/24"}},
-			},
+		"delegate": map[string]interface{}{
+			"hairpinMode":       true,
+			"isDefaultGateway": true,
 		},
 	}
 
@@ -183,16 +187,14 @@ func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID 
 
 	// Execute CNI DEL command (if namespace still exists)
 	if _, err := os.Stat(netnsPath); err == nil {
-		// Create CNI input
+		// Create CNI input for Flannel (same as ADD)
 		cniInput := map[string]interface{}{
 			"cniVersion": "0.4.0",
 			"name":       networkID,
 			"type":       "flannel",
-			"ipam": map[string]interface{}{
-				"type": "host-local",
-				"ranges": [][]map[string]string{
-					{{"subnet": container.IP.String() + "/24"}},
-				},
+			"delegate": map[string]interface{}{
+				"hairpinMode":       true,
+				"isDefaultGateway": true,
 			},
 		}
 

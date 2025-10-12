@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
+	"time"
 
 	"github.com/fertile/banyan/pkg/vpc/cni"
 	"github.com/spf13/cobra"
@@ -26,11 +29,18 @@ Example:
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plugin := args[0]
 
-		// Default configurations for supported plugins
-		var config []byte
-		switch plugin {
-		case "flannel":
-			config = []byte(`{
+		ctx := context.Background()
+		store := getStore()
+		runtime := cni.NewRuntime(store)
+
+		// Handle Flannel specially - start daemon
+		if plugin == "flannel" {
+			fmt.Println("🚀 Starting Flannel daemon...")
+			if err := startFlannelDaemon(); err != nil {
+				return fmt.Errorf("failed to start Flannel daemon: %w", err)
+			}
+
+			config := []byte(`{
 	"name": "flannel",
 	"type": "flannel",
 	"subnetFile": "/run/flannel/subnet.env",
@@ -40,6 +50,18 @@ Example:
 		"isDefaultGateway": true
 	}
 }`)
+			if err := runtime.SetupPlugin(ctx, plugin, config); err != nil {
+				return fmt.Errorf("failed to setup plugin: %w", err)
+			}
+
+			fmt.Println("✓ Flannel daemon started")
+			fmt.Printf("✓ Plugin '%s' configured successfully\n", plugin)
+			return nil
+		}
+
+		// Handle other plugins (e.g., calico)
+		var config []byte
+		switch plugin {
 		case "calico":
 			config = []byte(`{
 	"name": "calico",
@@ -50,10 +72,6 @@ Example:
 		default:
 			return fmt.Errorf("unsupported plugin: %s (supported: flannel, calico)", plugin)
 		}
-
-		ctx := context.Background()
-		store := getStore()
-		runtime := cni.NewRuntime(store)
 
 		if err := runtime.SetupPlugin(ctx, plugin, config); err != nil {
 			return fmt.Errorf("failed to setup plugin: %w", err)
@@ -145,6 +163,95 @@ Example:
 		fmt.Printf("Status: %s\n", status.Status)
 		return nil
 	},
+}
+
+func startFlannelDaemon() error {
+	// Check if already running
+	if isFlanneldRunning() {
+		fmt.Println("✓ Flannel daemon already running")
+		return nil
+	}
+
+	// Create subnet configuration file
+	if err := createFlannelSubnetConfig(); err != nil {
+		return fmt.Errorf("failed to create subnet config: %w", err)
+	}
+
+	// Start flanneld in background
+	cmd := exec.Command("flanneld",
+		"--iface=eth0", // Use default interface
+		"--subnet-file=/run/flannel/subnet.env",
+		"--ip-masq",
+	)
+
+	// Create log file
+	logFile, err := os.OpenFile("/var/log/flanneld.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to create log file: %w", err)
+	}
+
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		return fmt.Errorf("failed to start flanneld: %w", err)
+	}
+
+	// Save PID for management
+	pidFile := "/var/run/flanneld.pid"
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0644); err != nil {
+		logFile.Close()
+		return fmt.Errorf("failed to save PID: %w", err)
+	}
+
+	logFile.Close()
+
+	// Wait a bit for daemon to initialize
+	fmt.Println("Waiting for Flannel daemon to initialize...")
+	time.Sleep(2 * time.Second)
+
+	// Verify it's running
+	if !isFlanneldRunning() {
+		return fmt.Errorf("flanneld failed to start (check /var/log/flanneld.log)")
+	}
+
+	return nil
+}
+
+func isFlanneldRunning() bool {
+	// Check if PID file exists and process is running
+	pidFile := "/var/run/flanneld.pid"
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		return false
+	}
+
+	pid := string(data)
+	// Check if process exists
+	err = exec.Command("kill", "-0", pid).Run()
+	return err == nil
+}
+
+func createFlannelSubnetConfig() error {
+	// Create /run/flannel directory
+	if err := os.MkdirAll("/run/flannel", 0755); err != nil {
+		return fmt.Errorf("failed to create /run/flannel: %w", err)
+	}
+
+	// Create subnet configuration
+	// This tells Flannel to use 10.0.0.0/16 network with /24 subnets
+	config := `FLANNEL_NETWORK=10.0.0.0/16
+FLANNEL_SUBNET=10.0.1.0/24
+FLANNEL_MTU=1450
+FLANNEL_IPMASQ=true
+`
+
+	if err := os.WriteFile("/run/flannel/subnet.env", []byte(config), 0644); err != nil {
+		return fmt.Errorf("failed to write subnet config: %w", err)
+	}
+
+	return nil
 }
 
 func init() {

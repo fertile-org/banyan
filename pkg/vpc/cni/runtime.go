@@ -96,6 +96,23 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 		return fmt.Errorf("IP %s is outside VPC range %s", ip.String(), vpcCIDR.String())
 	}
 
+	// Auto-create network namespace if it doesn't exist
+	netnsPath := fmt.Sprintf("/var/run/netns/%s", containerID)
+	if _, err := os.Stat(netnsPath); os.IsNotExist(err) {
+		// Create /var/run/netns directory if needed
+		if err := os.MkdirAll("/var/run/netns", 0755); err != nil {
+			return fmt.Errorf("failed to create netns directory: %w", err)
+		}
+
+		// Create network namespace
+		cmd := exec.CommandContext(ctx, "ip", "netns", "add", containerID)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("failed to create network namespace: %w (stderr: %s)", err, stderr.String())
+		}
+	}
+
 	// Create CNI input
 	cniInput := map[string]interface{}{
 		"cniVersion": "0.4.0",
@@ -120,7 +137,7 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 	cmd.Env = append(os.Environ(),
 		"CNI_COMMAND=ADD",
 		"CNI_CONTAINERID="+containerID,
-		"CNI_NETNS=/var/run/netns/"+containerID,
+		"CNI_NETNS="+netnsPath,
 		"CNI_IFNAME=eth0",
 		"CNI_PATH="+r.cniBinPath,
 	)
@@ -161,22 +178,56 @@ func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID 
 		return fmt.Errorf("container %s not found: %w", containerID, err)
 	}
 
-	// Execute CNI DEL command
-	flannelBin := fmt.Sprintf("%s/flannel", r.cniBinPath)
-	cmd := exec.CommandContext(ctx, flannelBin)
-	cmd.Env = append(os.Environ(),
-		"CNI_COMMAND=DEL",
-		"CNI_CONTAINERID="+containerID,
-		"CNI_NETNS=/var/run/netns/"+containerID,
-		"CNI_IFNAME=eth0",
-		"CNI_PATH="+r.cniBinPath,
-	)
+	netnsPath := fmt.Sprintf("/var/run/netns/%s", containerID)
 
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// Execute CNI DEL command (if namespace still exists)
+	if _, err := os.Stat(netnsPath); err == nil {
+		// Create CNI input
+		cniInput := map[string]interface{}{
+			"cniVersion": "0.4.0",
+			"name":       networkID,
+			"type":       "flannel",
+			"ipam": map[string]interface{}{
+				"type": "host-local",
+				"ranges": [][]map[string]string{
+					{{"subnet": container.IP.String() + "/24"}},
+				},
+			},
+		}
 
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("CNI DEL failed: %w (stderr: %s)", err, stderr.String())
+		inputJSON, err := json.Marshal(cniInput)
+		if err != nil {
+			return fmt.Errorf("failed to marshal CNI input: %w", err)
+		}
+
+		flannelBin := fmt.Sprintf("%s/flannel", r.cniBinPath)
+		cmd := exec.CommandContext(ctx, flannelBin)
+		cmd.Env = append(os.Environ(),
+			"CNI_COMMAND=DEL",
+			"CNI_CONTAINERID="+containerID,
+			"CNI_NETNS="+netnsPath,
+			"CNI_IFNAME=eth0",
+			"CNI_PATH="+r.cniBinPath,
+		)
+		cmd.Stdin = bytes.NewReader(inputJSON)
+
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			return fmt.Errorf("CNI DEL failed: %w (stderr: %s)", err, stderr.String())
+		}
+	}
+
+	// Clean up network namespace
+	if _, err := os.Stat(netnsPath); err == nil {
+		cmd := exec.CommandContext(ctx, "ip", "netns", "delete", containerID)
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err != nil {
+			// Log but don't fail - namespace cleanup is optional
+			fmt.Fprintf(os.Stderr, "Warning: failed to delete network namespace: %v (stderr: %s)\n", err, stderr.String())
+		}
 	}
 
 	// Remove container info

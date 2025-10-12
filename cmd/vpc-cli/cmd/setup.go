@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 
 	"github.com/spf13/cobra"
@@ -14,7 +15,9 @@ import (
 const (
 	cniPluginsVersion = "v1.8.0"
 	flannelVersion    = "v1.7.1-flannel1"
+	flanneldVersion   = "v0.25.4"
 	cniBinDir         = "/opt/cni/bin"
+	flanneldBinDir    = "/usr/local/bin"
 )
 
 var setupCmd = &cobra.Command{
@@ -46,27 +49,52 @@ Installation directory: /opt/cni/bin (requires sudo)`,
 		arch := detectArchitecture()
 		fmt.Printf("✓ Detected architecture: %s\n", arch)
 
-		// Check if already installed
+		// Check what's already installed
+		cniInstalled := false
+		flanneldInstalled := false
+
 		if _, err := os.Stat(cniBinDir + "/flannel"); err == nil {
 			fmt.Println("✓ CNI plugins already installed")
-			fmt.Println("\nTo reinstall, delete /opt/cni/bin and run again")
+			cniInstalled = true
+		}
+
+		if _, err := os.Stat(flanneldBinDir + "/flanneld"); err == nil {
+			fmt.Println("✓ Flannel daemon already installed")
+			flanneldInstalled = true
+		}
+
+		if cniInstalled && flanneldInstalled {
+			fmt.Println("\n✅ All components already installed!")
+			fmt.Println("\nYou can now use:")
+			fmt.Println("  vpc-cli cni setup-plugin flannel")
+			fmt.Println("  vpc-cli cni add-container <container-id> <network-id> <ip>")
 			return nil
 		}
 
-		// Create CNI bin directory
-		fmt.Printf("Creating directory: %s\n", cniBinDir)
-		if err := os.MkdirAll(cniBinDir, 0755); err != nil {
-			return fmt.Errorf("failed to create %s: %w", cniBinDir, err)
+		// Install CNI plugins if needed
+		if !cniInstalled {
+			// Create CNI bin directory
+			fmt.Printf("Creating directory: %s\n", cniBinDir)
+			if err := os.MkdirAll(cniBinDir, 0755); err != nil {
+				return fmt.Errorf("failed to create %s: %w", cniBinDir, err)
+			}
+
+			// Install standard CNI plugins
+			if err := installStandardCNIPlugins(arch); err != nil {
+				return fmt.Errorf("failed to install standard CNI plugins: %w", err)
+			}
+
+			// Install Flannel CNI plugin
+			if err := installFlannelCNIPlugin(arch); err != nil {
+				return fmt.Errorf("failed to install Flannel CNI plugin: %w", err)
+			}
 		}
 
-		// Install standard CNI plugins
-		if err := installStandardCNIPlugins(arch); err != nil {
-			return fmt.Errorf("failed to install standard CNI plugins: %w", err)
-		}
-
-		// Install Flannel CNI plugin
-		if err := installFlannelCNIPlugin(arch); err != nil {
-			return fmt.Errorf("failed to install Flannel CNI plugin: %w", err)
+		// Install Flannel daemon if needed
+		if !flanneldInstalled {
+			if err := installFlannelDaemon(arch); err != nil {
+				return fmt.Errorf("failed to install Flannel daemon: %w", err)
+			}
 		}
 
 		// Verify installation
@@ -75,7 +103,13 @@ Installation directory: /opt/cni/bin (requires sudo)`,
 			return fmt.Errorf("verification failed: %w", err)
 		}
 
-		fmt.Println("\n✅ CNI plugins installed successfully!")
+		// Verify flanneld
+		if _, err := os.Stat(flanneldBinDir + "/flanneld"); os.IsNotExist(err) {
+			return fmt.Errorf("flanneld verification failed: binary not found at %s", flanneldBinDir+"/flanneld")
+		}
+		fmt.Printf("✓ Found: flanneld\n")
+
+		fmt.Println("\n✅ CNI plugins and Flannel daemon installed successfully!")
 		fmt.Println("\nYou can now use:")
 		fmt.Println("  vpc-cli cni setup-plugin flannel")
 		fmt.Println("  vpc-cli cni add-container <container-id> <network-id> <ip>")
@@ -163,6 +197,58 @@ func installFlannelCNIPlugin(arch string) error {
 	}
 
 	fmt.Println("✓ Flannel CNI plugin installed")
+
+	return nil
+}
+
+func installFlannelDaemon(arch string) error {
+	fmt.Println("\n📦 Installing Flannel daemon (flanneld)...")
+
+	url := fmt.Sprintf(
+		"https://github.com/flannel-io/flannel/releases/download/%s/flannel-%s-linux-%s.tar.gz",
+		flanneldVersion, flanneldVersion, arch,
+	)
+
+	fmt.Printf("Downloading from: %s\n", url)
+
+	// Download to temporary file
+	tmpFile := "/tmp/flanneld.tar.gz"
+	if err := downloadFile(url, tmpFile); err != nil {
+		return fmt.Errorf("download failed: %w", err)
+	}
+	defer os.Remove(tmpFile)
+
+	fmt.Println("Extracting flanneld binary...")
+
+	// Extract to temporary directory
+	tmpDir := "/tmp/flannel-extract"
+	os.RemoveAll(tmpDir)
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.Command("tar", "-C", tmpDir, "-xzf", tmpFile)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("extraction failed: %w", err)
+	}
+
+	// Move flanneld to /usr/local/bin
+	flanneldSrc := filepath.Join(tmpDir, "flanneld")
+	flanneldDst := filepath.Join(flanneldBinDir, "flanneld")
+
+	data, err := os.ReadFile(flanneldSrc)
+	if err != nil {
+		return fmt.Errorf("failed to read flanneld: %w", err)
+	}
+
+	if err := os.WriteFile(flanneldDst, data, 0755); err != nil {
+		return fmt.Errorf("failed to install flanneld: %w", err)
+	}
+
+	fmt.Println("✓ Flannel daemon installed at /usr/local/bin/flanneld")
 
 	return nil
 }

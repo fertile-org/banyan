@@ -21,6 +21,18 @@ func NewManager(store storage.StateStore) *Manager {
 	}
 }
 
+// allocateVxlanID finds the next available VNI starting from 100
+// VNI range: 100-16777215 (avoiding lower VNIs that might be reserved)
+func (m *Manager) allocateVxlanID(existingNetworks []*vpc.Network) int {
+	maxVNI := 99 // Start from 100
+	for _, net := range existingNetworks {
+		if net.VxlanID > maxVNI {
+			maxVNI = net.VxlanID
+		}
+	}
+	return maxVNI + 1
+}
+
 func (m *Manager) CreateNetwork(ctx context.Context, config vpc.NetworkConfig) (*vpc.Network, error) {
 	// Apply defaults
 	if config.CIDR == "" {
@@ -28,9 +40,6 @@ func (m *Manager) CreateNetwork(ctx context.Context, config vpc.NetworkConfig) (
 	}
 	if config.DNSSuffix == "" {
 		config.DNSSuffix = ".internal"
-	}
-	if config.VxlanID == 0 {
-		config.VxlanID = 4789
 	}
 	if config.Driver == "" {
 		config.Driver = "flannel"
@@ -41,14 +50,28 @@ func (m *Manager) CreateNetwork(ctx context.Context, config vpc.NetworkConfig) (
 		return nil, fmt.Errorf("invalid CIDR format: %w", err)
 	}
 
-	// Check for duplicate names
+	// Get existing networks for validation and VNI allocation
 	networks, err := m.ListNetworks(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check for duplicates: %w", err)
 	}
+
+	// Check for duplicate names
 	for _, net := range networks {
 		if net.Name == config.Name {
 			return nil, fmt.Errorf("network with name %s already exists", config.Name)
+		}
+	}
+
+	// Auto-allocate VxlanID if not specified
+	if config.VxlanID == 0 {
+		config.VxlanID = m.allocateVxlanID(networks)
+	} else {
+		// Validate user-specified VxlanID for collision
+		for _, net := range networks {
+			if net.VxlanID == config.VxlanID {
+				return nil, fmt.Errorf("VxlanID %d already in use by network %s", config.VxlanID, net.Name)
+			}
 		}
 	}
 

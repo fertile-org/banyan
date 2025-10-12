@@ -154,6 +154,8 @@ Each phase will:
 ### Overview
 Create the storage abstraction layer and implement NetworkManager to create/delete/list VPC networks. This provides the foundation for all other managers.
 
+**IMPORTANT VNI Fix**: The original plan had a bug where VxlanID defaulted to 4789 (the VXLAN UDP port). This has been corrected to use sequential VNI allocation starting from 100, ensuring proper network isolation. Each network gets a unique VNI: 100, 101, 102, etc.
+
 ### Changes Required:
 
 #### 1. Storage Interface
@@ -287,6 +289,18 @@ func NewManager(store storage.StateStore) *Manager {
     }
 }
 
+// allocateVxlanID finds the next available VNI starting from 100
+// VNI range: 100-16777215 (avoiding lower VNIs that might be reserved)
+func (m *Manager) allocateVxlanID(existingNetworks []*vpc.Network) int {
+    maxVNI := 99 // Start from 100
+    for _, net := range existingNetworks {
+        if net.VxlanID > maxVNI {
+            maxVNI = net.VxlanID
+        }
+    }
+    return maxVNI + 1
+}
+
 func (m *Manager) CreateNetwork(ctx context.Context, config vpc.NetworkConfig) (*vpc.Network, error) {
     // Apply defaults
     if config.CIDR == "" {
@@ -295,11 +309,22 @@ func (m *Manager) CreateNetwork(ctx context.Context, config vpc.NetworkConfig) (
     if config.DNSSuffix == "" {
         config.DNSSuffix = "internal"
     }
-    if config.VxlanID == 0 {
-        config.VxlanID = 4789
-    }
     if config.Driver == "" {
         config.Driver = "flannel"
+    }
+
+    // Auto-allocate unique VxlanID (VNI) if not specified
+    // Start from 100, increment sequentially for each new network
+    // Note: 4789 is the VXLAN UDP port, NOT a VNI!
+    if config.VxlanID == 0 {
+        config.VxlanID = m.allocateVxlanID(existingNetworks)
+    } else {
+        // Validate user-specified VxlanID for collision
+        for _, net := range existingNetworks {
+            if net.VxlanID == config.VxlanID {
+                return nil, fmt.Errorf("VxlanID %d already in use", config.VxlanID)
+            }
+        }
     }
 
     // Create network object
@@ -309,7 +334,6 @@ func (m *Manager) CreateNetwork(ctx context.Context, config vpc.NetworkConfig) (
         CIDR:      config.CIDR,
         VxlanID:   config.VxlanID,
         DNSSuffix: config.DNSSuffix,
-        Driver:    config.Driver,
         CreatedAt: time.Now(),
         Status:    "active",
     }

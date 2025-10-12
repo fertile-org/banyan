@@ -24,15 +24,27 @@ func Execute() error {
 var globalStore storage.StateStore
 
 func init() {
-	// Use persistent storage in ~/.vpc/state.json
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		// Fallback to in-memory only
-		globalStore = storage.NewMemoryStore()
-		return
+	var stateFile string
+
+	// Use shared storage location for consistency
+	// Root operations (like setup-plugin) and user reads use the same file
+	if os.Geteuid() == 0 {
+		// Running as root: use system-wide location
+		stateFile = "/var/lib/banyan/vpc/state.json"
+	} else {
+		// Running as user: try system location first, fallback to user home
+		stateFile = "/var/lib/banyan/vpc/state.json"
+		if _, err := os.Stat(stateFile); os.IsNotExist(err) {
+			// System file doesn't exist, use user's home directory
+			homeDir, err := os.UserHomeDir()
+			if err != nil {
+				globalStore = storage.NewMemoryStore()
+				return
+			}
+			stateFile = filepath.Join(homeDir, ".vpc", "state.json")
+		}
 	}
 
-	stateFile := filepath.Join(homeDir, ".vpc", "state.json")
 	store, err := storage.NewMemoryStoreWithFile(stateFile)
 	if err != nil {
 		// Fallback to in-memory only

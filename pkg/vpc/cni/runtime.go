@@ -1,44 +1,207 @@
 package cni
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"os"
+	"os/exec"
 
 	"github.com/fertile/banyan/pkg/vpc"
+	"github.com/fertile/banyan/pkg/vpc/storage"
 )
 
-// Runtime implements vpc.CNIRuntime interface
 type Runtime struct {
-	// Will add fields during implementation phase
+	store         storage.StateStore
+	cniConfigPath string
+	cniBinPath    string
 }
 
-// NewRuntime creates a new CNI runtime
-func NewRuntime() *Runtime {
-	return &Runtime{}
+func NewRuntime(store storage.StateStore) *Runtime {
+	return &Runtime{
+		store:         store,
+		cniConfigPath: "/etc/cni/net.d",
+		cniBinPath:    "/opt/cni/bin",
+	}
 }
 
-// AddToNetwork adds a container to a network
-func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID string, ip net.IP) error {
-	// TDD: Implementation will be added after test review
-	return nil
-}
-
-// RemoveFromNetwork removes a container from a network
-func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID string) error {
-	// TDD: Implementation will be added after test review
-	return nil
-}
-
-// SetupPlugin initializes a CNI plugin
 func (r *Runtime) SetupPlugin(ctx context.Context, plugin string, config []byte) error {
-	// TDD: Implementation will be added after test review
-	return nil
+	// Validate inputs
+	if plugin == "" {
+		return fmt.Errorf("plugin name cannot be empty")
+	}
+	if len(config) == 0 {
+		return fmt.Errorf("config cannot be empty")
+	}
+
+	// Validate JSON config
+	var configMap map[string]interface{}
+	if err := json.Unmarshal(config, &configMap); err != nil {
+		return fmt.Errorf("invalid JSON config: %w", err)
+	}
+
+	// Check if plugin is supported (only flannel and calico for now)
+	if plugin != "flannel" && plugin != "calico" {
+		return fmt.Errorf("unsupported plugin: %s (supported: flannel, calico)", plugin)
+	}
+
+	// Write CNI config to file
+	configFile := fmt.Sprintf("%s/10-%s.conf", r.cniConfigPath, plugin)
+
+	if err := os.MkdirAll(r.cniConfigPath, 0755); err != nil {
+		return fmt.Errorf("failed to create CNI config dir: %w", err)
+	}
+
+	if err := os.WriteFile(configFile, config, 0644); err != nil {
+		return fmt.Errorf("failed to write CNI config: %w", err)
+	}
+
+	// Save plugin status
+	status := &vpc.PluginStatus{
+		Name:    plugin,
+		Version: "1.0.0",
+		Status:  "active",
+	}
+
+	key := fmt.Sprintf("cni/plugins/%s", plugin)
+	return r.store.Save(ctx, key, status)
 }
 
-// GetPluginStatus returns the status of a CNI plugin
+func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID string, ip net.IP) error {
+	// Validate inputs
+	if containerID == "" {
+		return fmt.Errorf("containerID cannot be empty")
+	}
+	if networkID == "" {
+		return fmt.Errorf("networkID cannot be empty")
+	}
+
+	// Check if container already attached
+	key := fmt.Sprintf("cni/containers/%s", containerID)
+	var existingContainer vpc.Container
+	if err := r.store.Get(ctx, key, &existingContainer); err == nil {
+		return fmt.Errorf("container %s already attached to network", containerID)
+	}
+
+	// If IP is nil, we should auto-assign (for now just return error)
+	if ip == nil {
+		return fmt.Errorf("IP auto-assignment not yet implemented, please provide IP")
+	}
+
+	// Validate IP is in expected range (10.0.0.0/16)
+	_, vpcCIDR, _ := net.ParseCIDR("10.0.0.0/16")
+	if !vpcCIDR.Contains(ip) {
+		return fmt.Errorf("IP %s is outside VPC range %s", ip.String(), vpcCIDR.String())
+	}
+
+	// Create CNI input
+	cniInput := map[string]interface{}{
+		"cniVersion": "0.4.0",
+		"name":       networkID,
+		"type":       "flannel",
+		"ipam": map[string]interface{}{
+			"type": "host-local",
+			"ranges": [][]map[string]string{
+				{{"subnet": ip.String() + "/24"}},
+			},
+		},
+	}
+
+	inputJSON, err := json.Marshal(cniInput)
+	if err != nil {
+		return fmt.Errorf("failed to marshal CNI input: %w", err)
+	}
+
+	// Execute CNI ADD command
+	flannelBin := fmt.Sprintf("%s/flannel", r.cniBinPath)
+	cmd := exec.CommandContext(ctx, flannelBin)
+	cmd.Env = append(os.Environ(),
+		"CNI_COMMAND=ADD",
+		"CNI_CONTAINERID="+containerID,
+		"CNI_NETNS=/var/run/netns/"+containerID,
+		"CNI_IFNAME=eth0",
+		"CNI_PATH="+r.cniBinPath,
+	)
+	cmd.Stdin = bytes.NewReader(inputJSON)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("CNI ADD failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	// Save container info
+	container := &vpc.Container{
+		ID:        containerID,
+		NetworkID: networkID,
+		IP:        ip,
+		Status:    "attached",
+	}
+
+	return r.store.Save(ctx, key, container)
+}
+
+func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID string) error {
+	// Validate inputs
+	if containerID == "" {
+		return fmt.Errorf("containerID cannot be empty")
+	}
+	if networkID == "" {
+		return fmt.Errorf("networkID cannot be empty")
+	}
+
+	// Check if container exists
+	key := fmt.Sprintf("cni/containers/%s", containerID)
+	var container vpc.Container
+	if err := r.store.Get(ctx, key, &container); err != nil {
+		return fmt.Errorf("container %s not found: %w", containerID, err)
+	}
+
+	// Execute CNI DEL command
+	flannelBin := fmt.Sprintf("%s/flannel", r.cniBinPath)
+	cmd := exec.CommandContext(ctx, flannelBin)
+	cmd.Env = append(os.Environ(),
+		"CNI_COMMAND=DEL",
+		"CNI_CONTAINERID="+containerID,
+		"CNI_NETNS=/var/run/netns/"+containerID,
+		"CNI_IFNAME=eth0",
+		"CNI_PATH="+r.cniBinPath,
+	)
+
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("CNI DEL failed: %w (stderr: %s)", err, stderr.String())
+	}
+
+	// Remove container info
+	return r.store.Delete(ctx, key)
+}
+
 func (r *Runtime) GetPluginStatus(ctx context.Context, plugin string) (*vpc.PluginStatus, error) {
-	// TDD: Implementation will be added after test review
-	return nil, nil
+	// Validate input
+	if plugin == "" {
+		return nil, fmt.Errorf("plugin name cannot be empty")
+	}
+
+	key := fmt.Sprintf("cni/plugins/%s", plugin)
+
+	var status vpc.PluginStatus
+	if err := r.store.Get(ctx, key, &status); err != nil {
+		// Plugin not configured, return inactive status
+		return &vpc.PluginStatus{
+			Name:    plugin,
+			Version: "unknown",
+			Status:  "inactive",
+		}, nil
+	}
+
+	return &status, nil
 }
 
 // Ensure Runtime implements CNIRuntime interface

@@ -54,6 +54,31 @@ test-verbose:
 test-coverage:
 	go test -cover ./test/unit/...
 
+# Test specific module (usage: make test-module MODULE=pkg/vpc/network)
+# Examples:
+#   make test-module MODULE=pkg/vpc/network
+#   make test-module MODULE=pkg/vpc/network VERBOSE=1
+#   make test-module MODULE=pkg/vpc/ipam
+test-module:
+ifndef MODULE
+	@echo "Error: MODULE parameter is required"
+	@echo "Usage: make test-module MODULE=pkg/vpc/network"
+	@echo "       make test-module MODULE=pkg/vpc/network VERBOSE=1"
+	@exit 1
+endif
+ifdef VERBOSE
+	cd $(MODULE) && go test -v ./...
+else
+	cd $(MODULE) && go test ./...
+endif
+
+# VPC-specific test shortcuts
+test-vpc-network:
+	cd pkg/vpc && go test -v ./network/
+
+test-vpc-all:
+	cd pkg/vpc && go test ./...
+
 # Build all binaries
 build:
 	go build -o bin/banyan-cli cmd/cli/main.go

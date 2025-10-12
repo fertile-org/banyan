@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/fertile/banyan/test/integration/helpers"
+	"github.com/fertile-org/banyan/test/integration/helpers"
 )
 
 const (

@@ -79,7 +79,7 @@ go run ./test/integration/vpc/test_cni_docker_integration.go
 ### `helpers.docker` - Docker Operations
 
 ```go
-import "github.com/fertile/banyan/test/integration/helpers"
+import "github.com/fertile-org/banyan/test/integration/helpers"
 
 // Create test container
 container, err := helpers.CreateTestContainer(ctx, "test-container")
@@ -137,7 +137,7 @@ import (
     "context"
     "os"
 
-    "github.com/fertile/banyan/test/integration/helpers"
+    "github.com/fertile-org/banyan/test/integration/helpers"
 )
 
 func main() {
@@ -217,8 +217,8 @@ You can directly import and use VPC packages in tests:
 
 ```go
 import (
-    "github.com/fertile/banyan/pkg/vpc/cni"
-    "github.com/fertile/banyan/pkg/vpc/storage"
+    "github.com/fertile-org/banyan/pkg/vpc/cni"
+    "github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 func runTest(ctx context.Context, p *helpers.Printer) int {

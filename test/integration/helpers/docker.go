@@ -39,6 +39,11 @@ func CreateTestContainer(ctx context.Context, name string) (*DockerContainer, er
 		Name: name,
 	}
 
+	// Wait for container to be fully running
+	if err := WaitForContainer(ctx, containerID, 10*time.Second); err != nil {
+		return nil, fmt.Errorf("failed to wait for container: %w", err)
+	}
+
 	// Get PID
 	pid, err := getContainerPID(ctx, containerID)
 	if err != nil {

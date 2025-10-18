@@ -102,7 +102,7 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 
 	// Auto-create network namespace if it doesn't exist
 	netnsPath := fmt.Sprintf("/var/run/netns/%s", containerID)
-	// Use Lstat to check if symlink or file exists (without following symlink)
+	// Use Lstat to check if bind mount or file exists (without following symlink)
 	if _, err := os.Lstat(netnsPath); os.IsNotExist(err) {
 		// Create /var/run/netns directory if needed
 		if err := os.MkdirAll("/var/run/netns", 0755); err != nil {
@@ -118,6 +118,12 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 		}
 	}
 
+	// Ensure CNI state directory exists (required by host-local IPAM plugin)
+	// This directory is used by CNI plugins to store IP allocation state
+	if err := os.MkdirAll("/var/lib/cni/networks", 0755); err != nil {
+		return fmt.Errorf("failed to create CNI state directory: %w", err)
+	}
+
 	// Create CNI input for Flannel
 	// Flannel reads subnet info from /run/flannel/subnet.env
 	// We specify the delegate configuration for the bridge plugin
@@ -126,6 +132,7 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 		"name":       networkID,
 		"type":       "flannel",
 		"delegate": map[string]interface{}{
+			"bridge":            "cni0",
 			"hairpinMode":       true,
 			"isDefaultGateway": true,
 		},
@@ -148,12 +155,23 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 	)
 	cmd.Stdin = bytes.NewReader(inputJSON)
 
+	// Debug: Check namespace inodes to verify they're different
+	selfNsCmd := exec.Command("stat", "-L", "-c", "%i", "/proc/self/ns/net")
+	selfNsOutput, _ := selfNsCmd.Output()
+	targetNsCmd := exec.Command("stat", "-L", "-c", "%i", netnsPath)
+	targetNsOutput, _ := targetNsCmd.Output()
+	fmt.Fprintf(os.Stderr, "DEBUG: Current process netns inode: %s", string(selfNsOutput))
+	fmt.Fprintf(os.Stderr, "DEBUG: Target CNI_NETNS (%s) inode: %s", netnsPath, string(targetNsOutput))
+	if string(selfNsOutput) == string(targetNsOutput) {
+		fmt.Fprintf(os.Stderr, "WARNING: Current netns and target netns have the SAME inode!\n")
+	}
+
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("CNI ADD failed: %w (stderr: %s)", err, stderr.String())
+		return fmt.Errorf("CNI ADD failed: %w (stdout: %s, stderr: %s)", err, stdout.String(), stderr.String())
 	}
 
 	// Save container info

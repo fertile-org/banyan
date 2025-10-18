@@ -1,9 +1,11 @@
 package helpers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -17,10 +19,10 @@ type DockerContainer struct {
 	NetnsPath string
 }
 
-// CreateTestContainer creates a Docker container with no networking
+// CreateTestContainer creates a container with no networking using nerdctl/containerd
 func CreateTestContainer(ctx context.Context, name string) (*DockerContainer, error) {
 	// Create container without networking
-	cmd := exec.CommandContext(ctx, "docker", "run", "-d",
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "run", "-d",
 		"--name", name,
 		"--network=none",
 		"alpine", "sleep", "3600")
@@ -43,13 +45,17 @@ func CreateTestContainer(ctx context.Context, name string) (*DockerContainer, er
 		return nil, fmt.Errorf("failed to wait for container: %w", err)
 	}
 
-	// Get PID
+	// Get PID for informational purposes (not used for namespace access)
 	pid, err := getContainerPID(ctx, containerID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get container PID: %w", err)
 	}
 	container.PID = pid
-	container.NetnsPath = fmt.Sprintf("/proc/%d/ns/net", pid)
+
+	// Note: We don't use /proc/{PID}/ns/net anymore because Docker containers
+	// may use PID namespaces that make the PID invisible to the host.
+	// Instead, we use Docker's SandboxKey which points to the actual namespace file.
+	container.NetnsPath = fmt.Sprintf("/proc/%d/ns/net", pid) // For informational purposes only
 
 	return container, nil
 }
@@ -57,11 +63,11 @@ func CreateTestContainer(ctx context.Context, name string) (*DockerContainer, er
 // CleanupContainer stops and removes a container
 func CleanupContainer(ctx context.Context, name string) error {
 	// Stop container
-	stopCmd := exec.CommandContext(ctx, "docker", "stop", name)
+	stopCmd := exec.CommandContext(ctx, "sudo", "nerdctl", "stop", name)
 	stopCmd.Run() // Ignore errors
 
 	// Remove container
-	rmCmd := exec.CommandContext(ctx, "docker", "rm", name)
+	rmCmd := exec.CommandContext(ctx, "sudo", "nerdctl", "rm", name)
 	rmCmd.Run() // Ignore errors
 
 	return nil
@@ -69,8 +75,8 @@ func CleanupContainer(ctx context.Context, name string) error {
 
 // ExecInContainer executes a command in the container
 func ExecInContainer(ctx context.Context, containerID string, args ...string) (string, error) {
-	cmdArgs := append([]string{"exec", containerID}, args...)
-	cmd := exec.CommandContext(ctx, "docker", cmdArgs...)
+	cmdArgs := append([]string{"nerdctl", "exec", containerID}, args...)
+	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -130,50 +136,110 @@ func PingFromContainer(ctx context.Context, containerID, target string) error {
 	return err
 }
 
-// CreateNetnsSymlink creates a symlink from /var/run/netns to container netns
+// CreateNetnsSymlink attaches a container's namespace to /var/run/netns
+// With containerd, this should work directly without complex workarounds
 func CreateNetnsSymlink(container *DockerContainer) error {
-	symlinkPath := fmt.Sprintf("/var/run/netns/%s", container.Name)
+	mountPath := fmt.Sprintf("/var/run/netns/%s", container.Name)
 
-	// Use sudo to create the symlink (requires root privileges)
+	// Verify the container is still running
+	inspectCmd := exec.Command("sudo", "nerdctl", "inspect", "-f", "{{.State.Running}}", container.ID)
+	output, err := inspectCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to inspect container %s: %w", container.ID, err)
+	}
+	running := strings.TrimSpace(string(output))
+	if running != "true" {
+		return fmt.Errorf("container %s is not running (state: %s)", container.ID, running)
+	}
+
+	// Get container PID
+	pidCmd := exec.Command("sudo", "nerdctl", "inspect", "-f", "{{.State.Pid}}", container.ID)
+	pidOutput, err := pidCmd.Output()
+	if err != nil {
+		return fmt.Errorf("failed to get container PID: %w", err)
+	}
+
+	var hostPID int
+	if _, err := fmt.Sscanf(strings.TrimSpace(string(pidOutput)), "%d", &hostPID); err != nil {
+		return fmt.Errorf("failed to parse PID: %w", err)
+	}
+
+	if hostPID == 0 {
+		return fmt.Errorf("container %s has PID 0 (container may have exited)", container.ID)
+	}
+
+	fmt.Fprintf(os.Stderr, "DEBUG: Container PID is %d\n", hostPID)
+
+	// Ensure /var/run/netns exists
 	mkdirCmd := exec.Command("sudo", "mkdir", "-p", "/var/run/netns")
 	if err := mkdirCmd.Run(); err != nil {
-		return fmt.Errorf("failed to create /var/run/netns directory: %w", err)
+		return fmt.Errorf("failed to create /var/run/netns: %w", err)
 	}
 
-	// Create symlink with sudo
-	lnCmd := exec.Command("sudo", "ln", "-sf", container.NetnsPath, symlinkPath)
-	if output, err := lnCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create symlink: %w\n%s", err, output)
+	// Cleanup any existing namespace
+	deleteCmd := exec.Command("sudo", "ip", "netns", "delete", container.Name)
+	deleteCmd.Run() // Ignore errors - might not exist
+
+	// With containerd, /proc/{PID}/ns/net should be accessible
+	// Use ip netns attach which creates a proper bind mount
+	attachCmd := exec.Command("sudo", "ip", "netns", "attach", container.Name, fmt.Sprintf("%d", hostPID))
+	var stderr bytes.Buffer
+	attachCmd.Stderr = &stderr
+	if err := attachCmd.Run(); err != nil {
+		return fmt.Errorf("failed to attach namespace for PID %d: %w (stderr: %s)", hostPID, err, stderr.String())
+	}
+
+	// Verify the mount worked
+	verifyCmd := exec.Command("sudo", "ip", "netns", "list")
+	verifyOutput, verifyErr := verifyCmd.CombinedOutput()
+	if verifyErr == nil {
+		if strings.Contains(string(verifyOutput), container.Name) {
+			fmt.Fprintf(os.Stderr, "✓ Namespace attachment verified successfully\n")
+		} else {
+			fmt.Fprintf(os.Stderr, "WARNING: Namespace %s not found in 'ip netns list'\n", container.Name)
+		}
+	}
+
+	// Debug: Check filesystem type (should be nsfs)
+	fsTypeCmd := exec.Command("sudo", "stat", "-f", "-c", "%T", mountPath)
+	if fsTypeOutput, fsTypeErr := fsTypeCmd.CombinedOutput(); fsTypeErr == nil {
+		fsType := strings.TrimSpace(string(fsTypeOutput))
+		fmt.Fprintf(os.Stderr, "DEBUG: %s filesystem type: %s\n", mountPath, fsType)
+		if fsType != "nsfs" {
+			return fmt.Errorf("namespace mount has wrong filesystem type: %s (expected nsfs)", fsType)
+		}
 	}
 
 	return nil
 }
 
-// RemoveNetnsSymlink removes the netns symlink
+// RemoveNetnsSymlink removes the namespace symlink
 func RemoveNetnsSymlink(containerName string) error {
-	symlinkPath := fmt.Sprintf("/var/run/netns/%s", containerName)
+	mountPath := fmt.Sprintf("/var/run/netns/%s", containerName)
 
-	// Use sudo to remove the symlink
-	rmCmd := exec.Command("sudo", "rm", "-f", symlinkPath)
-	if err := rmCmd.Run(); err != nil {
-		return fmt.Errorf("failed to remove symlink: %w", err)
-	}
+	// Try ip netns delete first (in case it was created that way)
+	deleteCmd := exec.Command("sudo", "ip", "netns", "delete", containerName)
+	deleteCmd.Run() // Ignore errors - might not exist
+
+	// Also try to remove the symlink directly
+	rmCmd := exec.Command("sudo", "rm", "-f", mountPath)
+	rmCmd.Run() // Ignore errors - file might not exist
 
 	return nil
 }
 
-// CheckDockerAvailable checks if Docker is available and running
+// CheckDockerAvailable checks if nerdctl/containerd is available and running
 func CheckDockerAvailable(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "docker", "ps")
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "ps")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker not available or not running: %w", err)
+		return fmt.Errorf("nerdctl/containerd not available or not running: %w", err)
 	}
 	return nil
 }
 
 // getContainerPID gets the PID of a container
 func getContainerPID(ctx context.Context, containerID string) (int, error) {
-	cmd := exec.CommandContext(ctx, "docker", "inspect",
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "inspect",
 		"-f", "{{.State.Pid}}", containerID)
 
 	output, err := cmd.CombinedOutput()
@@ -202,7 +268,7 @@ func WaitForContainer(ctx context.Context, containerID string, timeout time.Dura
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for container to start")
 		case <-ticker.C:
-			cmd := exec.CommandContext(ctx, "docker", "inspect",
+			cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "inspect",
 				"-f", "{{.State.Running}}", containerID)
 			output, err := cmd.Output()
 			if err != nil {
@@ -225,7 +291,7 @@ type ContainerInfo struct {
 
 // InspectContainer returns container information
 func InspectContainer(ctx context.Context, containerID string) (*ContainerInfo, error) {
-	cmd := exec.CommandContext(ctx, "docker", "inspect", containerID)
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "inspect", containerID)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)

@@ -204,14 +204,14 @@ services:
 ## Implementation Checklist
 
 ### Phase 1: Flannel CNI + Core Features
-- [ ] CNI runtime integration with Flannel
-- [ ] Hierarchical IPAM implementation
+- [x] CNI runtime integration with Flannel
+- [x] Hierarchical IPAM implementation
 - [ ] Security rules translator (allow → iptables)
 - [ ] Embedded etcd for state management
 - [ ] DNS integration (CoreDNS)
 - [ ] Auto-config from docker-compose (`banyan init`)
 - [ ] Debug tools (`banyan network trace`)
-- [ ] Integration testing framework
+- [x] Integration testing framework
 
 ### Phase 2: Advanced Features
 - [ ] Calico CNI integration

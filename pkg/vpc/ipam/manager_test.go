@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/fertile/banyan/pkg/vpc/ipam"
-	"github.com/fertile/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/vpc/ipam"
+	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 func TestIPAMManager_AllocateHostSubnet(t *testing.T) {

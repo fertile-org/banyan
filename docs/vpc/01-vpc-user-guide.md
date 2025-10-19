@@ -81,14 +81,15 @@ services:
 
 ### Custom Networks
 
-Only customize when you need specific DNS or CIDR ranges:
+Only customize when you need specific DNS suffix:
 
 ```yaml
 networks:
   default:
     dns_suffix: "prod"      # Changes DNS to: web.prod, api.prod
-    cidr: "172.16.0.0/16"   # Custom IP range to avoid conflicts
 ```
+
+**Note**: The VPC CIDR range is `10.0.0.0/16` and provides 65,536 IP addresses, which is sufficient for most deployments.
 
 ## Security Rules Reference
 

@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/fertile/banyan/pkg/vpc/dns"
+	"github.com/fertile-org/banyan/pkg/vpc/dns"
 )
 
 func TestDNSManager_RegisterHost(t *testing.T) {

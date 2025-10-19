@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/fertile/banyan/pkg/vpc/ipam"
+	"github.com/fertile-org/banyan/pkg/vpc/ipam"
 	"github.com/spf13/cobra"
 )
 

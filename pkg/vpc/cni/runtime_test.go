@@ -6,15 +6,15 @@ import (
 	"os"
 	"testing"
 
-	"github.com/fertile/banyan/pkg/vpc"
-	"github.com/fertile/banyan/pkg/vpc/cni"
-	"github.com/fertile/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/cni"
+	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 func TestCNIRuntime_AddToNetwork(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMemoryStore()
-	runtime := cni.NewRuntime(store)
+	runtime := cni.NewRuntime(store, nil)
 
 	tests := []struct {
 		name        string
@@ -79,7 +79,7 @@ func TestCNIRuntime_AddToNetwork_Integration(t *testing.T) {
 
 	ctx := context.Background()
 	store := storage.NewMemoryStore()
-	runtime := cni.NewRuntime(store)
+	runtime := cni.NewRuntime(store, nil)
 
 	t.Run("add container to network with specific IP", func(t *testing.T) {
 		err := runtime.AddToNetwork(ctx, "container-001", "network-001", net.ParseIP("10.0.1.5"))
@@ -93,7 +93,7 @@ func TestCNIRuntime_AddToNetwork_Integration(t *testing.T) {
 func TestCNIRuntime_RemoveFromNetwork(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMemoryStore()
-	runtime := cni.NewRuntime(store)
+	runtime := cni.NewRuntime(store, nil)
 
 	tests := []struct {
 		name        string
@@ -134,7 +134,7 @@ func TestCNIRuntime_RemoveFromNetwork(t *testing.T) {
 func TestCNIRuntime_SetupPlugin(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMemoryStore()
-	runtime := cni.NewRuntime(store)
+	runtime := cni.NewRuntime(store, nil)
 
 	flannelConfig := []byte(`{
 		"name": "flannel",
@@ -199,7 +199,7 @@ func TestCNIRuntime_SetupPlugin_Integration(t *testing.T) {
 
 	ctx := context.Background()
 	store := storage.NewMemoryStore()
-	runtime := cni.NewRuntime(store)
+	runtime := cni.NewRuntime(store, nil)
 
 	flannelConfig := []byte(`{
 		"name": "flannel",
@@ -223,7 +223,7 @@ func TestCNIRuntime_SetupPlugin_Integration(t *testing.T) {
 func TestCNIRuntime_GetPluginStatus(t *testing.T) {
 	ctx := context.Background()
 	store := storage.NewMemoryStore()
-	runtime := cni.NewRuntime(store)
+	runtime := cni.NewRuntime(store, nil)
 
 	// Manually add plugin status to storage (without requiring /etc/cni write)
 	pluginStatus := &vpc.PluginStatus{

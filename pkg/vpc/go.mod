@@ -1,9 +1,10 @@
-module github.com/fertile/banyan/pkg/vpc
+module github.com/fertile-org/banyan/pkg/vpc
 
 go 1.21
 
 require (
-	github.com/fertile/banyan/pkg/interfaces v0.0.0
+	github.com/google/uuid v1.6.0
+	go.etcd.io/etcd/client/v3 v3.5.11
 )
 
-replace github.com/fertile/banyan/pkg/interfaces => ../interfaces
+replace github.com/fertile-org/banyan/pkg/interfaces => ../interfaces

@@ -8,7 +8,8 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/fertile/banyan/pkg/vpc/cni"
+	"github.com/fertile-org/banyan/pkg/vpc/cni"
+	"github.com/fertile-org/banyan/pkg/vpc/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -24,19 +25,37 @@ var cniSetupPluginCmd = &cobra.Command{
 	Long: `Setup and configure a CNI plugin (flannel or calico).
 
 Example:
-  vpc-cli cni setup-plugin flannel`,
+  vpc-cli cni setup-plugin flannel
+  vpc-cli cni setup-plugin flannel --etcd-endpoints=http://localhost:2379`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plugin := args[0]
 
 		ctx := context.Background()
-		store := getStore()
-		runtime := cni.NewRuntime(store)
+		
+		// Get etcd endpoints flag
+		etcdEndpoints, _ := cmd.Flags().GetString("etcd-endpoints")
+		
+		// Create store based on whether etcd endpoints provided
+		var store storage.StateStore
+		if etcdEndpoints != "" {
+			endpoints := []string{etcdEndpoints}
+			etcdStore, err := storage.NewEtcdStore(endpoints, "")
+			if err != nil {
+				return fmt.Errorf("failed to create etcd store: %w", err)
+			}
+			defer etcdStore.Close()
+			store = etcdStore
+		} else {
+			store = getStore()
+		}
+
+		runtime := cni.NewRuntime(store, getSecurityManager())
 
 		// Handle Flannel specially - start daemon
 		if plugin == "flannel" {
 			fmt.Println("🚀 Starting Flannel daemon...")
-			if err := startFlannelDaemon(); err != nil {
+			if err := startFlannelDaemon(etcdEndpoints); err != nil {
 				return fmt.Errorf("failed to start Flannel daemon: %w", err)
 			}
 
@@ -102,7 +121,7 @@ Example:
 
 		ctx := context.Background()
 		store := getStore()
-		runtime := cni.NewRuntime(store)
+		runtime := cni.NewRuntime(store, getSecurityManager())
 
 		if err := runtime.AddToNetwork(ctx, containerID, networkID, ip); err != nil {
 			return fmt.Errorf("failed to add container: %w", err)
@@ -127,7 +146,7 @@ Example:
 
 		ctx := context.Background()
 		store := getStore()
-		runtime := cni.NewRuntime(store)
+		runtime := cni.NewRuntime(store, getSecurityManager())
 
 		if err := runtime.RemoveFromNetwork(ctx, containerID, networkID); err != nil {
 			return fmt.Errorf("failed to remove container: %w", err)
@@ -151,7 +170,7 @@ Example:
 
 		ctx := context.Background()
 		store := getStore()
-		runtime := cni.NewRuntime(store)
+		runtime := cni.NewRuntime(store, getSecurityManager())
 
 		status, err := runtime.GetPluginStatus(ctx, plugin)
 		if err != nil {
@@ -165,24 +184,33 @@ Example:
 	},
 }
 
-func startFlannelDaemon() error {
+func startFlannelDaemon(etcdEndpoints string) error {
 	// Check if already running
 	if isFlanneldRunning() {
 		fmt.Println("✓ Flannel daemon already running")
 		return nil
 	}
 
-	// Create subnet configuration file
-	if err := createFlannelSubnetConfig(); err != nil {
-		return fmt.Errorf("failed to create subnet config: %w", err)
-	}
-
-	// Start flanneld in background
-	cmd := exec.Command("flanneld",
+	// Build flanneld command
+	args := []string{
 		"--iface=eth0", // Use default interface
 		"--subnet-file=/run/flannel/subnet.env",
 		"--ip-masq",
-	)
+	}
+
+	// If etcd endpoints provided, use etcd backend
+	if etcdEndpoints != "" {
+		args = append(args, "--etcd-endpoints="+etcdEndpoints)
+		fmt.Printf("Configuring Flannel with etcd backend: %s\n", etcdEndpoints)
+	} else {
+		// Create static subnet configuration file
+		if err := createFlannelSubnetConfig(); err != nil {
+			return fmt.Errorf("failed to create subnet config: %w", err)
+		}
+	}
+
+	// Start flanneld in background
+	cmd := exec.Command("flanneld", args...)
 
 	// Create log file
 	logFile, err := os.OpenFile("/var/log/flanneld.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
@@ -255,6 +283,9 @@ FLANNEL_IPMASQ=true
 }
 
 func init() {
+	// Add flags
+	cniSetupPluginCmd.Flags().String("etcd-endpoints", "", "Etcd endpoints for distributed coordination (e.g., http://localhost:2379)")
+
 	cniCmd.AddCommand(cniSetupPluginCmd)
 	cniCmd.AddCommand(cniAddContainerCmd)
 	cniCmd.AddCommand(cniRemoveContainerCmd)

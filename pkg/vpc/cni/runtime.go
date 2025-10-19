@@ -9,21 +9,23 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/fertile/banyan/pkg/vpc"
-	"github.com/fertile/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 type Runtime struct {
-	store         storage.StateStore
-	cniConfigPath string
-	cniBinPath    string
+	store           storage.StateStore
+	securityManager vpc.SecurityManager
+	cniConfigPath   string
+	cniBinPath      string
 }
 
-func NewRuntime(store storage.StateStore) *Runtime {
+func NewRuntime(store storage.StateStore, securityManager vpc.SecurityManager) *Runtime {
 	return &Runtime{
-		store:         store,
-		cniConfigPath: "/etc/cni/net.d",
-		cniBinPath:    "/opt/cni/bin",
+		store:           store,
+		securityManager: securityManager,
+		cniConfigPath:   "/etc/cni/net.d",
+		cniBinPath:      "/opt/cni/bin",
 	}
 }
 
@@ -132,8 +134,8 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 		"name":       networkID,
 		"type":       "flannel",
 		"delegate": map[string]interface{}{
-			"bridge":            "cni0",
-			"hairpinMode":       true,
+			"bridge":           "cni0",
+			"hairpinMode":      true,
 			"isDefaultGateway": true,
 		},
 	}
@@ -182,7 +184,19 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 		Status:    "attached",
 	}
 
-	return r.store.Save(ctx, key, container)
+	if err := r.store.Save(ctx, key, container); err != nil {
+		return err
+	}
+
+	// Apply security rules for this network
+	if r.securityManager != nil {
+		if err := r.securityManager.ApplyRules(ctx, networkID); err != nil {
+			// Log warning but don't fail container creation
+			fmt.Fprintf(os.Stderr, "Warning: failed to apply security rules: %v\n", err)
+		}
+	}
+
+	return nil
 }
 
 func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID string) error {
@@ -211,7 +225,7 @@ func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID 
 			"name":       networkID,
 			"type":       "flannel",
 			"delegate": map[string]interface{}{
-				"hairpinMode":       true,
+				"hairpinMode":      true,
 				"isDefaultGateway": true,
 			},
 		}

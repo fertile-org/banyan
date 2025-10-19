@@ -4,7 +4,9 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/fertile/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/security"
+	"github.com/fertile-org/banyan/pkg/vpc/storage"
 	"github.com/spf13/cobra"
 )
 
@@ -22,6 +24,9 @@ func Execute() error {
 
 // Global store instance
 var globalStore storage.StateStore
+
+// Global security manager instance
+var globalSecurityManager vpc.SecurityManager
 
 func init() {
 	var stateFile string
@@ -53,9 +58,18 @@ func init() {
 	}
 
 	globalStore = store
+
+	// Initialize security manager with resolver
+	resolver := security.NewRuntimeServiceResolver(globalStore)
+	globalSecurityManager = security.NewManager(resolver, false) // Not dry-run
 }
 
 // getStore returns the global store instance
 func getStore() storage.StateStore {
 	return globalStore
+}
+
+// getSecurityManager returns the global security manager instance
+func getSecurityManager() vpc.SecurityManager {
+	return globalSecurityManager
 }

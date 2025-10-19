@@ -4,7 +4,7 @@ import (
 	"context"
 	"net"
 
-	"github.com/fertile/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc"
 )
 
 // Manager implements vpc.DNSManager interface

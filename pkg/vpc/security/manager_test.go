@@ -2,15 +2,46 @@ package security_test
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"testing"
 
-	"github.com/fertile/banyan/pkg/vpc"
-	"github.com/fertile/banyan/pkg/vpc/security"
+	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/security"
 )
+
+// MockServiceResolver is a mock service resolver for testing
+type MockServiceResolver struct {
+	services map[string][]net.IP
+}
+
+func NewMockServiceResolver() *MockServiceResolver {
+	return &MockServiceResolver{
+		services: map[string][]net.IP{
+			"web": {
+				net.ParseIP("10.0.1.10"),
+				net.ParseIP("10.0.1.11"),
+			},
+			"api": {
+				net.ParseIP("10.0.2.10"),
+			},
+			"database": {
+				net.ParseIP("10.0.3.10"),
+			},
+		},
+	}
+}
+
+func (m *MockServiceResolver) ResolveServiceIPs(ctx context.Context, serviceName string) ([]net.IP, error) {
+	if ips, ok := m.services[serviceName]; ok {
+		return ips, nil
+	}
+	return nil, fmt.Errorf("service %q not found", serviceName)
+}
 
 func TestSecurityManager_AddRule(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	manager := security.NewManager(nil, true) // nil resolver, dryRun mode for tests
 
 	tests := []struct {
 		name    string
@@ -197,7 +228,7 @@ func TestSecurityManager_AddRule(t *testing.T) {
 
 func TestSecurityManager_RemoveRule(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	manager := security.NewManager(nil, true)
 
 	// First add some rules
 	rule1 := &vpc.SecurityRule{
@@ -251,7 +282,7 @@ func TestSecurityManager_RemoveRule(t *testing.T) {
 
 func TestSecurityManager_ListRules(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	manager := security.NewManager(nil, true)
 
 	// Add rules for different networks
 	manager.AddRule(ctx, &vpc.SecurityRule{
@@ -359,7 +390,8 @@ func TestSecurityManager_ListRules(t *testing.T) {
 
 func TestSecurityManager_ApplyRules(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	resolver := NewMockServiceResolver()
+	manager := security.NewManager(resolver, true)
 
 	// Setup rules for a network
 	manager.AddRule(ctx, &vpc.SecurityRule{
@@ -418,7 +450,8 @@ func TestSecurityManager_ApplyRules(t *testing.T) {
 
 func TestSecurityManager_DenyByDefault(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	resolver := NewMockServiceResolver()
+	manager := security.NewManager(resolver, true)
 
 	// Create a network with only one allow rule
 	manager.AddRule(ctx, &vpc.SecurityRule{
@@ -450,7 +483,7 @@ func TestSecurityManager_DenyByDefault(t *testing.T) {
 
 func TestSecurityManager_RuleTranslation(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	manager := security.NewManager(nil, true)
 
 	// Test that rules are correctly translated to iptables commands
 	testCases := []struct {
@@ -533,7 +566,8 @@ func TestSecurityManager_RuleTranslation(t *testing.T) {
 
 func TestSecurityManager_ComplexScenarios(t *testing.T) {
 	ctx := context.Background()
-	manager := security.NewManager()
+	resolver := NewMockServiceResolver()
+	manager := security.NewManager(resolver, true)
 
 	// Scenario: Multi-tier application with proper isolation
 	// Web tier -> API tier -> Database tier

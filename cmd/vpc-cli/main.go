@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fertile/banyan/cmd/vpc-cli/cmd"
+	"github.com/fertile-org/banyan/cmd/vpc-cli/cmd"
 )
 
 func main() {

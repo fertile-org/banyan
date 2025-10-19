@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/fertile/banyan/pkg/vpc"
-	"github.com/fertile/banyan/pkg/vpc/debug"
+	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/debug"
 )
 
 func TestDebugManager_TraceConnection(t *testing.T) {

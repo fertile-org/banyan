@@ -2,6 +2,7 @@ package dns_test
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 
@@ -354,8 +355,8 @@ func TestDNSManager_ConcurrentOperations(t *testing.T) {
 	// Concurrent registrations
 	for i := 0; i < 10; i++ {
 		go func(index int) {
-			hostname := "concurrent-host-" + string(rune('a'+index)) + ".internal"
-			ip := net.ParseIP("10.0.2." + string(rune('1'+index)))
+			hostname := fmt.Sprintf("concurrent-host-%c.internal", rune('a'+index))
+			ip := net.ParseIP(fmt.Sprintf("10.0.2.%d", 1+index))
 			err := manager.RegisterHost(ctx, hostname, ip)
 			if err != nil {
 				t.Errorf("concurrent registration failed: %v", err)

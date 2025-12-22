@@ -15,12 +15,12 @@ func TestDebugManager_TraceConnection(t *testing.T) {
 	manager := debug.NewManager()
 
 	tests := []struct {
+		checks  func(t *testing.T, result *vpc.TraceResult)
 		name    string
 		fromIP  net.IP
 		toIP    net.IP
 		port    int
 		wantErr bool
-		checks  func(t *testing.T, result *vpc.TraceResult)
 	}{
 		{
 			name:    "trace valid connection",
@@ -152,10 +152,10 @@ func TestDebugManager_CheckConnectivity(t *testing.T) {
 	manager := debug.NewManager()
 
 	tests := []struct {
+		checks      func(t *testing.T, result *vpc.ConnectivityResult)
 		name        string
 		containerID string
 		wantErr     bool
-		checks      func(t *testing.T, result *vpc.ConnectivityResult)
 	}{
 		{
 			name:        "check connectivity for existing container",
@@ -260,10 +260,10 @@ func TestDebugManager_GetIPTablesRules(t *testing.T) {
 	manager := debug.NewManager()
 
 	tests := []struct {
+		checks  func(t *testing.T, rules []string)
 		name    string
 		ip      net.IP
 		wantErr bool
-		checks  func(t *testing.T, rules []string)
 	}{
 		{
 			name:    "get rules for valid IP",

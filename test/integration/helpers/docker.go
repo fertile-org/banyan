@@ -22,9 +22,13 @@ type DockerContainer struct {
 // CreateTestContainer creates a container with no networking using nerdctl/containerd
 func CreateTestContainer(ctx context.Context, name string) (*DockerContainer, error) {
 	// Create container without networking
-	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "run", "-d",
+	// Use --snapshotter=native to avoid overlay-on-overlay issues in DinD environments
+	// Use --cgroup-manager=cgroupfs to work around cgroups v2 issues in DinD
+	// Use --cgroupns=host to share the host's cgroup namespace
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "run", "-d",
 		"--name", name,
 		"--network=none",
+		"--cgroupns=host",
 		"alpine", "sleep", "3600")
 
 	output, err := cmd.CombinedOutput()
@@ -63,11 +67,11 @@ func CreateTestContainer(ctx context.Context, name string) (*DockerContainer, er
 // CleanupContainer stops and removes a container
 func CleanupContainer(ctx context.Context, name string) error {
 	// Stop container
-	stopCmd := exec.CommandContext(ctx, "sudo", "nerdctl", "stop", name)
+	stopCmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "stop", name)
 	stopCmd.Run() // Ignore errors
 
 	// Remove container
-	rmCmd := exec.CommandContext(ctx, "sudo", "nerdctl", "rm", name)
+	rmCmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "rm", name)
 	rmCmd.Run() // Ignore errors
 
 	return nil
@@ -75,7 +79,7 @@ func CleanupContainer(ctx context.Context, name string) error {
 
 // ExecInContainer executes a command in the container
 func ExecInContainer(ctx context.Context, containerID string, args ...string) (string, error) {
-	cmdArgs := append([]string{"nerdctl", "exec", containerID}, args...)
+	cmdArgs := append([]string{"nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "exec", containerID}, args...)
 	cmd := exec.CommandContext(ctx, "sudo", cmdArgs...)
 
 	output, err := cmd.CombinedOutput()
@@ -142,7 +146,7 @@ func CreateNetnsSymlink(container *DockerContainer) error {
 	mountPath := fmt.Sprintf("/var/run/netns/%s", container.Name)
 
 	// Verify the container is still running
-	inspectCmd := exec.Command("sudo", "nerdctl", "inspect", "-f", "{{.State.Running}}", container.ID)
+	inspectCmd := exec.Command("sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "inspect", "-f", "{{.State.Running}}", container.ID)
 	output, err := inspectCmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to inspect container %s: %w", container.ID, err)
@@ -153,7 +157,7 @@ func CreateNetnsSymlink(container *DockerContainer) error {
 	}
 
 	// Get container PID
-	pidCmd := exec.Command("sudo", "nerdctl", "inspect", "-f", "{{.State.Pid}}", container.ID)
+	pidCmd := exec.Command("sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "inspect", "-f", "{{.State.Pid}}", container.ID)
 	pidOutput, err := pidCmd.Output()
 	if err != nil {
 		return fmt.Errorf("failed to get container PID: %w", err)
@@ -200,13 +204,15 @@ func CreateNetnsSymlink(container *DockerContainer) error {
 		}
 	}
 
-	// Debug: Check filesystem type (should be nsfs)
+	// Debug: Check filesystem type (should be nsfs, but may report as UNKNOWN in Alpine)
 	fsTypeCmd := exec.Command("sudo", "stat", "-f", "-c", "%T", mountPath)
 	if fsTypeOutput, fsTypeErr := fsTypeCmd.CombinedOutput(); fsTypeErr == nil {
 		fsType := strings.TrimSpace(string(fsTypeOutput))
 		fmt.Fprintf(os.Stderr, "DEBUG: %s filesystem type: %s\n", mountPath, fsType)
-		if fsType != "nsfs" {
-			return fmt.Errorf("namespace mount has wrong filesystem type: %s (expected nsfs)", fsType)
+		// Note: Alpine Linux may report "UNKNOWN" for nsfs, which is acceptable
+		// The important thing is that 'ip netns list' verified the namespace above
+		if fsType != "nsfs" && fsType != "UNKNOWN" {
+			return fmt.Errorf("namespace mount has wrong filesystem type: %s (expected nsfs or UNKNOWN)", fsType)
 		}
 	}
 
@@ -230,16 +236,31 @@ func RemoveNetnsSymlink(containerName string) error {
 
 // CheckDockerAvailable checks if nerdctl/containerd is available and running
 func CheckDockerAvailable(ctx context.Context) error {
-	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "ps")
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "ps")
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("nerdctl/containerd not available or not running: %w", err)
 	}
 	return nil
 }
 
+// CheckContainerdAvailable checks if containerd socket is available
+func CheckContainerdAvailable(ctx context.Context) error {
+	// Check if containerd socket exists
+	if _, err := os.Stat("/run/containerd/containerd.sock"); os.IsNotExist(err) {
+		return fmt.Errorf("containerd socket not found at /run/containerd/containerd.sock")
+	}
+
+	// Try to connect via ctr
+	cmd := exec.CommandContext(ctx, "sudo", "ctr", "version")
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("containerd not responding: %w", err)
+	}
+	return nil
+}
+
 // getContainerPID gets the PID of a container
 func getContainerPID(ctx context.Context, containerID string) (int, error) {
-	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "inspect",
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "inspect",
 		"-f", "{{.State.Pid}}", containerID)
 
 	output, err := cmd.CombinedOutput()
@@ -268,7 +289,7 @@ func WaitForContainer(ctx context.Context, containerID string, timeout time.Dura
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for container to start")
 		case <-ticker.C:
-			cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "inspect",
+			cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "inspect",
 				"-f", "{{.State.Running}}", containerID)
 			output, err := cmd.Output()
 			if err != nil {
@@ -291,7 +312,7 @@ type ContainerInfo struct {
 
 // InspectContainer returns container information
 func InspectContainer(ctx context.Context, containerID string) (*ContainerInfo, error) {
-	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "inspect", containerID)
+	cmd := exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "inspect", containerID)
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to inspect container: %w", err)

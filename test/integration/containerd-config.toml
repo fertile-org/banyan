@@ -1,0 +1,39 @@
+# Containerd configuration for integration tests
+# Optimized for testing inside container (DinD pattern)
+
+version = 2
+
+# Root and state directories
+root = "/var/lib/containerd"
+state = "/run/containerd"
+
+# Use native snapshotter for DinD compatibility (overlayfs doesn't work well nested)
+[plugins."io.containerd.grpc.v1.cri".containerd.default_runtime]
+  snapshotter = "native"
+
+[plugins."io.containerd.service.v1.snapshots-service"]
+  default = ["native"]
+
+# Disable cgroups monitoring to avoid cgroups v2 issues in DinD
+[plugins."io.containerd.cgroups.v1.cgroups"]
+  no_prometheus = true
+
+[plugins."io.containerd.grpc.v1.cri".containerd]
+  snapshotter = "native"
+  default_runtime_name = "runc"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+  # Disable systemd cgroup to avoid cgroups v2 issues in DinD
+  SystemdCgroup = false
+
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "registry.k8s.io/pause:3.9"
+  [plugins."io.containerd.grpc.v1.cri".cni]
+    bin_dir = "/opt/cni/bin"
+    conf_dir = "/etc/cni/net.d"
+
+[plugins."io.containerd.internal.v1.opt"]
+  path = "/opt/containerd"

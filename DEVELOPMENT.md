@@ -106,6 +106,80 @@ ls -lh /opt/cni/bin/
 # Should show: flannel, bridge, host-local, portmap, and others
 ```
 
+## Integration Testing (Docker-in-Docker)
+
+Integration tests run inside a Docker container that provides an isolated environment with containerd, nerdctl, etcd, and Flannel. This Docker-in-Docker (DinD) approach allows testing network functionality without affecting the host system.
+
+### Prerequisites
+
+- Docker installed and running
+- Privileged container support (required for network namespaces and cgroups)
+
+### Building the Test Container
+
+```bash
+# Build the integration test container image
+docker build -t banyan-integration-test -f test/integration/Dockerfile .
+```
+
+### Running Integration Tests
+
+```bash
+# Run all integration tests
+docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test all
+
+# Run specific test suites
+docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test dns        # DNS integration
+docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test debug      # Debug tools
+docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test security   # Security/iptables
+docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test cni        # CNI Docker integration
+docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test multihost  # Multi-Host networking
+```
+
+### Available Test Suites
+
+| Test Suite | Description | Services Required |
+|------------|-------------|-------------------|
+| `dns` | DNS server functionality | None |
+| `debug` | Debug and diagnostic tools | None |
+| `security` | iptables and security rules | iptables |
+| `cni` | CNI plugin with containerd | containerd, etcd, Flannel |
+| `multihost` | Multi-host networking simulation | containerd, etcd |
+
+### Debugging Integration Tests
+
+```bash
+# Start a shell inside the test container for debugging
+docker run --rm -it --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test shell
+
+# Start all services and keep the container running
+docker run --rm -it --privileged -v /lib/modules:/lib/modules:ro banyan-integration-test services
+```
+
+### Test Container Architecture
+
+The integration test container uses a "kind-like" approach:
+
+1. **Base Image**: `golang:1.24-alpine` with necessary tools
+2. **Container Runtime**: containerd with nerdctl CLI
+3. **Networking**: Flannel VXLAN overlay network
+4. **Coordination**: etcd for distributed state
+5. **CNI Plugins**: Standard CNI plugins + Flannel CNI
+
+### Important Notes
+
+- **Privileged mode** is required for:
+  - Creating network namespaces
+  - Managing iptables rules
+  - Running nested containers (containerd inside Docker)
+
+- **Kernel modules** (`/lib/modules:/lib/modules:ro`) are mounted for:
+  - VXLAN module support
+  - Bridge networking
+  - Network filtering
+
+- **Native snapshotter** is used instead of overlayfs to avoid overlay-on-overlay issues in nested containers
+
 ## Workspace
 
 This project uses Go workspaces. Dependencies are managed via `go.work`.

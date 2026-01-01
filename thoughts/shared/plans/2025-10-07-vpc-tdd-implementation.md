@@ -1155,9 +1155,9 @@ func init() {
 ### Success Criteria:
 
 #### Automated Verification:
-- [ ] CNI runtime tests pass (may skip some): `go test -v ./pkg/vpc/cni/`
-- [ ] No lint errors: `golangci-lint run ./pkg/vpc/cni/`
-- [ ] vpc-cli builds: `go build -o /tmp/vpc-cli ./cmd/vpc-cli/`
+- [x] CNI runtime tests pass (may skip some): `go test -v ./pkg/vpc/cni/`
+- [x] No lint errors: `golangci-lint run ./pkg/vpc/cni/`
+- [x] vpc-cli builds: `go build -o /tmp/vpc-cli ./cmd/vpc-cli/`
 
 #### Manual Verification (with vpc-cli):
 - [ ] Setup plugin: `sudo vpc-cli cni setup-plugin flannel` (check /etc/cni/net.d/10-flannel.conf exists)

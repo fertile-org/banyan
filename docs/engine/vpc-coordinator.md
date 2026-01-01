@@ -1,16 +1,40 @@
 # VPC Coordinator
 
+> **Implementation Status**: Phase 3 - Pending
+> **Dependencies**: Agent Registry ✅, VPC Module ✅ (already implemented)
+
 ## Overview
 
 The VPC Coordinator bridges the Engine control plane to the VPC networking layer. It acts as a facade that coordinates network provisioning, IP allocation, and security policy enforcement through the underlying VPC managers (NetworkManager, IPAMManager, SecurityManager).
+
+## Philosophy
+
+**"Implicit networking"** - Users don't need to think about networking. In banyan.yml, services reach each other by name:
+
+```yaml
+services:
+  api:
+    image: myapi:latest
+    environment:
+      - DATABASE_URL=postgres://db:5432/app  # "db" resolves via DNS
+  db:
+    image: postgres:15
+```
+
+Behind the scenes, VPC Coordinator:
+1. Allocates IP addresses for each container
+2. Registers service names in DNS
+3. Configures network namespaces
+4. (MVP-2) Applies security policies from `network_policy` plugin
 
 ## Responsibilities
 
 1. **Network Provisioning** - Create and manage VPC networks and subnets
 2. **IP Allocation Coordination** - Request and release IP addresses for containers
-3. **Security Policy Management** - Configure security groups and network policies
-4. **Network State Tracking** - Monitor network resource allocation
-5. **Cross-Component Coordination** - Orchestrate multiple VPC managers
+3. **DNS Registration** - Register service names for DNS-based discovery
+4. **Security Policy Management** - Configure security groups and network policies (MVP-2)
+5. **Network State Tracking** - Monitor network resource allocation
+6. **Cross-Component Coordination** - Orchestrate multiple VPC managers
 
 ## Architecture
 
@@ -928,8 +952,29 @@ func TestNetworkProvisioningUseCase_ProvisionNetwork(t *testing.T) {
 }
 ```
 
+## Network Policy Plugin (MVP-2)
+
+Explicit network policies are supported via the `network_policy` plugin:
+
+```yaml
+services:
+  api:
+    image: myapi:latest
+    plugins:
+      - name: network_policy
+        config:
+          allow:
+            - db
+          deny_all_others: true
+```
+
+This translates to security rules that:
+1. Allow traffic from `api` containers to `db` containers
+2. Deny all other outbound traffic from `api`
+
 ## Related Documents
 
 - [Orchestrator](./orchestrator.md) - Uses VPC coordinator for container networking
-- [VPC Module](../../pkg/vpc/README.md) - Underlying VPC implementation
+- [VPC Module](../../pkg/vpc/README.md) - Underlying VPC implementation ✅
 - [Network Node](../agent/network-node.md) - Agent-side network operations
+- [DNS Server](../../pkg/vpc/README.md#dns-server) - DNS-based service discovery ✅

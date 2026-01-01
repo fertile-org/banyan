@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -81,3 +81,33 @@ build:
 # Clean build artifacts
 clean:
 	rm -rf bin/
+
+# ============================================================================
+# Integration Tests (DinD-based)
+# ============================================================================
+
+# Build (or rebuild) the integration test Docker image
+# Usage: make test-integration-build
+test-integration-build:
+	./test/integration/run-integration-tests.sh --build
+
+# Run integration test(s) - builds image if needed
+# Usage: make test-integration                                                    # Run all tests
+#        make test-integration FILE=./test/integration/vpc/run_dns_integration.go # Run specific test
+test-integration:
+ifdef FILE
+	./test/integration/run-integration-tests.sh $(FILE)
+else
+	./test/integration/run-integration-tests.sh all
+endif
+
+# Start a debug shell inside the integration test container
+# Usage: make test-integration-shell
+test-integration-shell:
+	./test/integration/run-integration-tests.sh shell
+
+# List available integration tests
+# Usage: make test-integration-list
+test-integration-list:
+	@echo "Available integration tests:"
+	@find ./test/integration -name "run_*.go" -type f | sort

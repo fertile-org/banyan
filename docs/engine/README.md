@@ -4,7 +4,7 @@ This folder contains detailed design documents for each Engine component.
 
 ## Overview
 
-The Engine is the **control plane** of Banyan. It orchestrates deployments, manages state, coordinates agents, and integrates with the VPC networking layer.
+The Engine is the **control plane** of Banyan. It parses `banyan.yml` files, orchestrates deployments, manages state, coordinates agents, and integrates with the VPC networking layer.
 
 ## Architecture Pattern
 
@@ -51,7 +51,7 @@ All components follow **Clean Architecture** with **Hexagonal Architecture** (Po
 | **Agent Registry** | Manages agent registration and selection | [agent-registry.md](./agent-registry.md) |
 | **Plugin Manager** | Lifecycle plugins (Type 2) | [plugin-manager.md](./plugin-manager.md) |
 | **VPC Coordinator** | Bridges to VPC managers for network control | [vpc-coordinator.md](./vpc-coordinator.md) |
-| **Compose Parser** | Parses docker-compose.yaml and banyan.yaml files | [compose-parser.md](./compose-parser.md) |
+| **Banyan Parser** | Parses banyan.yml configuration files | [banyan-parser.md](./banyan-parser.md) |
 
 ## Directory Structure
 
@@ -106,8 +106,8 @@ pkg/engine/
 │                           Engine                                 │
 │                                                                  │
 │  ┌──────────────┐     ┌──────────────┐     ┌──────────────┐    │
-│  │Compose Parser│────►│ Orchestrator │────►│ State Manager│    │
-│  │ (yaml files) │     └──────┬───────┘     └──────┬───────┘    │
+│  │Banyan Parser │────►│ Orchestrator │────►│ State Manager│    │
+│  │(banyan.yml)  │     └──────┬───────┘     └──────┬───────┘    │
 │  └──────────────┘            │                    │             │
 │                              │                    ▼             │
 │                              │             ┌──────────────┐    │

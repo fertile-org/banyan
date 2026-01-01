@@ -1,13 +1,29 @@
 # State Manager Component Design
 
+> **Implementation Status**: Phase 3 - Pending
+> **Dependencies**: Agent Registry ✅
+
 ## Overview
 
-The State Manager handles desired vs actual state tracking and reconciliation. It continuously monitors the system state and triggers corrective actions when drift is detected.
+The State Manager handles desired vs actual state tracking and reconciliation. It continuously monitors the system state and triggers corrective actions when drift is detected. The desired state comes from parsed `banyan.yml` configurations.
+
+## Philosophy
+
+**"Self-healing infrastructure"** - When reality drifts from desired state (container crashes, node dies), the State Manager automatically corrects it:
+
+```yaml
+# User declares desired state in banyan.yml
+services:
+  api:
+    replicas: 3  # State Manager ensures 3 instances always run
+```
+
+If an instance crashes or a node fails, State Manager detects the drift and triggers reconciliation to restore the desired replica count.
 
 ## Responsibilities
 
-- Store and manage desired state (what should be running)
-- Collect and track actual state (what is running)
+- Store and manage desired state from banyan.yml (what should be running)
+- Collect and track actual state from agents (what is running)
 - Detect drift between desired and actual
 - Trigger reconciliation to correct drift
 - Provide state queries for other components
@@ -753,7 +769,28 @@ var _ ports.ReconcilerService = (*ReconcilerUseCase)(nil)
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Health Check Integration
+
+The State Manager tracks health status from banyan.yml health check definitions:
+
+```yaml
+services:
+  api:
+    healthcheck:
+      test: curl -f http://localhost:3000/health
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+When health checks fail:
+1. Agent reports unhealthy status
+2. State Manager detects `DriftUnhealthy`
+3. Reconciler generates `ActionRestart`
+4. Agent restarts the container
+
 ## Related Components
 
 - [Orchestrator](./orchestrator.md) - Sets desired state during deployment
-- [Agent Registry](./agent-registry.md) - Provides agent information for state collection
+- [Agent Registry](./agent-registry.md) - Provides agent information for state collection ✅
+- [VPC Coordinator](./vpc-coordinator.md) - Network state tracking

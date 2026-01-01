@@ -1,10 +1,30 @@
 # Agent Component Designs
 
+> **Implementation Status**: Phase 2 - In Progress (see [implementation-plan.md](../implementation-plan.md))
+
 This folder contains detailed design documents for each Agent component.
 
 ## Overview
 
 The Agent is the **data plane** of Banyan. It runs on each worker node and executes tasks received from the Engine, managing containers, networking, and security at the node level.
+
+## Philosophy
+
+**"Docker Compose that scales"** - The Agent receives simple instructions from the Engine and handles all the complexity of running containers on a node:
+
+```
+Engine sends:
+  "Deploy api service with image myapi:latest,
+   connect to VPC network, apply health check"
+
+Agent handles:
+  - Pull image from registry
+  - Create container with containerd
+  - Configure network namespace and IP
+  - Setup DNS resolution for service discovery
+  - Start health check monitoring
+  - Report status back to Engine
+```
 
 ## Architecture Pattern
 
@@ -204,8 +224,48 @@ pkg/agent/
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
+## Service Discovery
+
+The Agent configures DNS resolution so containers can reach each other by service name:
+
+```yaml
+# In banyan.yml
+services:
+  api:
+    environment:
+      - DATABASE_URL=postgres://db:5432/app  # "db" resolves via DNS
+  db:
+    image: postgres:15
+```
+
+When the Agent deploys a container:
+1. VPC Coordinator allocates an IP
+2. DNS server is updated with service name → IP mapping
+3. Container's /etc/resolv.conf points to VPC DNS server
+4. Service names resolve to container IPs
+
+## Health Monitoring
+
+The Agent monitors container health based on banyan.yml healthcheck configuration:
+
+```yaml
+services:
+  api:
+    healthcheck:
+      test: curl -f http://localhost:3000/health
+      interval: 30s
+      timeout: 10s
+      retries: 3
+```
+
+The Health Monitor:
+1. Executes health checks at specified intervals
+2. Reports health status to Engine
+3. Triggers container restart on repeated failures
+
 ## Related Documents
 
 - [Engine and Agent Architecture Overview](../engine-agent-architecture-design.md)
 - [Engine Components](../engine/README.md)
-- [VPC Module](../../pkg/vpc/README.md)
+- [VPC Module](../../pkg/vpc/README.md) ✅
+- [DNS Server](../../pkg/vpc/README.md#dns-server) ✅

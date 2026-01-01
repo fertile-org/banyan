@@ -1,124 +1,112 @@
-# Banyan Monorepo
+# Banyan
 
-Banyan is an infrastructure layer for docker-compose, which will allow us to deploy the docker-compose yaml file into various cloud and on-premises servers, include production-ready CICD and system monitoring.
+**Docker Compose that scales.** Deploy your containers across multiple servers with a single YAML file.
 
-### 1. Components Architecture
+## Why Banyan?
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CLI Interface                            │
-│  ├─ compose.yaml parser                                     │
-│  ├─ command router                                          │
-│  └─ configuration manager                                   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                   Core Engine                               │
-│  ├─ resource state manager                                  │
-│  ├─ deployment orchestrator                                 │
-│  ├─ provider abstraction layer                              │
-│  └─ plugin system manager                                   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                Plugin Ecosystem                             │
-│  ├─ cloud providers (AWS, GCP, Azure, DigitalOcean)         │
-│  ├─ server providers (bare metal, VPS)                      │
-│  ├─ deployment strategies (docker, systemd, containers)     │
-│  └─ monitoring & observability                              │
-└─────────────────────────────────────────────────────────────┘
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                Agent System                                 │
-│  ├─ lightweight deployment agent                            │
-│  ├─ health monitoring                                       │
-│  ├─ log collection                                          │
-│  └─ secure communication layer                              │
-└─────────────────────────────────────────────────────────────┘
+You know docker-compose. You use it for local development. But when it's time to deploy to production across multiple servers... suddenly you need Kubernetes, Helm charts, and a DevOps team.
 
-```
+**Banyan bridges that gap.** Write a `banyan.yml` that looks almost identical to docker-compose, add `replicas: 3`, and deploy across your servers.
 
-### 2. Usages - Configuration (TBD)
+## Quick Example
 
-
-Original `docker-compose.yaml` file
 ```yaml
-version: '3.8'
-
+# banyan.yml - that's it, one file
 services:
   web:
-    image: "myapp:latest"
+    image: myapp:latest
     ports:
-      - "80:8080"
+      - "3000:3000"
+    replicas: 3  # ← runs on 3 servers
     environment:
       - DATABASE_URL=${DATABASE_URL}
 
-  database:
-    image: "postgres:13"
+  api:
+    image: myapi:latest
+    replicas: 2
+
+  db:
+    image: postgres:15
+    volumes:
+      - db-data:/var/lib/postgresql/data
 
 volumes:
-  db_data:
-
-networks:
-  default:
+  db-data:
 ```
 
-
-Banyan config file:
-```yaml
-version: '3.8'
-docker_compose:
-    file: ./docker-compose.yaml
-
-# Simple network configuration (optional - uses smart defaults)
-networks:
-  default:
-    dns_suffix: "internal"  # Services accessible as service.internal
-
-services:
-  web:
-    instances: 2  # Simple scaling
-    health:
-        path: "/health"
-        interval: 30s
-    network:
-        # DNS: web.internal (auto-generated)
-        allow:
-            - from: internet
-              to_port: 443  # Public HTTPS access
-
-  database:
-    health:
-        path: "/health"
-        interval: 30s
-    plugins:
-        - plugin_name: database_backup
-          parameters:
-            schedule: "0 2 * * *"
-            retention: 7d
-            location: s3://...
-    network:
-        # DNS: database.internal (auto-generated)
-        allow:
-            - from: service:web
-              to_port: 5432  # Only web can connect to PostgreSQL port
-    # Persistent volume (auto-detected for database images)
-    volume:
-        size: 100GB
+Deploy:
+```bash
+banyan up
 ```
 
-### 3. Usages - Deployment & Monitoring (TBD)
+That's it. No YAML templating. No resource quotas. No node selectors. Just containers on servers.
+
+## Who Is This For?
+
+- **Startups** deploying their first production setup
+- **Small teams** without dedicated DevOps
+- **Developers** who know docker-compose and don't want to learn Kubernetes
+- **Anyone** who thinks "I just want to run 3 instances of my app"
+
+## What Banyan Does
+
+1. **Parses your banyan.yml** (familiar docker-compose syntax)
+2. **Distributes containers** across your servers
+3. **Handles networking** so services can talk to each other
+4. **Manages health** and restarts failed containers
+5. **Scales up/down** when you change replicas
+
+## What Banyan Doesn't Do
+
+- Complex resource scheduling (use Kubernetes)
+- Multi-region deployments (use Kubernetes)
+- Automatic scaling based on metrics (use Kubernetes)
+- Service mesh, sidecars, operators (use Kubernetes)
+
+**If you need those features, you need Kubernetes. That's okay.**
+
+Banyan is for teams who don't need Kubernetes complexity but do need to run containers on more than one server.
+
+## Architecture
 
 ```
-banyan validate -f banyan.yaml
-banyan deploy --dry-run
-banyan deploy
-banyan monitor
+┌─────────────────────────────────────────────────────────────┐
+│                    Banyan Engine                             │
+│  ├─ banyan.yml parser                                       │
+│  ├─ deployment orchestrator                                  │
+│  ├─ agent registry                                          │
+│  └─ plugin system                                           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                        gRPC/REST
+                              │
+┌─────────────────────────────────────────────────────────────┐
+│                    Banyan Agent (per server)                │
+│  ├─ container runtime (containerd)                          │
+│  ├─ health monitoring                                       │
+│  ├─ networking (VPC overlay)                                │
+│  └─ log collection                                          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## For Development
+## Getting Started
 
-Read [DEVELOPMENT.md](./DEVELOPMENT.md) to get the instruction for development of this project.
+```bash
+# Install banyan CLI
+curl -sSL https://get.banyan.dev | sh
+
+# Install agent on each server
+banyan agent install
+
+# Deploy your services
+banyan up
+```
+
+## Documentation
+
+- [Development Guide](./DEVELOPMENT.md)
+- [Engine Design](./docs/engine/README.md)
+- [banyan.yml Specification](./docs/engine/banyan-parser.md)
 
 ## License
 

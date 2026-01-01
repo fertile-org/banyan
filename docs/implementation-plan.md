@@ -4,15 +4,107 @@ This document provides a detailed implementation plan for the Banyan Engine and 
 
 > **Important**: This plan follows the detailed design documents in `docs/engine/` and `docs/agent/` folders. Refer to those documents for complete specifications.
 
+## Project Philosophy
+
+**"Docker Compose that scales"** - Banyan uses a simple `banyan.yml` file with docker-compose-like syntax, adding only `replicas` for scaling. Target audience is startups and small teams.
+
 ## Table of Contents
 
-1. [Implementation Overview](#implementation-overview)
-2. [Phase 1: Foundation Layer](#phase-1-foundation-layer)
-3. [Phase 2: Agent Data Plane](#phase-2-agent-data-plane)
-4. [Phase 3: Engine Control Plane](#phase-3-engine-control-plane)
-5. [Phase 4: Integration & Orchestration](#phase-4-integration--orchestration)
-6. [Testing Strategy](#testing-strategy)
-7. [Milestones & Validation Criteria](#milestones--validation-criteria)
+1. [MVP Phases Overview](#mvp-phases-overview)
+2. [Implementation Overview](#implementation-overview)
+3. [Phase 1: Foundation Layer](#phase-1-foundation-layer)
+4. [Phase 2: Agent Data Plane](#phase-2-agent-data-plane)
+5. [Phase 3: Engine Control Plane](#phase-3-engine-control-plane)
+6. [Phase 4: Integration & Orchestration](#phase-4-integration--orchestration)
+7. [Testing Strategy](#testing-strategy)
+8. [Milestones & Validation Criteria](#milestones--validation-criteria)
+
+---
+
+## MVP Phases Overview
+
+### MVP-1: Core Functionality (Current Focus)
+
+Deploy containers with replicas using a simple banyan.yml:
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    replicas: 3
+    healthcheck:
+      test: curl -f http://localhost:3000/health
+  db:
+    image: postgres:15
+    volumes:
+      - db-data:/var/lib/postgresql/data
+volumes:
+  db-data:
+```
+
+**Features:**
+- Parse banyan.yml (image, replicas, ports, environment, volumes, depends_on, healthcheck)
+- DNS-based service discovery (services reach each other by name)
+- Agent registration and selection
+- Basic deployment flow
+- Health checks
+
+**NOT included:** Load balancer plugin, auto-scaling, SSL, backup
+
+### MVP-2: Essential Plugins
+
+Add plugin system for load balancing and backup:
+
+```yaml
+services:
+  api:
+    image: myapp:latest
+    replicas: 3
+    plugins:
+      - name: load_balancer
+        config:
+          port: 443
+          ssl:
+            auto: true  # Let's Encrypt
+  db:
+    plugins:
+      - name: database_backup
+        config:
+          schedule: "0 2 * * *"
+          destination: s3://bucket/backups
+```
+
+**Features:**
+- Plugin system for per-service plugins
+- `load_balancer` plugin with SSL termination
+- `database_backup` plugin
+
+### MVP-3: Auto-Scaling & Advanced Features
+
+```yaml
+services:
+  api:
+    replicas:
+      min: 2
+      max: 10
+    plugins:
+      - name: auto_scaler
+        config:
+          metric: cpu
+          target: 70
+      - name: network_policy
+        config:
+          allow:
+            - db
+          deny_all_others: true
+```
+
+**Features:**
+- `auto_scaler` plugin
+- `network_policy` plugin (explicit allow/deny)
+- Dynamic replica scaling
+
+---
 
 ---
 
@@ -36,7 +128,7 @@ This document provides a detailed implementation plan for the Banyan Engine and 
 │         └────────────────────┼─────────────────────┘                  │     │
 │                              │                                        │     │
 │  ┌──────────────────┐        │        ┌──────────────────┐           │     │
-│  │  Compose Parser  │        │        │  VPC Coordinator │───────────┘     │
+│  │  Banyan Parser   │        │        │  VPC Coordinator │───────────┘     │
 │  │  (independent)   │        │        │                  │                 │
 │  └──────────────────┘        │        └──────────────────┘                 │
 │                              │                                             │
@@ -413,31 +505,29 @@ go test ./test/integration/agent/grpc/... -v -tags=integration
 
 Implement Engine components. Some can be developed in parallel.
 
-### 3.1 Compose Parser (Parallel Track A)
+### 3.1 Banyan Parser (Parallel Track A)
 
-**Design Document**: [docs/engine/compose-parser.md](engine/compose-parser.md)
+**Design Document**: [docs/engine/banyan-parser.md](engine/banyan-parser.md)
 
-**Target**: Parse docker-compose.yaml and banyan.yaml files
+**Target**: Parse banyan.yml configuration files
 
 **Directory**: `pkg/engine/parser/`
 
 **Implementation Order**:
 1. Domain layer (`domain/`)
-   - `ComposeProject` entity
-   - `ServiceDefinition`, `NetworkDefinition`, `VolumeDefinition` value objects
-   - `BanyanExtension` value object
+   - `BanyanConfig` entity
+   - `ServiceConfig`, `VolumeConfig` value objects
+   - `HealthcheckConfig` value object
 2. Inbound ports (`ports/inbound/`)
    - `ParserService` interface
 3. Outbound ports (`ports/outbound/`)
    - `FileReader` interface
    - `SchemaValidator` interface
 4. Use cases (`usecases/`)
-   - `ComposeParser` implementation
-   - `BanyanExtensionParser` implementation
+   - `BanyanParser` implementation
 5. Adapters (`adapters/`)
-   - `ComposeGoAdapter` (using compose-go library)
    - `YAMLFileReader` (outbound)
-   - `JSONSchemaValidator` (outbound)
+   - `Validator` (outbound)
 
 **Standalone Testing**:
 ```bash
@@ -445,12 +535,11 @@ go test ./pkg/engine/parser/... -v
 ```
 
 **Test Scenarios**:
-- Parse valid docker-compose.yaml
-- Parse banyan.yaml extensions
+- Parse valid banyan.yml
 - Handle invalid YAML syntax
-- Handle missing required fields
-- Merge multiple compose files
-- Variable substitution
+- Handle missing required fields (image)
+- Validate replicas value
+- Environment variable substitution
 
 **Integration Point**: Output feeds into Orchestrator deployment workflow
 
@@ -753,7 +842,7 @@ go test ./pkg/engine/grpc/... -v
 
 2. **Simple Deployment**
    ```
-   User submits compose file → Engine parses → Selects agent →
+   User submits banyan.yml → Engine parses → Selects agent →
    Dispatches container task → Agent creates container →
    Reports status → Engine updates state
    ```
@@ -864,12 +953,10 @@ Test fixtures location: `testdata/`
 
 ```
 testdata/
-├── compose/
-│   ├── valid-simple.yaml
-│   ├── valid-complex.yaml
-│   └── invalid-syntax.yaml
 ├── banyan/
-│   └── extensions.yaml
+│   ├── valid-simple.yml
+│   ├── valid-complex.yml
+│   └── invalid-syntax.yml
 └── fixtures/
     └── agent_state.json
 ```
@@ -895,9 +982,9 @@ testdata/
 - [ ] End-to-end agent integration test passes
 
 ### Milestone 3: Engine Foundation
-**Components**: Compose Parser, Agent Registry, Plugin Manager
+**Components**: Banyan Parser, Agent Registry, Plugin Manager
 **Validation**:
-- [ ] Compose Parser handles standard docker-compose files
+- [ ] Banyan Parser handles banyan.yml files
 - [ ] Agent Registry tracks agent lifecycle
 - [ ] Plugin Manager executes webhook plugins
 - [ ] All unit tests pass
@@ -913,7 +1000,7 @@ testdata/
 ### Milestone 5: System Integration
 **Validation**:
 - [ ] Engine can register and track agents
-- [ ] Full deployment workflow from compose file to running containers
+- [ ] Full deployment workflow from banyan.yml to running containers
 - [ ] Health check failures trigger container restart
 - [ ] State reconciliation restores desired state
 - [ ] All integration tests pass
@@ -937,7 +1024,7 @@ testdata/
 | Security Executor | `pkg/agent/security/` | [security-executor.md](agent/security-executor.md) | None |
 | Health Monitor | `pkg/agent/health/` | [health-monitor.md](agent/health-monitor.md) | Container Runtime |
 | Task Executor | `pkg/agent/executor/` | [task-executor.md](agent/task-executor.md) | All Agent components |
-| Compose Parser | `pkg/engine/parser/` | [compose-parser.md](engine/compose-parser.md) | None |
+| Banyan Parser | `pkg/engine/parser/` | [banyan-parser.md](engine/banyan-parser.md) | None |
 | Agent Registry | `pkg/engine/registry/` | [agent-registry.md](engine/agent-registry.md) | None |
 | Plugin Manager | `pkg/engine/plugin/` | [plugin-manager.md](engine/plugin-manager.md) | None |
 | VPC Coordinator | `pkg/engine/vpc/` | [vpc-coordinator.md](engine/vpc-coordinator.md) | Agent Registry |

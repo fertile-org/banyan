@@ -1,42 +1,153 @@
 # Engine and Agent Architecture Design
 
-**Date**: 2025-12-22
-**Git Commit**: 18d1f2e
-**Branch**: feat/vpc-implementation
-**Status**: Proposal
+**Date**: 2025-12-31
+**Status**: Updated for banyan.yml approach
+**Implementation**: Phase 3 complete (Agent Registry, Plugin Manager implemented)
 
 ## 1. Executive Summary
 
-This document proposes the detailed architecture design for Banyan's **Engine** (central orchestrator) and **Agent** (server-side runtime) modules. The design follows patterns established in the VPC module and integrates with the two-plugin architecture.
+This document describes the architecture for Banyan's **Engine** (central orchestrator) and **Agent** (server-side runtime) modules.
+
+### Project Philosophy
+
+**"Docker Compose that scales"** - Banyan is for startups and small teams who:
+- Know docker-compose from local development
+- Don't have dedicated DevOps teams
+- Don't want to learn Kubernetes
+- Just want their containers to run on multiple servers
 
 ### Key Design Principles
+- **Simple configuration**: `banyan.yml` uses docker-compose syntax with `replicas` for scaling
+- **Implicit networking**: Services talk to each other by name (DNS-based discovery)
+- **Plugin extensibility**: Advanced features (LB, auto-scaling, backup) via plugins
 - **Interface-driven**: All components communicate via well-defined interfaces
 - **Manager pattern**: Each concern has a dedicated manager with clear responsibilities
-- **Dependency injection**: Components receive their dependencies, enabling testability
-- **Storage abstraction**: State management through pluggable storage backends
-- **Plugin extensibility**: Both lifecycle (engine-level) and service (agent-level) plugins
 
-## 2. System Overview
+## 2. Configuration: banyan.yml
 
-### 2.1 Control Plane vs Data Plane
+### 2.1 Core Configuration (MVP-1)
 
-The architecture follows a clear separation between **control plane** (Engine) and **data plane** (Agent):
+```yaml
+# banyan.yml - Simple, familiar syntax
+services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - api
+
+  api:
+    image: ghcr.io/mycompany/api:latest
+    replicas: 3  # ← The only new concept
+    environment:
+      - DATABASE_URL=postgres://db:5432/app
+    healthcheck:
+      test: curl -f http://localhost:3000/health
+      interval: 30s
+    depends_on:
+      - db
+
+  worker:
+    image: ghcr.io/mycompany/worker:latest
+    replicas: 2
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - redis
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+
+volumes:
+  db-data:
+```
+
+### 2.2 With Plugins (MVP-2+)
+
+```yaml
+services:
+  api:
+    image: ghcr.io/mycompany/api:latest
+    replicas: 3
+    healthcheck:
+      test: curl -f http://localhost:3000/health
+    plugins:
+      - name: load_balancer
+        config:
+          port: 443
+          target_port: 3000
+          ssl:
+            auto: true  # Let's Encrypt
+
+  db:
+    image: postgres:15
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    plugins:
+      - name: database_backup
+        config:
+          schedule: "0 2 * * *"
+          retention: 7d
+          destination: s3://my-bucket/backups
+
+volumes:
+  db-data:
+```
+
+### 2.3 Supported Fields (MVP-1)
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `image` | string | Yes | - | Container image |
+| `replicas` | int | No | 1 | Number of instances |
+| `ports` | list | No | - | Port mappings "host:container" |
+| `environment` | list/map | No | - | Environment variables |
+| `volumes` | list | No | - | Volume mounts |
+| `depends_on` | list | No | - | Service dependencies |
+| `healthcheck.test` | string | No | - | Health check command |
+| `healthcheck.interval` | duration | No | 30s | Check interval |
+| `command` | string/list | No | - | Override command |
+| `restart` | string | No | unless-stopped | Restart policy |
+
+### 2.4 NOT Supported (By Design)
+
+| Feature | Reason |
+|---------|--------|
+| `build` | Use pre-built images |
+| `networks` | Auto-networking, all services can reach each other |
+| `deploy.resources` | Sensible defaults (can add later) |
+| `deploy.placement` | Banyan distributes automatically |
+| `secrets/configs` | Use environment variables |
+
+## 3. System Architecture
+
+### 3.1 Control Plane vs Data Plane
 
 | Concern | Engine (Control Plane) | Agent (Data Plane) |
 |---------|------------------------|-------------------|
-| Network | NetworkManager, IPAMManager - coordinates topology, allocates IPs/subnets | NetworkNode - executes CNI operations, configures interfaces |
-| Security | SecurityManager - defines and manages security rules | SecurityExecutor - applies iptables rules locally |
-| DNS | DNSManager - manages DNS records centrally | Reports service IPs for registration |
-| Containers | Orchestrates deployments across agents | ContainerRuntime - runs containers locally |
+| Configuration | Parses banyan.yml | Receives service specs |
+| Networking | Coordinates topology, manages DNS | Executes CNI, configures interfaces |
+| Security | Manages security rules | Applies iptables rules locally |
+| Containers | Orchestrates deployments | Runs containers locally |
+| State | Tracks desired vs actual | Reports actual state |
 
-### 2.2 Architecture Diagram
+### 3.2 Architecture Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                              CLI (User Machine)                              │
-│  ├─ compose.yaml parser                                                      │
-│  ├─ banyan.yaml parser                                                       │
-│  └─ command router → gRPC client                                             │
+│  └─ banyan.yml parser → command router → gRPC client                         │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │ gRPC
                                     ▼
@@ -44,13 +155,13 @@ The architecture follows a clear separation between **control plane** (Engine) a
 │                    ENGINE (Control Plane - Orchestrator Server)              │
 │                                                                              │
 │  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              │
-│  │ Deployment      │  │ State           │  │ Plugin          │              │
-│  │ Orchestrator    │  │ Manager         │  │ Manager         │              │
+│  │ Banyan Parser   │  │ Deployment      │  │ Plugin          │              │
+│  │ (banyan.yml)    │  │ Orchestrator    │  │ Manager         │              │
 │  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘              │
 │           │                    │                    │                        │
 │  ┌────────┴────────────────────┴────────────────────┴────────┐              │
-│  │                    Lifecycle Hooks (Type 2 Plugins)       │              │
-│  │   Validate → Plan → Deploy → Verify → Destroy             │              │
+│  │                    Service Plugins (per-service)          │              │
+│  │   load_balancer │ database_backup │ auto_scaler           │              │
 │  └───────────────────────────────────────────────────────────┘              │
 │                                                                              │
 │  ┌─────────────────────────────────────────────────────────────────────┐    │
@@ -62,8 +173,8 @@ The architecture follows a clear separation between **control plane** (Engine) a
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
 │  ┌────────────────┐  ┌─────────────────┐  ┌─────────────────┐               │
-│  │ Agent          │  │ Service         │  │ Network         │               │
-│  │ Registry       │  │ Discovery       │  │ Topology        │               │
+│  │ Agent          │  │ State           │  │ Service         │               │
+│  │ Registry       │  │ Manager         │  │ Discovery       │               │
 │  └────────────────┘  └─────────────────┘  └─────────────────┘               │
 └─────────────────────────────────────────────────────────────────────────────┘
             │ gRPC (bidirectional streaming)
@@ -77,941 +188,414 @@ The architecture follows a clear separation between **control plane** (Engine) a
 │  └─────────────────┘  └─────────────────┘  └─────────────────┘              │
 │                                                                              │
 │  ┌─────────────────┐  ┌─────────────────┐                                   │
-│  │ Security        │  │ Status          │  ← Executes commands from Engine  │
-│  │ Executor        │  │ Reporter        │  ← Reports state back to Engine   │
-│  └─────────────────┘  └─────────────────┘                                   │
-│           │                    │                                             │
-│  ┌────────┴────────────────────┴────────────────────────────┐               │
-│  │                Service Plugins (Type 1 - Sidecars)       │               │
-│  │   Load Balancer │ Monitoring Agent │ Backup │ etc.       │               │
-│  └──────────────────────────────────────────────────────────┘               │
-│           │                                                                  │
-│  ┌────────┴────────┐  ┌─────────────────┐                                   │
-│  │ Log             │  │ Metrics         │                                   │
-│  │ Collector       │  │ Collector       │                                   │
+│  │ Security        │  │ Task            │  ← Executes commands from Engine  │
+│  │ Executor        │  │ Executor        │  ← Reports state back to Engine   │
 │  └─────────────────┘  └─────────────────┘                                   │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## 3. Engine Architecture
-
-### 3.1 Directory Structure
-
-```
-cmd/engine/
-├── main.go                    # Entry point, wire dependencies
-└── config.go                  # Configuration loading
-
-pkg/engine/
-├── engine.go                  # Engine interface implementation
-├── types.go                   # Engine-specific types
-├── orchestrator/
-│   ├── orchestrator.go        # Deployment orchestrator
-│   ├── scheduler.go           # Deployment scheduling logic
-│   └── rollback.go            # Rollback strategies
-├── state/
-│   ├── manager.go             # State manager interface & impl
-│   ├── deployment.go          # Deployment state tracking
-│   └── reconciler.go          # State reconciliation
-├── registry/
-│   ├── agent.go               # Agent registry
-│   └── heartbeat.go           # Agent heartbeat handling
-├── plugin/
-│   ├── manager.go             # Plugin lifecycle manager
-│   ├── registry.go            # Plugin registration
-│   ├── grpc_host.go           # gRPC plugin host
-│   └── hooks.go               # Lifecycle hook definitions
-├── vpc/                       # VPC Control Plane (integrates with pkg/vpc)
-│   ├── coordinator.go         # Cross-agent network coordination
-│   ├── topology.go            # Network topology management
-│   └── bridge.go              # Bridge to pkg/vpc managers
-├── discovery/
-│   └── service.go             # Service discovery coordination
-└── api/
-    ├── grpc/
-    │   ├── server.go          # gRPC server
-    │   └── handlers.go        # Request handlers
-    └── proto/
-        └── engine.proto       # Protocol definitions
-
-# Note: Engine uses existing pkg/vpc managers (NetworkManager, IPAMManager,
-# SecurityManager, DNSManager) for control plane operations
-```
-
-### 3.2 Core Interfaces
-
-```go
-// pkg/engine/engine.go
-
-package engine
-
-import (
-    "context"
-    "github.com/fertile-org/banyan/pkg/interfaces"
-)
-
-// Engine is the main orchestrator interface
-type Engine interface {
-    // Deployment operations
-    Deploy(ctx context.Context, req *DeploymentRequest) (*DeploymentResult, error)
-    Rollback(ctx context.Context, deploymentID string) error
-    Cancel(ctx context.Context, deploymentID string) error
-
-    // Status and monitoring
-    GetDeploymentStatus(ctx context.Context, deploymentID string) (*DeploymentStatus, error)
-    ListDeployments(ctx context.Context, filter *DeploymentFilter) ([]*Deployment, error)
-
-    // Agent management
-    RegisterAgent(ctx context.Context, agent *AgentInfo) error
-    DeregisterAgent(ctx context.Context, agentID string) error
-    GetAgent(ctx context.Context, agentID string) (*AgentInfo, error)
-    ListAgents(ctx context.Context) ([]*AgentInfo, error)
-
-    // Plugin management (Type 2 - Lifecycle plugins)
-    RegisterPlugin(ctx context.Context, plugin *PluginInfo) error
-    UnregisterPlugin(ctx context.Context, pluginID string) error
-    ListPlugins(ctx context.Context) ([]*PluginInfo, error)
-
-    // Lifecycle
-    Start(ctx context.Context) error
-    Stop(ctx context.Context) error
-    HealthCheck(ctx context.Context) (*HealthStatus, error)
-}
-```
-
-### 3.3 Orchestrator Component
-
-```go
-// pkg/engine/orchestrator/orchestrator.go
-
-package orchestrator
-
-import "context"
-
-// Orchestrator manages deployment workflows
-type Orchestrator interface {
-    // CreateDeployment creates a new deployment workflow
-    CreateDeployment(ctx context.Context, req *DeploymentRequest) (*Deployment, error)
-
-    // ExecuteDeployment runs the deployment pipeline
-    // Pipeline: Validate → Plan → Deploy → Verify
-    ExecuteDeployment(ctx context.Context, deploymentID string) error
-
-    // RollbackDeployment reverts to previous state
-    RollbackDeployment(ctx context.Context, deploymentID string, strategy RollbackStrategy) error
-
-    // GetDeploymentPlan returns the planned actions without executing
-    GetDeploymentPlan(ctx context.Context, req *DeploymentRequest) (*DeploymentPlan, error)
-}
-
-// Scheduler determines deployment order and parallelism
-type Scheduler interface {
-    // Schedule creates an execution plan for services
-    Schedule(ctx context.Context, services []*Service, deps *DependencyGraph) (*ExecutionPlan, error)
-
-    // ValidateDependencies checks for circular dependencies
-    ValidateDependencies(ctx context.Context, deps *DependencyGraph) error
-}
-```
-
-### 3.4 State Management
-
-```go
-// pkg/engine/state/manager.go
-
-package state
-
-import "context"
-
-// StateManager handles deployment and agent state
-type StateManager interface {
-    // Deployment state
-    SaveDeployment(ctx context.Context, deployment *Deployment) error
-    GetDeployment(ctx context.Context, id string) (*Deployment, error)
-    UpdateDeploymentStatus(ctx context.Context, id string, status DeploymentState) error
-    ListDeployments(ctx context.Context, filter *Filter) ([]*Deployment, error)
-
-    // Agent state
-    SaveAgentState(ctx context.Context, agentID string, state *AgentState) error
-    GetAgentState(ctx context.Context, agentID string) (*AgentState, error)
-
-    // Service state (desired vs actual)
-    SaveDesiredState(ctx context.Context, deploymentID string, state *DesiredState) error
-    GetDesiredState(ctx context.Context, deploymentID string) (*DesiredState, error)
-    SaveActualState(ctx context.Context, deploymentID string, state *ActualState) error
-    GetActualState(ctx context.Context, deploymentID string) (*ActualState, error)
-
-    // Reconciliation
-    GetStateDrift(ctx context.Context, deploymentID string) (*StateDrift, error)
-}
-
-// Reconciler continuously reconciles desired vs actual state
-type Reconciler interface {
-    // Start begins the reconciliation loop
-    Start(ctx context.Context) error
-
-    // Stop halts reconciliation
-    Stop(ctx context.Context) error
-
-    // TriggerReconcile forces immediate reconciliation
-    TriggerReconcile(ctx context.Context, deploymentID string) error
-}
-```
-
-### 3.5 Agent Registry
-
-```go
-// pkg/engine/registry/agent.go
-
-package registry
-
-import (
-    "context"
-    "time"
-)
-
-// AgentRegistry manages agent registrations
-type AgentRegistry interface {
-    // Registration
-    Register(ctx context.Context, info *AgentInfo) error
-    Deregister(ctx context.Context, agentID string) error
-
-    // Queries
-    Get(ctx context.Context, agentID string) (*AgentInfo, error)
-    List(ctx context.Context, filter *AgentFilter) ([]*AgentInfo, error)
-    GetHealthy(ctx context.Context) ([]*AgentInfo, error)
-
-    // Heartbeat
-    RecordHeartbeat(ctx context.Context, agentID string, status *AgentHealth) error
-    GetLastHeartbeat(ctx context.Context, agentID string) (time.Time, error)
-
-    // Selection (for deployment targeting)
-    SelectAgents(ctx context.Context, selector *AgentSelector) ([]*AgentInfo, error)
-}
-
-// AgentInfo contains agent metadata
-type AgentInfo struct {
-    ID          string            `json:"id"`
-    Hostname    string            `json:"hostname"`
-    Address     string            `json:"address"`     // gRPC address
-    Labels      map[string]string `json:"labels"`      // For targeting
-    Capacity    *AgentCapacity    `json:"capacity"`    // Resources available
-    Version     string            `json:"version"`     // Agent version
-    Status      AgentStatus       `json:"status"`      // online, offline, draining
-    RegisteredAt time.Time        `json:"registered_at"`
-    LastSeen    time.Time         `json:"last_seen"`
-}
-```
-
-### 3.6 Lifecycle Plugin System (Type 2)
-
-```go
-// pkg/engine/plugin/hooks.go
-
-package plugin
-
-import "context"
-
-// LifecycleHook defines when a plugin is invoked
-type LifecycleHook string
-
-const (
-    HookValidate LifecycleHook = "validate"  // Before deployment starts
-    HookPlan     LifecycleHook = "plan"      // After planning, before execution
-    HookDeploy   LifecycleHook = "deploy"    // During deployment to each agent
-    HookVerify   LifecycleHook = "verify"    // After deployment, before complete
-    HookDestroy  LifecycleHook = "destroy"   // During teardown
-)
-
-// PluginManager manages lifecycle plugins
-type PluginManager interface {
-    // Plugin registration
-    RegisterPlugin(ctx context.Context, plugin *PluginInfo) error
-    UnregisterPlugin(ctx context.Context, pluginID string) error
-    ListPlugins(ctx context.Context) ([]*PluginInfo, error)
-
-    // Plugin discovery
-    DiscoverPlugins(ctx context.Context, path string) ([]*PluginInfo, error)
-
-    // Hook execution
-    ExecuteHook(ctx context.Context, hook LifecycleHook, data *HookData) (*HookResult, error)
-
-    // Plugin lifecycle
-    StartPlugin(ctx context.Context, pluginID string) error
-    StopPlugin(ctx context.Context, pluginID string) error
-}
-
-// PluginInfo describes a lifecycle plugin
-type PluginInfo struct {
-    ID          string          `json:"id"`
-    Name        string          `json:"name"`
-    Version     string          `json:"version"`
-    Hooks       []LifecycleHook `json:"hooks"`        // Which hooks to register for
-    GRPCAddress string          `json:"grpc_address"` // Plugin's gRPC endpoint
-    Config      map[string]any  `json:"config"`
-}
-
-// HookData is passed to plugins during hook execution
-type HookData struct {
-    DeploymentID string         `json:"deployment_id"`
-    Hook         LifecycleHook  `json:"hook"`
-    Services     []*ServiceSpec `json:"services"`
-    Context      map[string]any `json:"context"` // Hook-specific context
-}
-```
-
-### 3.7 gRPC API
-
-```protobuf
-// pkg/engine/api/proto/engine.proto
-
-syntax = "proto3";
-package banyan.engine.v1;
-
-service EngineService {
-    // Deployment operations
-    rpc Deploy(DeployRequest) returns (DeployResponse);
-    rpc GetDeploymentStatus(GetStatusRequest) returns (DeploymentStatus);
-    rpc CancelDeployment(CancelRequest) returns (CancelResponse);
-    rpc RollbackDeployment(RollbackRequest) returns (RollbackResponse);
-
-    // Agent operations (called by agents)
-    rpc RegisterAgent(RegisterAgentRequest) returns (RegisterAgentResponse);
-    rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
-    rpc ReportStatus(StatusReport) returns (StatusAck);
-
-    // Watch for deployment tasks (agent pulls work)
-    rpc WatchTasks(WatchTasksRequest) returns (stream DeploymentTask);
-}
-
-message DeployRequest {
-    string deployment_id = 1;
-    string compose_file = 2;    // docker-compose.yaml content
-    string banyan_config = 3;   // banyan.yaml content
-    repeated string targets = 4; // Agent selectors
-    map<string, string> variables = 5;
-}
-
-message DeploymentTask {
-    string task_id = 1;
-    string deployment_id = 2;
-    TaskType type = 3;
-    bytes payload = 4;  // Task-specific payload
-}
-
-enum TaskType {
-    TASK_UNKNOWN = 0;
-    TASK_DEPLOY_SERVICE = 1;
-    TASK_STOP_SERVICE = 2;
-    TASK_UPDATE_NETWORK = 3;
-    TASK_HEALTH_CHECK = 4;
-}
-```
-
-## 4. Agent Architecture
+## 4. Engine Components
 
 ### 4.1 Directory Structure
 
 ```
-cmd/agent/
-├── main.go                    # Entry point
-└── config.go                  # Configuration
-
-pkg/agent/
-├── agent.go                   # Agent interface implementation
-├── types.go                   # Agent-specific types
-├── runtime/
-│   ├── docker.go              # Docker runtime implementation
-│   ├── containerd.go          # containerd runtime (future)
-│   └── interface.go           # Container runtime interface
-├── network/
-│   ├── node.go                # NetworkNode - executes CNI operations locally
-│   └── cni_executor.go        # CNI plugin execution (uses pkg/vpc/cni)
-├── security/
-│   └── executor.go            # SecurityExecutor - applies iptables locally
-├── status/
-│   └── reporter.go            # Reports local state to Engine
-├── health/
-│   ├── monitor.go             # Health monitoring
-│   ├── checker.go             # Health check execution
-│   └── reporter.go            # Health reporting to engine
-├── plugin/
-│   ├── manager.go             # Service plugin manager (Type 1)
-│   ├── sidecar.go             # Sidecar lifecycle management
-│   └── registry.go            # Plugin registration
-├── collector/
-│   ├── logs.go                # Log collection
-│   └── metrics.go             # Metrics collection
-├── executor/
-│   ├── executor.go            # Task executor
-│   └── task_handlers.go       # Individual task handlers
-└── api/
-    ├── grpc/
-    │   ├── client.go          # gRPC client to engine
-    │   └── handlers.go        # Local API handlers
-    └── proto/
-        └── agent.proto
-
-# Note: Agent is DATA PLANE only - it executes operations commanded by Engine.
-# It does NOT manage network state - it receives instructions and executes them.
+pkg/engine/
+├── engine.go                  # Main Engine implementation
+├── types.go                   # Shared types
+├── parser/                    # Banyan Parser (Phase 3.1)
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+├── registry/                  # Agent Registry (Phase 3.2) ✅ IMPLEMENTED
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+├── plugin/                    # Plugin Manager (Phase 3.3) ✅ IMPLEMENTED
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+├── state/                     # State Manager (Phase 3.5)
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+├── orchestrator/              # Deployment Orchestrator (Phase 3.6)
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+└── vpc/                       # VPC Coordinator (Phase 3.4)
+    └── coordinator.go
 ```
 
-### 4.2 Core Interfaces
+### 4.2 Agent Registry (Implemented)
+
+The Agent Registry tracks all agents in the cluster and provides agent selection for deployments.
 
 ```go
-// pkg/agent/agent.go
-
-package agent
-
-import "context"
-
-// Agent is the main agent interface
-type Agent interface {
-    // Lifecycle
-    Start(ctx context.Context) error
-    Stop(ctx context.Context) error
-
-    // Engine connection
-    ConnectToEngine(ctx context.Context, engineAddr string) error
-    Disconnect(ctx context.Context) error
-
-    // Task execution
-    ExecuteTask(ctx context.Context, task *Task) (*TaskResult, error)
-
-    // Service management
-    DeployService(ctx context.Context, spec *ServiceSpec) error
-    StopService(ctx context.Context, serviceName string) error
-    GetServiceStatus(ctx context.Context, serviceName string) (*ServiceStatus, error)
-    ListServices(ctx context.Context) ([]*ServiceStatus, error)
-
-    // Health
-    HealthCheck(ctx context.Context) (*HealthStatus, error)
-
-    // Plugin management (Type 1 - Service plugins)
-    DeploySidecar(ctx context.Context, serviceName string, plugin *SidecarSpec) error
-    StopSidecar(ctx context.Context, serviceName string, pluginName string) error
+// pkg/engine/registry/ports/inbound/service.go
+type RegistryService interface {
+    RegisterAgent(ctx context.Context, req *domain.RegisterAgentRequest) (*domain.Agent, error)
+    DeregisterAgent(ctx context.Context, agentID domain.AgentID) error
+    ProcessHeartbeat(ctx context.Context, agentID domain.AgentID, status *domain.HeartbeatStatus) error
+    GetAgent(ctx context.Context, agentID domain.AgentID) (*domain.Agent, error)
+    ListAgents(ctx context.Context, filter domain.AgentFilter) ([]domain.Agent, error)
+    SelectAgents(ctx context.Context, criteria domain.SelectionCriteria, strategy string) ([]domain.Agent, error)
+    DrainAgent(ctx context.Context, agentID domain.AgentID) error
+    ActivateAgent(ctx context.Context, agentID domain.AgentID) error
 }
 ```
 
-### 4.3 Container Runtime
+**Selection Strategies:**
+- `round_robin` - Distribute evenly across agents
+- `least_loaded` - Prefer agents with most available resources
+- `spread` - Maximize distribution across hosts
+- `bin_pack` - Minimize number of hosts used
+
+### 4.3 Plugin Manager (Implemented)
+
+The Plugin Manager handles lifecycle hooks and plugin execution.
 
 ```go
-// pkg/agent/runtime/interface.go
+// pkg/engine/plugin/ports/inbound/service.go
+type PluginService interface {
+    RegisterPlugin(ctx context.Context, plugin *domain.Plugin) error
+    UnregisterPlugin(ctx context.Context, name string) error
+    GetPlugin(ctx context.Context, name string) (*domain.Plugin, error)
+    ListPlugins(ctx context.Context) ([]domain.Plugin, error)
+    ListPluginsByHook(ctx context.Context, hook domain.HookPoint) ([]domain.Plugin, error)
+    ExecuteHook(ctx context.Context, hook domain.HookPoint, execCtx domain.ExecutionContext) (*domain.HookResults, error)
+    EnablePlugin(ctx context.Context, name string) error
+    DisablePlugin(ctx context.Context, name string) error
+    SetPriority(ctx context.Context, name string, priority int) error
+}
+```
 
-package runtime
+**Hook Points:**
+- `pre_deploy` - Before deployment starts
+- `post_deploy` - After successful deployment
+- `pre_destroy` - Before teardown
+- `post_destroy` - After teardown
+- `on_error` - When deployment fails
+- `health_check` - During health monitoring
 
-import (
-    "context"
-    "io"
-)
+**Plugin Types:**
+- `webhook` - HTTP webhooks (implemented)
+- `grpc` - gRPC plugins (future)
+- `script` - Shell scripts (future)
+- `builtin` - Built-in Go plugins (future)
 
-// ContainerRuntime abstracts container operations
+### 4.4 Banyan Parser (To Implement)
+
+Parses banyan.yml into internal service specifications.
+
+```go
+// pkg/engine/parser/ports/inbound/service.go
+type ParserService interface {
+    Parse(ctx context.Context, content []byte) (*domain.BanyanConfig, error)
+    ParseFile(ctx context.Context, path string) (*domain.BanyanConfig, error)
+    Validate(ctx context.Context, config *domain.BanyanConfig) error
+}
+```
+
+### 4.5 State Manager (To Implement)
+
+Tracks desired vs actual state for reconciliation.
+
+```go
+// pkg/engine/state/ports/inbound/service.go
+type StateService interface {
+    SaveDesiredState(ctx context.Context, deploymentID string, state *domain.DesiredState) error
+    GetDesiredState(ctx context.Context, deploymentID string) (*domain.DesiredState, error)
+    UpdateActualState(ctx context.Context, deploymentID string, state *domain.ActualState) error
+    GetActualState(ctx context.Context, deploymentID string) (*domain.ActualState, error)
+    GetStateDrift(ctx context.Context, deploymentID string) (*domain.StateDrift, error)
+    TriggerReconcile(ctx context.Context, deploymentID string) error
+}
+```
+
+### 4.6 Deployment Orchestrator (To Implement)
+
+Coordinates the full deployment workflow.
+
+```go
+// pkg/engine/orchestrator/ports/inbound/service.go
+type OrchestratorService interface {
+    CreateDeployment(ctx context.Context, config *domain.BanyanConfig) (*domain.Deployment, error)
+    ExecuteDeployment(ctx context.Context, deploymentID string) error
+    GetDeploymentStatus(ctx context.Context, deploymentID string) (*domain.DeploymentStatus, error)
+    RollbackDeployment(ctx context.Context, deploymentID string) error
+    CancelDeployment(ctx context.Context, deploymentID string) error
+}
+```
+
+## 5. Agent Components
+
+### 5.1 Directory Structure
+
+```
+pkg/agent/
+├── agent.go                   # Main Agent implementation
+├── container/                 # Container Runtime (Phase 2.1)
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+├── network/                   # Network Node (Phase 2.2)
+│   └── node.go
+├── security/                  # Security Executor (Phase 2.3)
+│   └── executor.go
+├── health/                    # Health Monitor (Phase 2.4)
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+├── executor/                  # Task Executor (Phase 2.5)
+│   ├── domain/
+│   ├── ports/
+│   ├── usecases/
+│   └── adapters/
+└── api/
+    └── grpc/
+```
+
+### 5.2 Container Runtime
+
+Manages container lifecycle via containerd.
+
+```go
 type ContainerRuntime interface {
-    // Container lifecycle
     Create(ctx context.Context, spec *ContainerSpec) (string, error)
     Start(ctx context.Context, containerID string) error
     Stop(ctx context.Context, containerID string, timeout int) error
     Remove(ctx context.Context, containerID string, force bool) error
-
-    // Container inspection
     Inspect(ctx context.Context, containerID string) (*ContainerInfo, error)
     List(ctx context.Context, filter *ContainerFilter) ([]*ContainerInfo, error)
-
-    // Logs and exec
-    Logs(ctx context.Context, containerID string, opts *LogOptions) (io.ReadCloser, error)
-    Exec(ctx context.Context, containerID string, cmd []string) (*ExecResult, error)
-
-    // Image management
     PullImage(ctx context.Context, image string) error
-    ImageExists(ctx context.Context, image string) (bool, error)
-
-    // Network
-    ConnectNetwork(ctx context.Context, containerID, networkID string) error
-    DisconnectNetwork(ctx context.Context, containerID, networkID string) error
-}
-
-// ContainerSpec defines a container to create
-type ContainerSpec struct {
-    Name        string            `json:"name"`
-    Image       string            `json:"image"`
-    Command     []string          `json:"command,omitempty"`
-    Env         map[string]string `json:"env,omitempty"`
-    Labels      map[string]string `json:"labels,omitempty"`
-    Ports       []PortMapping     `json:"ports,omitempty"`
-    Volumes     []VolumeMount     `json:"volumes,omitempty"`
-    NetworkMode string            `json:"network_mode,omitempty"`
-    Resources   *ResourceSpec     `json:"resources,omitempty"`
-    HealthCheck *HealthCheckSpec  `json:"health_check,omitempty"`
 }
 ```
 
-### 4.4 Network Node (Data Plane)
+### 5.3 Network Node
 
-The Agent's network component is a **NetworkNode** - it executes network operations locally but does NOT manage network state. All coordination and state management happens in the Engine's control plane.
+Executes network operations locally. Receives commands from Engine.
 
 ```go
-// pkg/agent/network/node.go
-
-package network
-
-import (
-    "context"
-    "net"
-)
-
-// NetworkNode executes network operations on the local host.
-// It receives commands from Engine and applies them locally.
-// It does NOT manage network state - that's the Engine's responsibility.
 type NetworkNode interface {
-    // Initialize prepares the local network stack
-    // Called once when agent starts, using config from Engine
     Initialize(ctx context.Context, config *NodeConfig) error
-
-    // AttachContainer connects a container to the network
-    // Engine provides the allocated IP; NetworkNode configures the interface
     AttachContainer(ctx context.Context, req *AttachRequest) (*AttachResult, error)
-
-    // DetachContainer removes a container from the network
     DetachContainer(ctx context.Context, containerID string, networkID string) error
-
-    // GetStatus reports local network state to Engine
     GetStatus(ctx context.Context) (*NodeStatus, error)
 }
-
-// AttachRequest contains Engine-provided network config for a container
-type AttachRequest struct {
-    ContainerID string `json:"container_id"`
-    NetworkID   string `json:"network_id"`
-    IP          net.IP `json:"ip"`      // Allocated by Engine's IPAMManager
-    Gateway     net.IP `json:"gateway"` // Provided by Engine
-    DNS         []net.IP `json:"dns"`   // Provided by Engine
-}
-
-// AttachResult confirms the attachment
-type AttachResult struct {
-    Success     bool   `json:"success"`
-    Interface   string `json:"interface"`   // e.g., "eth0"
-    MacAddress  string `json:"mac_address"`
-    Error       string `json:"error,omitempty"`
-}
-
-// NodeConfig is provided by Engine during initialization
-type NodeConfig struct {
-    HostID        string   `json:"host_id"`
-    NetworkID     string   `json:"network_id"`
-    Subnet        string   `json:"subnet"`        // This host's subnet (from Engine)
-    Gateway       net.IP   `json:"gateway"`
-    DNS           []net.IP `json:"dns"`
-    VxlanID       int      `json:"vxlan_id"`
-    CNIPluginPath string   `json:"cni_plugin_path"`
-}
-
-// NodeStatus reports local state to Engine for reconciliation
-type NodeStatus struct {
-    HostID           string            `json:"host_id"`
-    Containers       []ContainerNet    `json:"containers"`        // Active container networks
-    InterfaceStatus  string            `json:"interface_status"`  // up, down, error
-    LastError        string            `json:"last_error,omitempty"`
-}
 ```
 
-### 4.5 Security Executor (Data Plane)
+### 5.4 Health Monitor
+
+Tracks service health and reports to Engine.
 
 ```go
-// pkg/agent/security/executor.go
-
-package security
-
-import (
-    "context"
-
-    "github.com/fertile-org/banyan/pkg/vpc"
-)
-
-// SecurityExecutor applies security rules locally.
-// Rules are defined by Engine's SecurityManager; Executor just applies them.
-type SecurityExecutor interface {
-    // ApplyRules applies iptables rules received from Engine
-    ApplyRules(ctx context.Context, rules []*vpc.SecurityRule) error
-
-    // RemoveRules removes specific rules
-    RemoveRules(ctx context.Context, ruleIDs []string) error
-
-    // GetAppliedRules returns currently applied rules (for status reporting)
-    GetAppliedRules(ctx context.Context) ([]*AppliedRule, error)
-
-    // Flush removes all banyan-managed rules (used during cleanup)
-    Flush(ctx context.Context) error
-}
-
-// AppliedRule represents a rule that has been applied locally
-type AppliedRule struct {
-    RuleID    string `json:"rule_id"`
-    IPTables  string `json:"iptables"`  // The actual iptables rule
-    AppliedAt string `json:"applied_at"`
-}
-```
-
-### 4.6 Status Reporter
-
-```go
-// pkg/agent/status/reporter.go
-
-package status
-
-import (
-    "context"
-    "time"
-)
-
-// StatusReporter sends local state to Engine for reconciliation
-type StatusReporter interface {
-    // Start begins periodic status reporting
-    Start(ctx context.Context) error
-
-    // Stop halts reporting
-    Stop(ctx context.Context) error
-
-    // ReportNow sends an immediate status update
-    ReportNow(ctx context.Context) error
-
-    // SetReportInterval configures reporting frequency
-    SetReportInterval(interval time.Duration)
-}
-
-// AgentStatus is sent to Engine periodically
-type AgentStatus struct {
-    AgentID        string                 `json:"agent_id"`
-    Timestamp      time.Time              `json:"timestamp"`
-    NetworkStatus  *NetworkNodeStatus     `json:"network_status"`
-    SecurityStatus *SecurityStatus        `json:"security_status"`
-    Containers     []ContainerStatus      `json:"containers"`
-    Resources      *ResourceStatus        `json:"resources"`
-}
-```
-
-### 4.7 Health Monitoring
-
-```go
-// pkg/agent/health/monitor.go
-
-package health
-
-import (
-    "context"
-    "time"
-)
-
-// HealthMonitor tracks service health
 type HealthMonitor interface {
-    // Start/stop monitoring
     Start(ctx context.Context) error
     Stop(ctx context.Context) error
-
-    // Register services for monitoring
     RegisterService(ctx context.Context, spec *HealthSpec) error
     UnregisterService(ctx context.Context, serviceName string) error
-
-    // Manual checks
     CheckService(ctx context.Context, serviceName string) (*HealthResult, error)
-    CheckAll(ctx context.Context) ([]*HealthResult, error)
-
-    // Status
     GetServiceHealth(ctx context.Context, serviceName string) (*HealthStatus, error)
-    GetAgentHealth(ctx context.Context) (*AgentHealth, error)
 }
-
-// HealthSpec defines health check configuration
-type HealthSpec struct {
-    ServiceName string        `json:"service_name"`
-    Type        HealthType    `json:"type"`         // http, tcp, exec
-    Endpoint    string        `json:"endpoint"`     // URL, host:port, or command
-    Interval    time.Duration `json:"interval"`
-    Timeout     time.Duration `json:"timeout"`
-    Retries     int           `json:"retries"`
-}
-
-type HealthType string
-
-const (
-    HealthHTTP HealthType = "http"
-    HealthTCP  HealthType = "tcp"
-    HealthExec HealthType = "exec"
-)
 ```
 
-### 4.8 Service Plugin System (Type 1 - Sidecars)
+### 5.5 Task Executor
+
+Handles deployment tasks from Engine.
 
 ```go
-// pkg/agent/plugin/manager.go
-
-package plugin
-
-import "context"
-
-// SidecarManager manages service-level plugins
-type SidecarManager interface {
-    // Plugin lifecycle
-    Deploy(ctx context.Context, serviceName string, spec *SidecarSpec) error
-    Stop(ctx context.Context, serviceName string, pluginName string) error
-
-    // Status
-    GetStatus(ctx context.Context, serviceName string, pluginName string) (*SidecarStatus, error)
-    ListSidecars(ctx context.Context, serviceName string) ([]*SidecarStatus, error)
-
-    // Communication
-    SendToSidecar(ctx context.Context, serviceName, pluginName string, msg *Message) (*Response, error)
-}
-
-// SidecarSpec defines a sidecar plugin
-type SidecarSpec struct {
-    Name       string            `json:"name"`       // e.g., "application_load_balancer"
-    Image      string            `json:"image"`      // Container image
-    Parameters map[string]any    `json:"parameters"` // Plugin-specific config
-    Placement  PlacementStrategy `json:"placement"`  // with-service or standalone
-}
-
-// PlacementStrategy determines sidecar deployment
-type PlacementStrategy string
-
-const (
-    // PlacementWithService deploys sidecar on same host as service
-    PlacementWithService PlacementStrategy = "with-service"
-    // PlacementStandalone deploys sidecar on dedicated host (e.g., ALB)
-    PlacementStandalone PlacementStrategy = "standalone"
-)
-```
-
-### 4.9 Task Executor
-
-```go
-// pkg/agent/executor/executor.go
-
-package executor
-
-import "context"
-
-// TaskExecutor handles deployment tasks from engine
 type TaskExecutor interface {
-    // Task execution
     Execute(ctx context.Context, task *Task) (*TaskResult, error)
-
-    // Async execution
     ExecuteAsync(ctx context.Context, task *Task) (TaskHandle, error)
     GetTaskStatus(ctx context.Context, taskID string) (*TaskStatus, error)
     CancelTask(ctx context.Context, taskID string) error
-
-    // Task queue
-    QueueTask(ctx context.Context, task *Task) error
-    DrainQueue(ctx context.Context) error
 }
+```
 
-// Task represents work from the engine
-type Task struct {
-    ID           string                 `json:"id"`
-    DeploymentID string                 `json:"deployment_id"`
-    Type         TaskType               `json:"type"`
-    Payload      map[string]interface{} `json:"payload"`
-    Priority     int                    `json:"priority"`
-    Timeout      time.Duration          `json:"timeout"`
+## 6. Networking (Implicit)
+
+### 6.1 Service Discovery
+
+All services can reach each other by name. The VPC DNS handles resolution.
+
+```yaml
+# In banyan.yml
+services:
+  api:
+    environment:
+      - DATABASE_URL=postgres://db:5432/app  # "db" resolves via DNS
+```
+
+How it works:
+1. When `api` service starts, Engine registers it with DNS
+2. DNS returns IP(s) for service name lookups
+3. For replicated services (`replicas: 3`), DNS returns all replica IPs (round-robin)
+
+### 6.2 Network Flow
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Engine                                   │
+│  1. Parse banyan.yml                                             │
+│  2. Allocate IPs from IPAM                                       │
+│  3. Register DNS records                                         │
+│  4. Send network config to agents                                │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                         Agent                                    │
+│  5. Configure container network (CNI)                            │
+│  6. Apply security rules (iptables)                              │
+│  7. Container can reach other services by name                   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+## 7. Plugin System
+
+### 7.1 Per-Service Plugins
+
+Plugins are defined per-service in banyan.yml:
+
+```yaml
+services:
+  api:
+    plugins:
+      - name: load_balancer
+        config:
+          port: 443
+          ssl:
+            auto: true
+```
+
+### 7.2 Plugin Categories
+
+| Plugin | Purpose | MVP Phase |
+|--------|---------|-----------|
+| `load_balancer` | Expose service with LB + SSL | MVP-2 |
+| `auto_scaler` | Scale based on metrics | MVP-3 |
+| `database_backup` | Scheduled backups | MVP-2 |
+| `network_policy` | Explicit allow/deny rules | MVP-3 |
+
+### 7.3 Plugin Interface
+
+```go
+// Per-service plugin interface
+type ServicePlugin interface {
+    Name() string
+    Initialize(ctx context.Context, config map[string]any) error
+    OnServiceCreate(ctx context.Context, service *ServiceSpec) error
+    OnServiceUpdate(ctx context.Context, service *ServiceSpec) error
+    OnServiceDelete(ctx context.Context, serviceName string) error
+    HealthCheck(ctx context.Context) error
 }
-
-type TaskType string
-
-const (
-    TaskDeployService  TaskType = "deploy_service"
-    TaskStopService    TaskType = "stop_service"
-    TaskUpdateConfig   TaskType = "update_config"
-    TaskSetupNetwork   TaskType = "setup_network"
-    TaskApplyRules     TaskType = "apply_rules"
-    TaskHealthCheck    TaskType = "health_check"
-    TaskDeploySidecar  TaskType = "deploy_sidecar"
-)
 ```
 
-## 5. Communication Patterns
-
-### 5.1 Engine ↔ Agent Communication
-
-```
-┌─────────────┐                           ┌─────────────┐
-│   Engine    │                           │    Agent    │
-└──────┬──────┘                           └──────┬──────┘
-       │                                         │
-       │  Agent Registration (gRPC)              │
-       │◄────────────────────────────────────────│
-       │                                         │
-       │  Heartbeat Stream (bidirectional)       │
-       │◄───────────────────────────────────────►│
-       │                                         │
-       │  Task Assignment (server push)          │
-       │────────────────────────────────────────►│
-       │                                         │
-       │  Task Result (client report)            │
-       │◄────────────────────────────────────────│
-       │                                         │
-       │  Status Updates (streaming)             │
-       │◄────────────────────────────────────────│
-```
-
-### 5.2 Plugin Communication
-
-```
-Type 2 Plugins (Lifecycle - Engine Level):
-┌────────────┐     gRPC      ┌──────────────────┐
-│   Engine   │◄─────────────►│ Compliance Check │
-└────────────┘               └──────────────────┘
-                             ┌──────────────────┐
-                 ◄───────────►│  Cloud Provider  │
-                             └──────────────────┘
-
-Type 1 Plugins (Service - Agent Level):
-┌────────────┐    Container    ┌──────────────┐
-│  Service   │◄───Network────►│  ALB Sidecar │
-│ Container  │                └──────────────┘
-└────────────┘                ┌──────────────┐
-                              │ Metrics Agent│
-                              └──────────────┘
-```
-
-## 6. Deployment Flow
-
-### 6.1 Full Deployment Sequence
+## 8. Deployment Flow
 
 ```
 User                CLI                 Engine              Agent(s)
  │                   │                    │                    │
- │ banyan deploy     │                    │                    │
+ │ banyan up         │                    │                    │
  │──────────────────►│                    │                    │
- │                   │ Parse compose.yaml │                    │
- │                   │ Parse banyan.yaml  │                    │
- │                   │                    │                    │
- │                   │ Deploy Request     │                    │
+ │                   │ Parse banyan.yml   │                    │
  │                   │───────────────────►│                    │
  │                   │                    │                    │
- │                   │                    │ [VALIDATE Hook]    │
- │                   │                    │ ───► Plugins       │
+ │                   │                    │ Select Agents      │
+ │                   │                    │ (Agent Registry)   │
  │                   │                    │                    │
- │                   │                    │ [PLAN Hook]        │
- │                   │                    │ ───► Plugins       │
+ │                   │                    │ Execute Plugins    │
+ │                   │                    │ (pre_deploy hook)  │
  │                   │                    │                    │
- │                   │                    │ Schedule Tasks     │
+ │                   │                    │ Allocate IPs       │
+ │                   │                    │ (IPAM Manager)     │
+ │                   │                    │                    │
+ │                   │                    │ Register DNS       │
+ │                   │                    │ (DNS Manager)      │
+ │                   │                    │                    │
+ │                   │                    │ Dispatch Tasks     │
  │                   │                    │────────────────────►
  │                   │                    │                    │
- │                   │                    │ [DEPLOY Hook]      │
- │                   │                    │ ───► Plugins       │
- │                   │                    │                    │
- │                   │                    │              Setup Network
  │                   │                    │              Pull Images
+ │                   │                    │              Setup Network
  │                   │                    │              Start Containers
- │                   │                    │              Deploy Sidecars
+ │                   │                    │              Apply Security
  │                   │                    │                    │
  │                   │                    │◄────────────────────
  │                   │                    │ Task Results       │
  │                   │                    │                    │
- │                   │                    │ [VERIFY Hook]      │
- │                   │                    │ ───► Plugins       │
+ │                   │                    │ Execute Plugins    │
+ │                   │                    │ (post_deploy hook) │
  │                   │                    │                    │
  │                   │◄───────────────────│                    │
  │◄──────────────────│ Deployment Complete│                    │
 ```
 
-## 7. State Management
+## 9. Implementation Status
 
-### 7.1 Distributed State (via etcd)
+### Phase 1: Foundation ✅
+- [x] Shared domain models
+- [x] Logger and configuration
 
-```
-etcd Keys:
-├── /banyan/agents/{agent_id}           # Agent registration
-├── /banyan/agents/{agent_id}/health    # Agent health
-├── /banyan/deployments/{deploy_id}     # Deployment metadata
-├── /banyan/deployments/{deploy_id}/state  # Deployment state
-├── /banyan/services/{service_name}     # Service definitions
-├── /banyan/services/{service_name}/instances  # Running instances
-└── /banyan/networks/...                # VPC state (existing)
-```
+### Phase 2: Agent Data Plane (In Progress)
+- [ ] Container Runtime
+- [ ] Network Node
+- [ ] Security Executor
+- [ ] Health Monitor
+- [ ] Task Executor
 
-### 7.2 State Store Interface (Reusing VPC Pattern)
+### Phase 3: Engine Control Plane ✅
+- [ ] Banyan Parser (partial - uses compose-go)
+- [x] Agent Registry (complete with tests)
+- [x] Plugin Manager (complete with webhook runner)
+- [ ] VPC Coordinator
+- [ ] State Manager
+- [ ] Deployment Orchestrator
 
-```go
-// pkg/engine/storage/interface.go
+### Phase 4: Integration
+- [ ] Engine-Agent gRPC communication
+- [ ] Full deployment flow
+- [ ] Health monitoring
+- [ ] State reconciliation
 
-package storage
+### Future: MVP-2 Plugins
+- [ ] load_balancer plugin
+- [ ] database_backup plugin
+- [ ] SSL/TLS with Let's Encrypt
 
-import "context"
+### Future: MVP-3 Features
+- [ ] auto_scaler plugin
+- [ ] network_policy plugin
 
-// EngineStore extends StateStore with engine-specific operations
-type EngineStore interface {
-    storage.StateStore  // Reuse VPC storage interface
+## 10. Configuration
 
-    // Watch for changes (for reconciliation)
-    Watch(ctx context.Context, prefix string) (<-chan WatchEvent, error)
-
-    // Transactions
-    Transaction(ctx context.Context, ops []Operation) error
-
-    // Leases (for agent TTL)
-    CreateLease(ctx context.Context, ttl int64) (LeaseID, error)
-    KeepAlive(ctx context.Context, leaseID LeaseID) error
-}
-```
-
-## 8. Implementation Phases
-
-### Phase 1: Core Engine & Agent (Foundation)
-- [ ] Basic gRPC communication
-- [ ] Agent registration and heartbeat
-- [ ] Simple deployment flow (no plugins)
-- [ ] Docker runtime integration
-- [ ] State management with etcd
-
-### Phase 2: VPC Integration
-- [ ] Bridge agent network manager to pkg/vpc
-- [ ] Container network attachment
-- [ ] DNS registration on deploy
-- [ ] Security rules application
-
-### Phase 3: Plugin System
-- [ ] Lifecycle plugin framework (Type 2)
-- [ ] Service plugin framework (Type 1)
-- [ ] Plugin discovery and registration
-- [ ] Plugin SDK enhancements
-
-### Phase 4: Advanced Features
-- [ ] Multi-agent deployment scheduling
-- [ ] Rollback strategies
-- [ ] Health-based routing
-- [ ] Log and metrics collection
-
-## 9. Configuration
-
-### 9.1 Engine Configuration
+### 10.1 Engine Configuration
 
 ```yaml
 # /etc/banyan/engine.yaml
 engine:
   listen_addr: "0.0.0.0:7777"
-  grpc:
-    max_connections: 1000
-    keepalive_interval: 30s
 
 storage:
   type: "etcd"
   endpoints:
     - "localhost:2379"
 
-plugins:
-  discovery_path: "/opt/banyan/plugins"
-
 reconciliation:
   interval: 30s
 
 logging:
   level: "info"
-  format: "json"
 ```
 
-### 9.2 Agent Configuration
+### 10.2 Agent Configuration
 
 ```yaml
 # /etc/banyan/agent.yaml
@@ -1019,46 +603,21 @@ agent:
   id: "${HOSTNAME}"
   labels:
     region: "us-east-1"
-    type: "worker"
 
 engine:
   address: "engine.banyan.local:7777"
 
 runtime:
-  type: "docker"
-  socket: "/var/run/docker.sock"
-
-network:
-  etcd_endpoints:
-    - "localhost:2379"
+  type: "containerd"
+  socket: "/run/containerd/containerd.sock"
 
 health:
   check_interval: 10s
   report_interval: 30s
 ```
 
-## 10. Security Considerations
-
-1. **mTLS for gRPC**: All engine-agent communication uses mutual TLS
-2. **Agent authentication**: Agents authenticate with certificates or tokens
-3. **Plugin isolation**: Plugins run as separate processes with limited privileges
-4. **Secret management**: Integration with external secret stores (HashiCorp Vault, etc.)
-
-## 11. Open Questions
-
-1. **Plugin discovery**: How should lifecycle plugins be discovered and started?
-   - Option A: Engine starts plugins as subprocesses
-   - Option B: Plugins register with engine on startup (current design)
-
-2. **Multi-engine HA**: How to handle engine failover?
-   - Leader election via etcd
-   - State is already distributed
-
-3. **Agent updates**: How to update agents without disruption?
-   - Rolling updates with drain/cordon
-
 ---
 
-*Document Version: 1.0*
-*Author: Research Assistant*
-*Based on existing patterns from pkg/vpc module*
+*Document Version: 2.0*
+*Updated: 2025-12-31*
+*Architecture aligned with banyan.yml approach and MVP phases*

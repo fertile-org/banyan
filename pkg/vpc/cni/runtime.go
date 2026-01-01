@@ -52,11 +52,12 @@ func (r *Runtime) SetupPlugin(ctx context.Context, plugin string, config []byte)
 	// Write CNI config to file
 	configFile := fmt.Sprintf("%s/10-%s.conf", r.cniConfigPath, plugin)
 
-	if err := os.MkdirAll(r.cniConfigPath, 0755); err != nil {
+	if err := os.MkdirAll(r.cniConfigPath, 0o755); err != nil {
 		return fmt.Errorf("failed to create CNI config dir: %w", err)
 	}
 
-	if err := os.WriteFile(configFile, config, 0644); err != nil {
+	// CNI config files need to be readable by CNI plugins running as root
+	if err := os.WriteFile(configFile, config, 0o600); err != nil {
 		return fmt.Errorf("failed to write CNI config: %w", err)
 	}
 
@@ -107,7 +108,7 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 	// Use Lstat to check if bind mount or file exists (without following symlink)
 	if _, err := os.Lstat(netnsPath); os.IsNotExist(err) {
 		// Create /var/run/netns directory if needed
-		if err := os.MkdirAll("/var/run/netns", 0755); err != nil {
+		if err := os.MkdirAll("/var/run/netns", 0o755); err != nil {
 			return fmt.Errorf("failed to create netns directory: %w", err)
 		}
 
@@ -122,7 +123,7 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 
 	// Ensure CNI state directory exists (required by host-local IPAM plugin)
 	// This directory is used by CNI plugins to store IP allocation state
-	if err := os.MkdirAll("/var/lib/cni/networks", 0755); err != nil {
+	if err := os.MkdirAll("/var/lib/cni/networks", 0o755); err != nil {
 		return fmt.Errorf("failed to create CNI state directory: %w", err)
 	}
 
@@ -164,7 +165,7 @@ func (r *Runtime) AddToNetwork(ctx context.Context, containerID, networkID strin
 	targetNsOutput, _ := targetNsCmd.Output()
 	fmt.Fprintf(os.Stderr, "DEBUG: Current process netns inode: %s", string(selfNsOutput))
 	fmt.Fprintf(os.Stderr, "DEBUG: Target CNI_NETNS (%s) inode: %s", netnsPath, string(targetNsOutput))
-	if string(selfNsOutput) == string(targetNsOutput) {
+	if bytes.Equal(selfNsOutput, targetNsOutput) {
 		fmt.Fprintf(os.Stderr, "WARNING: Current netns and target netns have the SAME inode!\n")
 	}
 

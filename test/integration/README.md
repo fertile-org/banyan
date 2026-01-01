@@ -2,6 +2,35 @@
 
 Go-based integration test scripts for Banyan VPC components. These tests use real Docker containers and system resources to verify end-to-end functionality.
 
+## Docker-in-Docker (DinD) Based Testing
+
+Integration tests run inside a Docker container with containerd, Flannel, and all dependencies pre-installed. This approach (similar to Kubernetes "kind") provides:
+
+- **Isolated environment** - Tests don't affect host system
+- **Reproducible** - Same environment across all machines
+- **CI/CD ready** - No host dependencies required
+- **Full network stack** - containerd, CNI, iptables, network namespaces
+
+### Quick Start
+
+```bash
+# Build the Docker image (required on first run or after changes)
+make test-integration-build
+
+# Run all integration tests
+make test-integration
+
+# Run a specific test file
+make test-integration FILE=./test/integration/vpc/run_dns_integration.go
+make test-integration FILE=./test/integration/agent/run_task_executor_integration.go
+
+# List available tests
+make test-integration-list
+
+# Start shell for debugging
+make test-integration-shell
+```
+
 ## Structure
 
 ```
@@ -10,8 +39,24 @@ test/integration/
 │   ├── docker.go               # Docker container operations
 │   ├── network.go              # Network verification utilities
 │   └── printer.go              # Colored output formatting
+├── agent/                      # Agent-specific test scripts
+│   └── run_task_executor_integration.go  # Task Executor integration tests
+├── engine/                     # Engine-specific test scripts
+│   ├── run_orchestrator_integration.go      # Orchestrator workflow tests
+│   ├── run_state_manager_integration.go     # State management/drift tests
+│   ├── run_vpc_coordinator_integration.go   # VPC Coordinator tests
+│   └── run_engine_server_integration.go     # gRPC server lifecycle tests
 ├── vpc/                        # VPC-specific test scripts
-│   └── test_cni_docker_integration.go
+│   ├── run_cni_docker_integration.go   # CNI/containerd tests
+│   ├── run_dns_integration.go          # DNS service discovery tests
+│   ├── run_debug_integration.go        # Network debugging tests
+│   ├── run_security_integration.go     # Security/iptables tests
+│   └── run_multi_host_integration.go   # Multi-host VPC tests
+├── Dockerfile                  # DinD test container
+├── entrypoint.sh               # Test container entrypoint
+├── containerd-config.toml      # containerd configuration
+├── supervisord.conf            # Service manager config
+├── run-integration-tests.sh    # Main test runner script
 └── README.md                   # This file
 ```
 
@@ -31,28 +76,160 @@ We chose Go for integration tests because:
 
 ### Prerequisites
 
-- Docker installed and running
-- Flannel daemon running: `sudo vpc-cli cni setup-plugin flannel`
-- Root privileges for network operations
+- Docker installed and running (that's it!)
 
 ### Running Tests
 
-**From project root:**
+**Recommended: Using DinD Container (no host dependencies)**
 ```bash
-go run ./test/integration/vpc/test_cni_docker_integration.go
+# Build image first (or after any changes to test infrastructure)
+make test-integration-build
+
+# Run all tests
+make test-integration
+
+# Run a specific test file
+make test-integration FILE=./test/integration/vpc/run_dns_integration.go
+
+# List all available test files
+make test-integration-list
 ```
 
-**From test directory:**
+**Alternative: Running directly on host (requires containerd, flannel, etc.)**
 ```bash
-cd test/integration/vpc
-go run test_cni_docker_integration.go
+# Requires: containerd, nerdctl, flannel, iptables, root privileges
+sudo go run ./test/integration/vpc/run_cni_docker_integration.go
 ```
 
 ## Available Tests
 
+### Agent Tests (`test/integration/agent/`)
+
+#### `run_task_executor_integration.go`
+
+Tests the Agent Task Executor with real containerd.
+
+**What it tests:**
+1. Check containerd availability
+2. Create real service chain (ContainerdRuntime → ContainerUseCase → TaskExecutor)
+3. Test container.create task
+4. Verify container exists in containerd
+5. Test container.start task
+6. Verify container is running
+7. Test container.stop task
+8. Test container.remove task
+9. Verify container cleanup
+
+**Usage:**
+```bash
+make test-integration FILE=./test/integration/agent/run_task_executor_integration.go
+```
+
+### Engine Tests (`test/integration/engine/`)
+
+These tests verify the Engine components without requiring Docker or external resources.
+They use in-memory adapters for fast, isolated testing.
+
+#### `run_orchestrator_integration.go`
+
+Tests the full deployment workflow.
+
+**What it tests:**
+1. Creating deployment from banyan.yml
+2. Parsing services correctly
+3. Generating deployment plan (dry-run)
+4. Verifying dependency ordering
+5. Executing deployment
+6. Verifying deployment state
+7. Plugin hooks execution
+8. Task dispatching to agents
+9. Rollback functionality
+10. Listing deployments
+11. Circular dependency detection
+12. Deleting deployment
+
+**Usage:**
+```bash
+go run ./test/integration/engine/run_orchestrator_integration.go
+```
+
+#### `run_state_manager_integration.go`
+
+Tests state management and drift detection.
+
+**What it tests:**
+1. Setting desired state
+2. Retrieving desired state
+3. Setting actual state (no drift)
+4. Detecting replica mismatch drift
+5. Detecting unhealthy instance drift
+6. Detecting missing service drift
+7. Triggering reconciliation
+8. Verifying dispatched actions
+9. Generating drift report
+10. Detecting extra service drift
+11. Deleting desired state
+12. Managing multiple deployments
+
+**Usage:**
+```bash
+go run ./test/integration/engine/run_state_manager_integration.go
+```
+
+#### `run_vpc_coordinator_integration.go`
+
+Tests the VPC Coordinator for network management.
+
+**What it tests:**
+1. Provisioning VPC network
+2. Verifying subnets creation
+3. Allocating container networks
+4. Verifying unique IP assignment
+5. Creating security groups
+6. Applying network policies
+7. Registering DNS entries
+8. Resolving DNS entries
+9. Getting network status
+10. Getting container network
+11. Releasing container networks
+12. Unregistering DNS
+13. Deleting security policies
+14. Deleting security groups
+15. Deleting VPC network
+16. Verifying network cleanup
+17. Managing multiple VPCs
+
+**Usage:**
+```bash
+go run ./test/integration/engine/run_vpc_coordinator_integration.go
+```
+
+#### `run_engine_server_integration.go`
+
+Tests the Engine gRPC server lifecycle.
+
+**What it tests:**
+1. Creating server with default config
+2. Verifying service registration
+3. Starting server
+4. Testing gRPC connection
+5. Testing health check
+6. Testing port conflict detection
+7. Testing GetServices
+8. Testing GetGRPCServer
+9. Testing graceful shutdown
+10. Testing factory pattern
+11. Testing server without services
+12. Testing stop without start
+
+**Usage:**
+```bash
+go run ./test/integration/engine/run_engine_server_integration.go
+```
+
 ### VPC Tests (`test/integration/vpc/`)
 
-#### `test_cni_docker_integration.go`
+#### `run_cni_docker_integration.go`
 
 Tests CNI runtime integration with real Docker containers.
 
@@ -71,7 +248,25 @@ Tests CNI runtime integration with real Docker containers.
 
 **Usage:**
 ```bash
-go run ./test/integration/vpc/test_cni_docker_integration.go
+make test-integration FILE=./test/integration/vpc/run_cni_docker_integration.go
+```
+
+#### `run_dns_integration.go`
+
+Tests DNS service discovery functionality.
+
+**Usage:**
+```bash
+make test-integration FILE=./test/integration/vpc/run_dns_integration.go
+```
+
+#### `run_security_integration.go`
+
+Tests security/iptables rule management.
+
+**Usage:**
+```bash
+make test-integration FILE=./test/integration/vpc/run_security_integration.go
 ```
 
 ## Helper Packages
@@ -211,6 +406,12 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
    }
    ```
 
+6. **Name test files with `run_` prefix**
+   ```
+   run_my_feature_integration.go
+   ```
+   This allows the `all` command to auto-discover tests.
+
 ## Importing VPC Packages
 
 You can directly import and use VPC packages in tests:
@@ -243,7 +444,7 @@ Start Docker: `sudo systemctl start docker`
 Start Flannel: `sudo vpc-cli cni setup-plugin flannel`
 
 ### "Permission denied"
-Use `sudo` for network operations: `sudo go run ./test/integration/vpc/test_cni_docker_integration.go`
+Use `sudo` for network operations: `sudo go run ./test/integration/vpc/run_cni_docker_integration.go`
 
 ### "Cannot find package"
 Run from project root or ensure Go modules are initialized:
@@ -252,11 +453,13 @@ go mod download
 go mod tidy
 ```
 
-## Future Tests
+## Adding New Tests
 
-Planned integration tests:
-- Multi-container networking tests
-- Cross-host communication tests (requires multiple hosts)
-- Security group enforcement tests
-- DNS service discovery tests
-- Performance benchmarking tests
+To add a new integration test:
+
+1. Create a new file with `run_` prefix: `test/integration/<category>/run_my_test_integration.go`
+2. Follow the template above
+3. Rebuild the Docker image: `make test-integration-build`
+4. Run with: `make test-integration FILE=./test/integration/<category>/run_my_test_integration.go`
+
+The test will automatically be included when running `make test-integration`.

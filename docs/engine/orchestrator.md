@@ -1,15 +1,40 @@
 # Orchestrator Component Design
 
+> **Implementation Status**: Phase 3 - In Progress
+> **Dependencies**: Banyan Parser ✅, Agent Registry ✅, Plugin Manager ✅
+
 ## Overview
 
-The Orchestrator manages deployment workflows through a pipeline pattern. It coordinates the entire deployment lifecycle from validation to verification.
+The Orchestrator manages deployment workflows through a pipeline pattern. It coordinates the entire deployment lifecycle from validation to verification, taking `banyan.yml` configuration and deploying services across the cluster.
+
+## Philosophy
+
+**"Docker Compose that scales"** - The Orchestrator takes a familiar banyan.yml file and handles the complexity of distributed deployment automatically:
+
+```yaml
+# User provides this simple file
+services:
+  api:
+    image: myapp:latest
+    replicas: 3
+    healthcheck:
+      test: curl -f http://localhost:3000/health
+
+# Orchestrator handles:
+# - Parsing and validation
+# - Agent selection (which nodes to deploy to)
+# - Dependency ordering (deploy db before api)
+# - Network provisioning (DNS-based service discovery)
+# - Health check setup
+# - Rolling updates and rollbacks
+```
 
 ## Responsibilities
 
-- Parse and validate deployment requests
+- Parse and validate banyan.yml deployment requests
 - Build execution plans based on service dependencies
 - Execute deployment pipelines (Validate → Plan → Deploy → Verify)
-- Coordinate with lifecycle plugins at each stage
+- Coordinate with lifecycle plugins at each stage (MVP-2)
 - Handle rollbacks on failure
 
 ## Architecture
@@ -324,10 +349,9 @@ type OrchestratorService interface {
 // CreateDeploymentRequest contains deployment parameters
 type CreateDeploymentRequest struct {
     Name        string
-    ComposeFile string            // docker-compose.yaml content
-    BanyanFile  string            // banyan.yaml content
-    Targets     []string          // Agent selectors
-    Variables   map[string]string // Variable substitution
+    BanyanFile  string            // banyan.yml content
+    Targets     []string          // Agent selectors (optional, auto-select if empty)
+    Variables   map[string]string // Variable substitution (e.g., ${DB_PASSWORD})
 }
 
 // RollbackStrategy defines how to rollback
@@ -439,9 +463,9 @@ type Scheduler interface {
     ValidateDependencies(ctx context.Context, deps *domain.DependencyGraph) error
 }
 
-// ComposeParser defines compose file parsing
-type ComposeParser interface {
-    Parse(composeContent, banyanContent string) ([]domain.Service, error)
+// BanyanParser defines banyan.yml parsing
+type BanyanParser interface {
+    Parse(banyanContent string) ([]domain.Service, error)
 }
 ```
 
@@ -468,7 +492,7 @@ type DeployUseCase struct {
     dispatcher ports.AgentDispatcher
     scheduler  ports.Scheduler
     plugins    ports.PluginExecutor
-    parser     ports.ComposeParser
+    parser     ports.BanyanParser
 }
 
 func NewDeployUseCase(
@@ -476,7 +500,7 @@ func NewDeployUseCase(
     dispatcher ports.AgentDispatcher,
     scheduler ports.Scheduler,
     plugins ports.PluginExecutor,
-    parser ports.ComposeParser,
+    parser ports.BanyanParser,
 ) *DeployUseCase {
     return &DeployUseCase{
         repo:       repo,
@@ -488,10 +512,10 @@ func NewDeployUseCase(
 }
 
 func (uc *DeployUseCase) CreateDeployment(ctx context.Context, req ports.CreateDeploymentRequest) (*domain.Deployment, error) {
-    // Parse compose file
-    services, err := uc.parser.Parse(req.ComposeFile, req.BanyanFile)
+    // Parse banyan.yml file
+    services, err := uc.parser.Parse(req.BanyanFile)
     if err != nil {
-        return nil, fmt.Errorf("failed to parse compose file: %w", err)
+        return nil, fmt.Errorf("failed to parse banyan.yml: %w", err)
     }
 
     deployment := &domain.Deployment{
@@ -738,7 +762,6 @@ func NewGRPCHandler(orchestrator ports.OrchestratorService) *GRPCHandler {
 func (h *GRPCHandler) Deploy(ctx context.Context, req *pb.DeployRequest) (*pb.DeployResponse, error) {
     createReq := ports.CreateDeploymentRequest{
         Name:        req.DeploymentId,
-        ComposeFile: req.ComposeFile,
         BanyanFile:  req.BanyanConfig,
         Targets:     req.Targets,
         Variables:   req.Variables,
@@ -905,8 +928,52 @@ var _ ports.DeploymentRepository = (*EtcdDeploymentRepository)(nil)
 └──────────────────────────────────────────────────────────────────┘
 ```
 
+## Networking
+
+Services in a banyan.yml deployment can reach each other by name through implicit DNS-based service discovery:
+
+```yaml
+services:
+  api:
+    image: myapi:latest
+    environment:
+      - DATABASE_URL=postgres://db:5432/app  # "db" resolves via DNS
+  db:
+    image: postgres:15
+```
+
+The Orchestrator coordinates with VPC Coordinator to:
+1. Allocate container IPs from the VPC subnet
+2. Register service names in DNS
+3. Apply security policies (MVP-2 plugin)
+
+## Plugin Integration (MVP-2)
+
+Per-service plugins are defined in banyan.yml and executed by the Plugin Manager:
+
+```yaml
+services:
+  api:
+    image: myapi:latest
+    replicas: 3
+    plugins:
+      - name: load_balancer
+        config:
+          port: 443
+          ssl:
+            auto: true
+```
+
+The Orchestrator calls plugin hooks at each pipeline stage:
+- `validate` - Before deployment starts
+- `plan` - After execution plan is created
+- `deploy` - During container deployment
+- `verify` - After deployment completes
+
 ## Related Components
 
 - [State Manager](./state-manager.md) - Tracks desired vs actual state
-- [Agent Registry](./agent-registry.md) - Agent selection for deployment
-- [Plugin Manager](./plugin-manager.md) - Lifecycle hook execution
+- [Agent Registry](./agent-registry.md) - Agent selection for deployment ✅
+- [Plugin Manager](./plugin-manager.md) - Lifecycle hook execution ✅
+- [Banyan Parser](./banyan-parser.md) - Parse banyan.yml configuration ✅
+- [VPC Coordinator](./vpc-coordinator.md) - Network provisioning

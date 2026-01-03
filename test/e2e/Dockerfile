@@ -5,21 +5,11 @@ FROM golang:1.24-bookworm AS builder
 
 WORKDIR /src
 
-# Copy go.work and module files first for better caching
-COPY go.work go.work
-COPY cmd/banyan-cli/go.mod cmd/banyan-cli/go.sum ./cmd/banyan-cli/
-COPY pkg/vpc/go.mod pkg/vpc/go.sum ./pkg/vpc/
-COPY pkg/engine/go.mod pkg/engine/go.sum ./pkg/engine/
-COPY internal/common/go.mod internal/common/go.sum ./internal/common/
-
-# Download dependencies
-RUN cd cmd/banyan-cli && go mod download
-
-# Copy source code
+# Copy all source code (go.work will be ignored via GOWORK=off)
 COPY . .
 
-# Build banyan-cli
-RUN go build -o /banyan-cli ./cmd/banyan-cli
+# Build banyan-cli without go.work (it has its own go.mod with replace directives)
+RUN cd cmd/banyan-cli && GOWORK=off go build -o /banyan-cli .
 
 # Final image
 FROM debian:bookworm-slim

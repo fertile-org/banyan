@@ -21,7 +21,7 @@ services:
       - engine-data:/var/lib/banyan
       - ./examples:/examples:ro
     healthcheck:
-      test: ["CMD", "etcdctl", "--endpoints=http://localhost:2379", "endpoint", "health"]
+      test: ["CMD", "curl", "-sf", "http://localhost:2379/health"]
       interval: 5s
       timeout: 5s
       retries: 10

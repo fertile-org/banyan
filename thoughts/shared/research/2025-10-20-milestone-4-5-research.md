@@ -1,13 +1,19 @@
 # Milestone 4 & 5 Research: DNS, Service Discovery, and Production Features
 
+> **DEPRECATED**: This research document uses old "VPC Milestone" terminology.
+> The features described here are now consolidated into:
+> - **Phase 5: DNS & Service Discovery** (see `docs/implementation-plan.md`)
+> - **Phase 6: Production Features** (see `docs/implementation-plan.md`)
+>
+> Refer to `docs/implementation-plan.md` for the current project roadmap.
+
 ---
 **Research Metadata**
 - Date: 2025-10-20
 - Branch: feat/vpc-implementation
 - Commit: f50e0d1
-- Status: Complete
-- Milestones Completed: Milestone 2 (Security Rules), Milestone 3 (Multi-Host Networking)
-- Focus: Milestone 4 (DNS & Service Discovery), Milestone 5 (Production Features)
+- Status: Complete (research only - implementation follows Phase 5/6)
+- Focus: DNS & Service Discovery, Production Features
 ---
 
 ## Executive Summary

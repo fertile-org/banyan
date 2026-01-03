@@ -1,0 +1,36 @@
+# Example Banyan deployment file
+# Similar to docker-compose but with replicas for scaling
+
+services:
+  web:
+    image: nginx:alpine
+    replicas: 2
+    ports:
+      - "80:80"
+
+  api:
+    image: myapp/api:v1
+    replicas: 3
+    ports:
+      - "8080:8080"
+    environment:
+      LOG_LEVEL: info
+      DB_HOST: db.internal
+    depends_on:
+      - web
+      - db
+
+  db:
+    image: postgres:15-alpine
+    replicas: 1
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: banyan
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: app
+    volumes:
+      - db-data:/var/lib/postgresql/data
+
+volumes:
+  db-data:

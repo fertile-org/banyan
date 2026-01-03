@@ -46,6 +46,12 @@ test/integration/
 │   ├── run_state_manager_integration.go     # State management/drift tests
 │   ├── run_vpc_coordinator_integration.go   # VPC Coordinator tests
 │   └── run_engine_server_integration.go     # gRPC server lifecycle tests
+├── integration/                # Engine-Agent integration test scripts
+│   ├── run_agent_lifecycle_integration.go       # Agent registration/lifecycle tests
+│   ├── run_simple_deployment_integration.go     # Full deployment workflow tests
+│   ├── run_network_provisioning_integration.go  # VPC network provisioning tests
+│   ├── run_health_monitoring_integration.go     # Container health monitoring tests
+│   └── run_state_reconciliation_integration.go  # State drift/reconciliation tests
 ├── vpc/                        # VPC-specific test scripts
 │   ├── run_cni_docker_integration.go   # CNI/containerd tests
 │   ├── run_dns_integration.go          # DNS service discovery tests
@@ -267,6 +273,153 @@ Tests security/iptables rule management.
 **Usage:**
 ```bash
 make test-integration FILE=./test/integration/vpc/run_security_integration.go
+```
+
+### Integration Tests (`test/integration/integration/`)
+
+These tests verify complete Engine-Agent integration flows using in-memory adapters.
+They simulate the full orchestration workflow without requiring real containerd or Docker.
+
+#### `run_agent_lifecycle_integration.go`
+
+Tests the complete Agent registration and lifecycle management.
+
+**What it tests:**
+1. Setting up Engine components (registry, events, gRPC server)
+2. Starting Engine gRPC server
+3. Agent registration with Engine
+4. Verifying Agent appears in registry
+5. Agent heartbeat processing
+6. Agent status updates
+7. Agent deregistration
+8. Verifying Agent removal from registry
+9. Event publication verification
+
+**Usage:**
+```bash
+go run ./test/integration/integration/run_agent_lifecycle_integration.go
+```
+
+#### `run_simple_deployment_integration.go`
+
+Tests a complete deployment workflow from banyan.yml to running containers.
+
+**What it tests:**
+1. Setting up Engine orchestrator with all dependencies
+2. Connecting Agent to Engine
+3. Creating deployment from banyan.yml
+4. Parsing services and dependencies
+5. Generating and verifying deployment plan
+6. Executing deployment
+7. Task dispatching to Agent
+8. Verifying container creation
+9. Verifying deployment state
+10. Health check configuration
+11. Rolling update simulation
+12. Deployment cleanup
+
+**Usage:**
+```bash
+go run ./test/integration/integration/run_simple_deployment_integration.go
+```
+
+#### `run_network_provisioning_integration.go`
+
+Tests VPC network provisioning through the Engine VPC Coordinator.
+
+**What it tests:**
+1. Setting up Engine VPC Coordinator
+2. Provisioning VPC network
+3. Verifying subnet creation
+4. Allocating container networks
+5. Verifying unique IP assignment
+6. Creating security groups
+7. Applying network policies
+8. Registering DNS entries
+9. Resolving DNS entries
+10. Getting network status
+11. Getting container network info
+12. Releasing container networks
+13. Unregistering DNS
+14. Deleting security policies
+15. Deleting security groups
+16. Deleting VPC network
+17. Verifying network cleanup
+18. Managing multiple VPCs
+19. Cleanup verification
+
+**Usage:**
+```bash
+go run ./test/integration/integration/run_network_provisioning_integration.go
+```
+
+#### `run_health_monitoring_integration.go`
+
+Tests container health monitoring and automatic recovery.
+
+**What it tests:**
+1. Setting up Engine state management
+2. Setting up Agent health monitoring
+3. Creating deployment with health checks
+4. Verifying desired state
+5. Simulating container startup
+6. Simulating successful health checks
+7. Processing heartbeat with healthy status
+8. Verifying no drift detected
+9. Simulating container health failure
+10. Detecting unhealthy container drift
+11. Triggering reconciliation
+12. Verifying restart action dispatched
+13. Simulating container restart
+14. Simulating health recovery
+15. Processing recovery heartbeat
+16. Verifying drift resolved
+17. Generating drift report
+18. Simulating Agent offline
+19. Detecting Agent unreachable drift
+20. Testing reconnection recovery
+21. Processing reconnection heartbeat
+22. Cleanup verification
+
+**Usage:**
+```bash
+go run ./test/integration/integration/run_health_monitoring_integration.go
+```
+
+#### `run_state_reconciliation_integration.go`
+
+Tests state drift detection and automatic reconciliation.
+
+**What it tests:**
+1. Setting up Engine orchestrator
+2. Setting up Agent task executor
+3. Creating initial deployment
+4. Verifying deployment in desired state
+5. Starting containers via task executor
+6. Syncing actual state to Engine
+7. Verifying no drift (states match)
+8. Simulating container crash
+9. Reporting crashed state to Engine
+10. Detecting container drift
+11. Triggering reconciliation
+12. Generating recovery tasks
+13. Executing recovery on Agent
+14. Syncing recovered state
+15. Verifying drift resolved
+16. Simulating extra container
+17. Detecting extra container drift
+18. Triggering extra container removal
+19. Executing removal on Agent
+20. Syncing cleaned state
+21. Verifying extra drift resolved
+22. Simulating replica mismatch
+23. Detecting replica drift
+24. Triggering replica adjustment
+25. Cleanup verification
+
+**Usage:**
+```bash
+go run ./test/integration/integration/run_state_reconciliation_integration.go
 ```
 
 ## Helper Packages

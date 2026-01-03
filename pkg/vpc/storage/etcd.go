@@ -39,6 +39,15 @@ func NewEtcdStore(endpoints []string, prefix string) (*EtcdStore, error) {
 		return nil, fmt.Errorf("failed to create etcd client: %w", err)
 	}
 
+	// Verify connectivity with a short timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = client.Status(ctx, endpoints[0])
+	if err != nil {
+		client.Close()
+		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
+	}
+
 	return &EtcdStore{
 		client: client,
 		prefix: prefix,

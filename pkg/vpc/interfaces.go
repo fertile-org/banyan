@@ -35,6 +35,14 @@ type CNIRuntime interface {
 	GetPluginStatus(ctx context.Context, plugin string) (*PluginStatus, error)
 }
 
+// CNIRuntimeWithServiceRegistry extends CNIRuntime with service discovery support
+type CNIRuntimeWithServiceRegistry interface {
+	CNIRuntime
+
+	// AddToNetworkWithService adds a container to a network and registers it with a service
+	AddToNetworkWithService(ctx context.Context, containerID, networkID string, ip net.IP, serviceName string) error
+}
+
 // IPAMManager manages IP address allocation
 type IPAMManager interface {
 	// AllocateHostSubnet allocates a /24 subnet for a host

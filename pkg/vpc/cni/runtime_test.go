@@ -288,3 +288,57 @@ func TestCNIRuntime_GetPluginStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestCNIRuntime_DNSConfiguration(t *testing.T) {
+	store := storage.NewMemoryStore()
+	runtime := cni.NewRuntime(store, nil)
+
+	t.Run("set and get DNS servers", func(t *testing.T) {
+		servers := []string{"10.0.0.2", "8.8.8.8"}
+		searchDomains := []string{"internal", "local"}
+
+		runtime.SetDNS(servers, searchDomains)
+
+		gotServers := runtime.GetDNSServers()
+		if len(gotServers) != len(servers) {
+			t.Errorf("expected %d DNS servers, got %d", len(servers), len(gotServers))
+		}
+		for i, s := range servers {
+			if gotServers[i] != s {
+				t.Errorf("expected DNS server %s at index %d, got %s", s, i, gotServers[i])
+			}
+		}
+
+		gotDomains := runtime.GetDNSSearchDomains()
+		if len(gotDomains) != len(searchDomains) {
+			t.Errorf("expected %d search domains, got %d", len(searchDomains), len(gotDomains))
+		}
+		for i, d := range searchDomains {
+			if gotDomains[i] != d {
+				t.Errorf("expected search domain %s at index %d, got %s", d, i, gotDomains[i])
+			}
+		}
+	})
+
+	t.Run("empty DNS config by default", func(t *testing.T) {
+		newRuntime := cni.NewRuntime(store, nil)
+		if len(newRuntime.GetDNSServers()) != 0 {
+			t.Error("expected empty DNS servers by default")
+		}
+		if len(newRuntime.GetDNSSearchDomains()) != 0 {
+			t.Error("expected empty search domains by default")
+		}
+	})
+}
+
+func TestCNIRuntime_ServiceRegistry(t *testing.T) {
+	store := storage.NewMemoryStore()
+	runtime := cni.NewRuntime(store, nil)
+
+	t.Run("get service registry", func(t *testing.T) {
+		reg := runtime.GetServiceRegistry()
+		if reg == nil {
+			t.Error("expected service registry, got nil")
+		}
+	})
+}

@@ -16,8 +16,10 @@ This document provides a detailed implementation plan for the Banyan Engine and 
 4. [Phase 2: Agent Data Plane](#phase-2-agent-data-plane)
 5. [Phase 3: Engine Control Plane](#phase-3-engine-control-plane)
 6. [Phase 4: Integration & Orchestration](#phase-4-integration--orchestration)
-7. [Testing Strategy](#testing-strategy)
-8. [Milestones & Validation Criteria](#milestones--validation-criteria)
+7. [Phase 5: DNS & Service Discovery](#phase-5-dns--service-discovery)
+8. [Phase 6: Production Features](#phase-6-production-features)
+9. [Testing Strategy](#testing-strategy)
+10. [Validation Criteria](#validation-criteria)
 
 ---
 
@@ -919,6 +921,129 @@ go test ./test/e2e/... -v -tags=e2e -timeout=30m
 
 ---
 
+## Phase 5: DNS & Service Discovery
+
+### 5.1 Service Registry
+
+**Target**: Enable service-to-container mapping for DNS resolution
+
+**Components**:
+- Add `ServiceName` field to Container struct
+- Implement service registry in StateStore
+- Integrate with CNI Runtime (register on AddToNetwork, deregister on RemoveFromNetwork)
+
+**Implementation**:
+```go
+// New methods in StateStore interface
+PutService(ctx context.Context, serviceName, containerID string, ip net.IP) error
+DeleteService(ctx context.Context, serviceName, containerID string) error
+GetServiceInstances(ctx context.Context, serviceName string) ([]ServiceInstance, error)
+```
+
+**Validation**:
+- [ ] Service registry stores service → container mappings in etcd
+- [ ] Services can be queried programmatically
+- [ ] Unit tests validate registration/deregistration
+
+---
+
+### 5.2 DNS Manager Implementation
+
+**Target**: Implement health-aware DNS resolution
+
+**Components**:
+- Implement DNSManager with in-memory cache
+- 4 interface methods: RegisterHost, UnregisterHost, LookupHost, UpdateHealth
+- Round-robin load balancing across healthy instances
+
+**Test Coverage**: 404 lines of existing tests in `pkg/vpc/dns/manager_test.go`
+
+**Validation**:
+- [ ] All existing DNS tests pass
+- [ ] DNS resolution returns healthy container IPs
+- [ ] Load balancing distributes requests across instances
+
+---
+
+### 5.3 CoreDNS Integration
+
+**Target**: Container DNS resolution via CoreDNS
+
+**Components**:
+- CoreDNS plugin that queries Banyan DNS Manager
+- Container `/etc/resolv.conf` configuration
+- Integration with CNI plugin
+
+**Validation**:
+- [ ] Containers can resolve service names via DNS
+- [ ] Health-aware resolution filters unhealthy instances
+- [ ] `nslookup <service>.internal` works from containers
+
+---
+
+## Phase 6: Production Features
+
+### 6.1 Observability & Metrics
+
+**Target**: Production monitoring and debugging
+
+**Components**:
+- Implement DebugManager (TraceConnection, CheckConnectivity, GetIPTablesRules)
+- Prometheus metrics exporter
+- Flow logs implementation
+
+**Metrics to expose**:
+- Container network traffic (bytes in/out)
+- DNS query rate and latency
+- Security rule hit counts
+- IPAM allocation/release rates
+
+**CLI Commands**:
+```bash
+banyan network flow-logs <service>
+banyan network trace <from> <to>
+banyan network connectivity <container>
+```
+
+**Validation**:
+- [ ] DebugManager methods implemented
+- [ ] Prometheus metrics endpoint works
+- [ ] Flow logs capture network traffic
+
+---
+
+### 6.2 Multi-CNI Support
+
+**Target**: Support multiple CNI plugins beyond Flannel
+
+**Components**:
+- Calico CNI plugin implementation
+- CNI plugin selection in configuration
+- Runtime detection of available plugins
+
+**Validation**:
+- [ ] Calico plugin setup works
+- [ ] Cross-host communication with Calico
+- [ ] Automatic fallback to Flannel if preferred unavailable
+
+---
+
+### 6.3 Network Policy Enhancements
+
+**Target**: Advanced network policy management
+
+**Components**:
+- Policy dry-run mode (simulate without applying)
+- Policy conflict detection
+- Egress rule support (currently ingress only)
+
+**Validation**:
+- [ ] Dry-run mode shows what would change
+- [ ] Conflicting policies detected and reported
+- [ ] Egress rules enforced
+
+---
+
 ## Testing Strategy
 
 ### Test Categories
@@ -963,55 +1088,52 @@ testdata/
 
 ---
 
-## Milestones & Validation Criteria
+## Validation Criteria
 
-### Milestone 1: Agent Foundation
-**Components**: Container Runtime, Network Node, Security Executor
-**Validation**:
-- [ ] Can create/start/stop container via Container Runtime
-- [ ] Can configure network namespace via Network Node
-- [ ] Can apply iptables rules via Security Executor
-- [ ] All unit tests pass
+### Phase 1: Foundation Layer ✅
+- [x] Project structure with hexagonal architecture
+- [x] Domain models for Engine and Agent
+- [x] Port interfaces defined
+- [x] Basic adapters scaffolded
 
-### Milestone 2: Agent Complete
-**Components**: Health Monitor, Task Executor, Agent gRPC Server
-**Validation**:
-- [ ] Task Executor routes tasks to correct components
-- [ ] Health Monitor detects container health status
-- [ ] Agent accepts gRPC connections
-- [ ] End-to-end agent integration test passes
+### Phase 2: Agent Data Plane ✅
+- [x] Container Runtime: create/start/stop containers
+- [x] Network Node: configure network namespaces
+- [x] Security Executor: apply iptables rules
+- [x] Health Monitor: detect container health
+- [x] Task Executor: route tasks to components
+- [x] Agent gRPC Server: accept connections
 
-### Milestone 3: Engine Foundation
-**Components**: Banyan Parser, Agent Registry, Plugin Manager
-**Validation**:
-- [ ] Banyan Parser handles banyan.yml files
-- [ ] Agent Registry tracks agent lifecycle
-- [ ] Plugin Manager executes webhook plugins
-- [ ] All unit tests pass
+### Phase 3: Engine Control Plane ✅
+- [x] Banyan Parser: parse banyan.yml files
+- [x] Agent Registry: track agent lifecycle
+- [x] Plugin Manager: execute webhook plugins
+- [x] State Manager: detect and report drift
+- [x] VPC Coordinator: provision container networks
+- [x] Orchestrator: execute deployment workflow
 
-### Milestone 4: Engine Complete
-**Components**: VPC Coordinator, State Manager, Orchestrator
-**Validation**:
-- [ ] VPC Coordinator provisions container networks
-- [ ] State Manager detects and reports drift
-- [ ] Orchestrator executes full deployment workflow
-- [ ] All Engine unit tests pass
+### Phase 4: Integration & Orchestration ✅
+- [x] Agent Lifecycle integration test
+- [x] Simple Deployment integration test
+- [x] Network Provisioning integration test
+- [x] Health Monitoring integration test
+- [x] State Reconciliation integration test
+- [ ] E2E: Multi-node deployment
+- [ ] E2E: Rolling updates
+- [ ] E2E: Failure recovery
 
-### Milestone 5: System Integration
-**Validation**:
-- [ ] Engine can register and track agents
-- [ ] Full deployment workflow from banyan.yml to running containers
-- [ ] Health check failures trigger container restart
-- [ ] State reconciliation restores desired state
-- [ ] All integration tests pass
+### Phase 5: DNS & Service Discovery
+- [x] Service Registry in StateStore (`pkg/vpc/registry/`)
+- [x] DNS Manager implementation (`pkg/vpc/dns/` - 405 lines of tests)
+- [x] CoreDNS integration (DNS Server + CNI DNS configuration)
+- [x] Container DNS resolution works (via configureContainerDNS)
 
-### Milestone 6: Production Ready
-**Validation**:
-- [ ] Multi-node deployment works
-- [ ] Rolling updates with zero downtime
-- [ ] Network policies enforced across nodes
-- [ ] E2E test suite passes
-- [ ] Documentation complete
+### Phase 6: Production Features
+- [ ] DebugManager implementation
+- [ ] Prometheus metrics exporter
+- [ ] Flow logs
+- [ ] Multi-CNI support (Calico)
+- [ ] Network policy enhancements
 
 ---
 

@@ -5,18 +5,29 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/fertile-org/banyan/pkg/vpc/registry"
 	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
-// RuntimeServiceResolver resolves service names to IPs using the state store
+// RuntimeServiceResolver resolves service names to IPs using the service registry
 type RuntimeServiceResolver struct {
-	store storage.StateStore
+	store    storage.StateStore
+	registry *registry.Registry
 }
 
 // NewRuntimeServiceResolver creates a new runtime-based service resolver
 func NewRuntimeServiceResolver(store storage.StateStore) *RuntimeServiceResolver {
 	return &RuntimeServiceResolver{
-		store: store,
+		store:    store,
+		registry: registry.NewRegistry(store),
+	}
+}
+
+// NewRuntimeServiceResolverWithRegistry creates a resolver with an existing registry
+func NewRuntimeServiceResolverWithRegistry(store storage.StateStore, reg *registry.Registry) *RuntimeServiceResolver {
+	return &RuntimeServiceResolver{
+		store:    store,
+		registry: reg,
 	}
 }
 
@@ -26,10 +37,20 @@ func (r *RuntimeServiceResolver) ResolveServiceIPs(ctx context.Context, serviceN
 		return nil, fmt.Errorf("service name cannot be empty")
 	}
 
-	// For now, return a simple mock implementation
-	// In a real implementation, this would query the state store for containers
-	// belonging to this service and return their IPs
+	// Use the service registry to resolve IPs
+	ips, err := r.registry.GetServiceIPs(ctx, serviceName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve service %q: %w", serviceName, err)
+	}
 
-	// TODO: Implement actual service registry lookup when state store has service mappings
-	return nil, fmt.Errorf("service %q not found in registry", serviceName)
+	if len(ips) == 0 {
+		return nil, fmt.Errorf("service %q not found in registry", serviceName)
+	}
+
+	return ips, nil
+}
+
+// GetRegistry returns the service registry for registration operations
+func (r *RuntimeServiceResolver) GetRegistry() *registry.Registry {
+	return r.registry
 }

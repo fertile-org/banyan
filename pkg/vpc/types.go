@@ -40,12 +40,13 @@ type SecurityRule struct {
 
 // Container represents a container attached to the network
 type Container struct {
-	ID        string    `json:"id"`
-	NetworkID string    `json:"network_id"`
-	IP        net.IP    `json:"ip"`
-	HostID    string    `json:"host_id"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
+	ID          string    `json:"id"`
+	NetworkID   string    `json:"network_id"`
+	IP          net.IP    `json:"ip"`
+	HostID      string    `json:"host_id"`
+	Status      string    `json:"status"`
+	ServiceName string    `json:"service_name,omitempty"` // For service discovery
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // PluginStatus represents the status of a CNI plugin

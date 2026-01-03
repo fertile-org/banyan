@@ -22,6 +22,9 @@ bin/
 dist/
 build/
 
+# Integration test binaries
+run_*_integration
+
 # IDE files
 .vscode/
 .idea/

@@ -359,6 +359,12 @@ func TestNewConstants(t *testing.T) {
 			t.Errorf("expected config/registry, got %s", keyRegistry)
 		}
 	})
+
+	t.Run("auth hash key", func(t *testing.T) {
+		if keyAuthHash != "config/auth_hash" {
+			t.Errorf("expected config/auth_hash, got %s", keyAuthHash)
+		}
+	})
 }
 
 func assertSliceEqual(t *testing.T, expected, got []string) {

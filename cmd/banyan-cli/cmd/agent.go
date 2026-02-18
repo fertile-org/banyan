@@ -152,9 +152,53 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	fmt.Println("\n5. Configuring engine connection and authentication...")
+	existingCfg, _ := loadConfig()
+	if existingCfg.Security.Password != "" && existingCfg.Agent.EngineHost != "" {
+		fmt.Printf("   [OK] Config already exists at %s\n", configPath)
+		fmt.Printf("   Engine: %s:%s (password set)\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
+	} else {
+		fmt.Print("   Engine host (default: localhost): ")
+		engineHost := readLine()
+		if engineHost == "" {
+			engineHost = "localhost"
+		}
+		fmt.Printf("   [OK] Engine host: %s\n", engineHost)
+
+		fmt.Print("   Engine port (default: 2379): ")
+		enginePort := readLine()
+		if enginePort == "" {
+			enginePort = "2379"
+		}
+		fmt.Printf("   [OK] Engine port: %s\n", enginePort)
+
+		fmt.Println("\n6. Configuring authentication...")
+		fmt.Print("   Enter cluster password (leave empty to skip): ")
+		password := readLine()
+
+		cfg := BanyanConfig{
+			Agent: AgentConfig{
+				EngineHost: engineHost,
+				EnginePort: enginePort,
+			},
+		}
+		if password != "" {
+			cfg.Security = SecurityConfig{
+				AuthType: "password",
+				Password: password,
+			}
+		}
+
+		if err := saveConfig(cfg); err != nil {
+			fmt.Printf("   [WARN] Failed to save config: %v\n", err)
+		} else {
+			fmt.Printf("   [OK] Config saved to %s\n", configPath)
+		}
+	}
+
 	fmt.Println("\n========================================")
 	fmt.Println("Initialization complete!")
-	fmt.Println("\nNext step: banyan-cli agent start --engine http://engine-host:2379")
+	fmt.Println("\nNext step: banyan-cli agent start")
 	return nil
 }
 
@@ -184,6 +228,13 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Node name: %s\n", nodeName)
 
+	// Use config-based engine endpoint if --engine flag was not explicitly set
+	if !cmd.Flags().Changed("engine") {
+		if cfgEndpoint := getConfigEngineEndpoint(); cfgEndpoint != "" {
+			agentEngineEndpoint = cfgEndpoint
+		}
+	}
+
 	// Wait for engine connection
 	fmt.Printf("Connecting to Engine at %s...\n", agentEngineEndpoint)
 	if err := waitForAgentEtcd(ctx, agentEngineEndpoint, 30*time.Second); err != nil {
@@ -195,6 +246,11 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	store, err := storage.NewEtcdStore([]string{agentEngineEndpoint}, "/banyan")
 	if err != nil {
 		return fmt.Errorf("failed to connect to etcd: %w", err)
+	}
+
+	// Verify authentication
+	if err := verifyAuth(ctx, store); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Check for nerdctl
@@ -550,9 +606,15 @@ func agentHTTPServer(ctx context.Context, logProvider LogProvider, apiPort strin
 		}
 	})
 
+	// Wrap with Basic Auth middleware if password is configured
+	var handler http.Handler = mux
+	if password := getConfigPassword(); password != "" {
+		handler = basicAuthMiddleware(mux, password)
+	}
+
 	server := &http.Server{
 		Addr:    net.JoinHostPort("", apiPort),
-		Handler: mux,
+		Handler: handler,
 	}
 
 	// Graceful shutdown when context is cancelled
@@ -623,6 +685,18 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 		_, err = client.Status(ctx, agentEngineEndpoint)
 		if err == nil {
 			fmt.Println("OK")
+
+			// Verify authentication if password is configured and etcd is reachable
+			if password := getConfigPassword(); password != "" {
+				store, storeErr := storage.NewEtcdStore([]string{agentEngineEndpoint}, "/banyan")
+				if storeErr == nil {
+					if authErr := verifyAuth(ctx, store); authErr != nil {
+						fmt.Printf("Authentication: FAILED (%v)\n", authErr)
+					} else {
+						fmt.Println("Authentication: OK")
+					}
+				}
+			}
 		} else {
 			fmt.Printf("FAILED (%v)\n", err)
 		}

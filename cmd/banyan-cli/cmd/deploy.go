@@ -184,6 +184,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}
 
+	// Verify authentication
+	if err := verifyAuth(ctx, store); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
 	// Push built images to the engine's OCI registry
 	if !deployDryRun {
 		if err := pushServiceImages(ctx, store, manifest.Services); err != nil {
@@ -438,6 +443,11 @@ func runDown(cmd *cobra.Command, args []string) error {
 	store, err := storage.NewEtcdStore([]string{downEtcdEndpoint}, "/banyan")
 	if err != nil {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
+	}
+
+	// Verify authentication
+	if err := verifyAuth(ctx, store); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
 	}
 
 	// Find deployment by name

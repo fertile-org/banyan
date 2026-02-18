@@ -18,6 +18,7 @@ INSTALL_DIR="/usr/local/bin"
 NERDCTL_VERSION="2.0.3"
 CNI_VERSION="1.6.1"
 ETCD_VERSION="3.5.17"
+BUILDKIT_VERSION="0.19.0"
 
 # --- Output helpers ---
 
@@ -208,6 +209,48 @@ install_cni() {
     info "CNI plugins installed."
 }
 
+install_buildkit() {
+    if command -v buildkitd &>/dev/null; then
+        info "BuildKit already installed, skipping."
+    else
+        info "Installing BuildKit v${BUILDKIT_VERSION}..."
+
+        local url="https://github.com/moby/buildkit/releases/download/v${BUILDKIT_VERSION}/buildkit-v${BUILDKIT_VERSION}.linux-${ARCH}.tar.gz"
+        local tmp
+        tmp=$(mktemp -d)
+        if ! curl -fsSL "$url" | tar -xz -C "$tmp"; then
+            rm -rf "$tmp"
+            fatal "Failed to download BuildKit from ${url}"
+        fi
+        mv "$tmp/bin/buildkitd" "$tmp/bin/buildctl" "${INSTALL_DIR}/"
+        rm -rf "$tmp"
+
+        info "BuildKit installed."
+    fi
+
+    # Ensure buildkitd is running via systemd
+    if ! systemctl is-active --quiet buildkit 2>/dev/null; then
+        info "Setting up buildkitd service..."
+        cat > /etc/systemd/system/buildkit.service <<'UNIT'
+[Unit]
+Description=BuildKit
+After=containerd.service
+
+[Service]
+ExecStart=/usr/local/bin/buildkitd --oci-worker=false --containerd-worker=true
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+        systemctl daemon-reload
+        systemctl enable --now buildkit
+        info "buildkitd started."
+    else
+        info "buildkitd is running."
+    fi
+}
+
 # --- Verify ---
 
 verify() {
@@ -244,6 +287,13 @@ verify() {
             info "  nerdctl: OK"
         else
             error "  nerdctl: NOT FOUND"
+            ok=false
+        fi
+
+        if command -v buildkitd &>/dev/null; then
+            info "  buildkit: OK"
+        else
+            error "  buildkit: NOT FOUND"
             ok=false
         fi
     fi
@@ -326,6 +376,7 @@ main() {
         install_containerd
         install_nerdctl
         install_cni
+        install_buildkit
     fi
 
     verify

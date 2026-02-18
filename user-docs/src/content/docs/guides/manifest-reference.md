@@ -19,6 +19,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Dependencies | `depends_on:` | `depends_on:` | Same (informational) |
 | Replicas | `deploy.replicas:` | `replicas:` | Top-level, not nested |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
+| Build | `build:` | `build:` | Same syntax (context + dockerfile) |
 | Volumes | `volumes:` | -- | Not yet supported |
 | Networks | `networks:` | -- | Managed automatically |
 
@@ -31,7 +32,8 @@ name: <application-name>    # Required
 
 services:
   <service-name>:           # One or more services
-    image: <image>          # Required
+    image: <image>          # Required (unless build is set)
+    build: <context-path>   # Build from Dockerfile
     replicas: <number>      # Default: 1
     ports:
       - "<host>:<container>"
@@ -57,7 +59,8 @@ services:
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `image` | string | Yes | -- | Container image. Any registry works: `nginx:alpine`, `ghcr.io/org/app:v1`. |
+| `image` | string | Conditional | -- | Container image. Required unless `build` is set. Any registry works: `nginx:alpine`, `ghcr.io/org/app:v1`. |
+| `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
 | `replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `env` | list | No | -- | Environment variables in `KEY=value` format. |
@@ -87,69 +90,81 @@ services:
 
 One container on one worker.
 
-### Web application with database
+### Full example (examples/banyan.yml)
+
+This is the example manifest included in the repository:
 
 ```yaml
-name: webapp
+name: my-app
 
 services:
-  frontend:
-    image: nginx:alpine
-    replicas: 3
+  web:
+    build: ./web
     ports:
       - "80:80"
+    depends_on:
+      - api
 
   api:
-    image: hashicorp/http-echo:latest
-    replicas: 2
+    build: ./api
+    replicas: 3
     ports:
-      - "3000:3000"
+      - "8080:8080"
     env:
-      - DATABASE_URL=postgres://db:5432/app
-      - REDIS_URL=redis://cache:6379
+      - DB_HOST=my-app-db-0
+      - DB_PORT=5432
     depends_on:
       - db
 
   db:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
     replicas: 1
     ports:
       - "5432:5432"
     env:
-      - POSTGRES_DB=app
-      - POSTGRES_USER=admin
+      - POSTGRES_USER=banyan
       - POSTGRES_PASSWORD=secret
-
-  cache:
-    image: redis:7-alpine
-    replicas: 1
-    ports:
-      - "6379:6379"
+      - POSTGRES_DB=app
 ```
 
-### Background workers
+This shows `build:` for custom services, `image:` for off-the-shelf databases, `replicas` for scaling, `env` for configuration, and `depends_on` for ordering.
+
+### Build from source
+
+Use `build:` to build images from a Dockerfile instead of pulling a pre-built image. Built images are pushed to the Engine's embedded OCI registry so all agents can pull them.
+
+**String form** — just the build context path:
 
 ```yaml
-name: pipeline
-
 services:
-  worker:
-    image: hashicorp/http-echo:latest
-    replicas: 5
-    env:
-      - QUEUE_URL=amqp://rabbitmq:5672
-      - CONCURRENCY=4
-    command:
-      - ./worker
-      - --queue
-      - jobs
-
-  scheduler:
-    image: hashicorp/http-echo:latest
-    replicas: 1
-    env:
-      - SCHEDULE_INTERVAL=60s
+  web:
+    build: ./web
+    ports:
+      - "80:80"
 ```
+
+**Object form** — specify a custom Dockerfile:
+
+```yaml
+services:
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.prod
+```
+
+If `image` is not set, Banyan generates a name: `<app-name>-<service-name>:latest`. You can set `image` explicitly to control the tag:
+
+```yaml
+services:
+  api:
+    image: my-api:v2
+    build: ./api
+```
+
+Each service must have either `image` or `build` (or both).
+
+The [full example](#full-example-examplesbanyanyml) above demonstrates mixing `build:` and `image:` services. Services with `build:` are built locally and pushed to the Engine's registry. Services with only `image:` are pulled directly by agents.
 
 ## Validation
 

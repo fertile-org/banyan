@@ -1,25 +1,27 @@
 # Example Banyan deployment file
 # Familiar docker-compose syntax with replicas for multi-server deployment
+#
+# Deploy: banyan-cli deploy -f examples/banyan.yml
 
 name: my-app
 
 services:
   web:
-    image: nginx:alpine
-    replicas: 2
+    build: ./web
     ports:
       - "80:80"
+    depends_on:
+      - api
 
   api:
-    image: hashicorp/http-echo:latest
+    build: ./api
     replicas: 3
     ports:
       - "8080:8080"
     env:
-      - LOG_LEVEL=info
-      - DB_HOST=db.internal
+      - DB_HOST=my-app-db-0
+      - DB_PORT=5432
     depends_on:
-      - web
       - db
 
   db:

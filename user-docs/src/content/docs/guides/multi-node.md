@@ -96,29 +96,44 @@ name: my-app
 
 services:
   web:
-    image: nginx:alpine
-    replicas: 4
+    build: ./web
     ports:
       - "80:80"
+    depends_on:
+      - api
 
   api:
-    image: hashicorp/http-echo:latest
-    replicas: 2
+    build: ./api
+    replicas: 3
+    ports:
+      - "8080:8080"
     env:
-      - APP_ENV=production
+      - DB_HOST=my-app-db-0
+      - DB_PORT=5432
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    env:
+      - POSTGRES_USER=banyan
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=app
 ```
 
 ```bash
 banyan-cli deploy -f banyan.yaml --etcd http://192.168.1.10:2379
 ```
 
-Banyan distributes 6 containers across 2 workers using round-robin:
+Banyan distributes 5 containers across 2 workers using round-robin:
 
 | Worker 1 | Worker 2 |
 |----------|----------|
-| my-app-web-0 | my-app-web-1 |
-| my-app-web-2 | my-app-web-3 |
-| my-app-api-0 | my-app-api-1 |
+| my-app-web-0 | my-app-api-0 |
+| my-app-api-1 | my-app-api-2 |
+| my-app-db-0 | |
 
 ## 5. Check containers on workers
 

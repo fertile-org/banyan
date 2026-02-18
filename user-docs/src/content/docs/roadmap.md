@@ -57,7 +57,19 @@ Collect and store resource metrics from every node and container.
 
 ---
 
-## Milestone 5 — Auto-Scaling and Redeployment
+## Milestone 5 — Health-Based Scheduling and Resource Requests
+
+Smarter task distribution based on node resources instead of simple round-robin.
+
+- Agent reports node resource usage (CPU, memory, disk) to Engine via etcd
+- Engine selects the node with the most available resources when scheduling new tasks
+- Resource requests in banyan.yaml: services can declare CPU and memory requirements (e.g. `cpus: 2`, `memory: 4g`)
+- Engine validates that target node has sufficient resources before assigning a task
+- Engine rejects deployments that exceed total cluster capacity
+
+---
+
+## Milestone 6 — Auto-Scaling and Redeployment
 
 Scale services based on metrics and support zero-downtime updates.
 
@@ -70,7 +82,7 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 6 — Monitoring Dashboard and CLI
+## Milestone 7 — Monitoring Dashboard and CLI
 
 Give operators visibility into the cluster through a web UI and CLI commands.
 
@@ -83,7 +95,7 @@ Give operators visibility into the cluster through a web UI and CLI commands.
 
 ---
 
-## Milestone 7 — Advanced Security
+## Milestone 8 — Advanced Security
 
 Stronger authentication model for production environments.
 
@@ -94,7 +106,7 @@ Stronger authentication model for production environments.
 
 ---
 
-## Milestone 8 — Advanced Metrics and Dashboard Enhancements
+## Milestone 9 — Advanced Metrics and Dashboard Enhancements
 
 Deeper observability and richer operational tooling.
 

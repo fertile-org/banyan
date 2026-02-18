@@ -16,6 +16,8 @@
 
 ---
 
+> **Under heavy development.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
+
 ## From one server to many
 
 You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and everything works.

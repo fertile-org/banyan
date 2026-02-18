@@ -21,7 +21,18 @@ Deploy containers across multiple servers using a familiar YAML manifest.
 
 ---
 
-## Milestone 2 — Metrics Collection
+## Milestone 2 — Basic Security
+
+Secure communication between CLI, Engine, and Agents.
+
+- Username/password authentication for agent-to-engine connections
+- Username/password authentication for CLI-to-engine commands
+- Username/password authentication for CLI-to-agent commands
+- Credential configuration via CLI flags and config file
+
+---
+
+## Milestone 3 — Metrics Collection
 
 Collect and store resource metrics from every node and container.
 
@@ -33,7 +44,7 @@ Collect and store resource metrics from every node and container.
 
 ---
 
-## Milestone 3 — Auto-Scaling and Redeployment
+## Milestone 4 — Auto-Scaling and Redeployment
 
 Scale services based on metrics and support zero-downtime updates.
 
@@ -46,7 +57,7 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 4 — Monitoring Dashboard and CLI
+## Milestone 5 — Monitoring Dashboard and CLI
 
 Give operators visibility into the cluster through a web UI and CLI commands.
 
@@ -59,7 +70,18 @@ Give operators visibility into the cluster through a web UI and CLI commands.
 
 ---
 
-## Milestone 5 — Advanced Metrics and Dashboard Enhancements
+## Milestone 6 — Advanced Security
+
+Stronger authentication model for production environments.
+
+- Private key authentication for agent-to-engine connections
+- Private key authentication for CLI-to-engine and CLI-to-agent
+- Key generation and distribution tooling
+- Certificate rotation support
+
+---
+
+## Milestone 7 — Advanced Metrics and Dashboard Enhancements
 
 Deeper observability and richer operational tooling.
 

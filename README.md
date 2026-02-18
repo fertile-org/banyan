@@ -141,4 +141,4 @@ See the [Development Guide](./DEVELOPMENT.md) for project structure, build comma
 
 ## License
 
-TBD
+Apache License 2.0. See [LICENSE](./LICENSE) for details.

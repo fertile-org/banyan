@@ -6,6 +6,13 @@
 
 <p align="center"><strong>Docker Compose syntax that scales.</strong></p>
 
+<p align="center">
+  <a href="https://github.com/fertile-org/banyan/actions/workflows/ci.yml"><img src="https://github.com/fertile-org/banyan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://codecov.io/gh/fertile-org/banyan"><img src="https://codecov.io/gh/fertile-org/banyan/branch/main/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/fertile-org/banyan/releases/latest"><img src="https://img.shields.io/github/v/release/fertile-org/banyan?label=release" alt="Release"></a>
+  <img src="https://img.shields.io/badge/go-1.24-00ADD8?logo=go" alt="Go 1.24">
+</p>
+
 <p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
 
 <p align="center">

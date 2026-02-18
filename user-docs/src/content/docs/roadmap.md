@@ -23,6 +23,8 @@ Deploy containers across multiple servers using a familiar YAML manifest.
 
 ## Milestone 2 — Service Observability
 
+Status: **Done**
+
 Per-container health status, logs, and visibility from the CLI.
 
 - Agent monitors container health after deployment (running, exited, restarting)
@@ -36,12 +38,16 @@ Per-container health status, logs, and visibility from the CLI.
 
 ## Milestone 3 — Basic Security
 
+Status: **Done**
+
 Secure communication between CLI, Engine, and Agents.
 
-- Username/password authentication for agent-to-engine connections
-- Username/password authentication for CLI-to-engine commands
-- Username/password authentication for CLI-to-agent commands
-- Credential configuration via CLI flags and config file
+- password authentication for agent-to-engine connections
+- password authentication for CLI-to-engine commands
+- password authentication for CLI-to-agent commands
+- Credential configuration config file (/etc/banyan/banyan.yaml), which should have 3 sections: `security`, `engine`, `agent`. the security section should include fields for `auth_type` (only support `password` for now), and `password`.
+  - The agent section should include fields for `engine_host` and `engine_port`.
+- update init command of engine/agent to ask for password and store it in the config file, also ask for engine host/port in agent init (with default values)
 
 ---
 

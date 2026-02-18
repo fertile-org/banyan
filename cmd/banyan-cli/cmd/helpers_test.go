@@ -260,6 +260,107 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 	})
 }
 
+func TestGroupTasksByService(t *testing.T) {
+	t.Run("groups tasks by service name", func(t *testing.T) {
+		tasks := []TaskRecord{
+			{ServiceName: "web", ContainerName: "myapp-web-0"},
+			{ServiceName: "api", ContainerName: "myapp-api-0"},
+			{ServiceName: "web", ContainerName: "myapp-web-1"},
+			{ServiceName: "api", ContainerName: "myapp-api-1"},
+			{ServiceName: "db", ContainerName: "myapp-db-0"},
+		}
+		grouped := groupTasksByService(tasks)
+
+		if len(grouped) != 3 {
+			t.Errorf("expected 3 groups, got %d", len(grouped))
+		}
+		if len(grouped["web"]) != 2 {
+			t.Errorf("expected 2 web tasks, got %d", len(grouped["web"]))
+		}
+		if len(grouped["api"]) != 2 {
+			t.Errorf("expected 2 api tasks, got %d", len(grouped["api"]))
+		}
+		if len(grouped["db"]) != 1 {
+			t.Errorf("expected 1 db task, got %d", len(grouped["db"]))
+		}
+	})
+
+	t.Run("handles empty input", func(t *testing.T) {
+		grouped := groupTasksByService(nil)
+		if len(grouped) != 0 {
+			t.Errorf("expected 0 groups, got %d", len(grouped))
+		}
+	})
+
+	t.Run("single service", func(t *testing.T) {
+		tasks := []TaskRecord{
+			{ServiceName: "web", ContainerName: "myapp-web-0"},
+			{ServiceName: "web", ContainerName: "myapp-web-1"},
+		}
+		grouped := groupTasksByService(tasks)
+		if len(grouped) != 1 {
+			t.Errorf("expected 1 group, got %d", len(grouped))
+		}
+		if len(grouped["web"]) != 2 {
+			t.Errorf("expected 2 web tasks, got %d", len(grouped["web"]))
+		}
+	})
+}
+
+func TestSortedServiceNames(t *testing.T) {
+	t.Run("returns sorted names", func(t *testing.T) {
+		grouped := map[string][]TaskRecord{
+			"web": {{ServiceName: "web"}},
+			"api": {{ServiceName: "api"}},
+			"db":  {{ServiceName: "db"}},
+		}
+		names := sortedServiceNames(grouped)
+		expected := []string{"api", "db", "web"}
+		assertSliceEqual(t, expected, names)
+	})
+
+	t.Run("handles empty map", func(t *testing.T) {
+		grouped := map[string][]TaskRecord{}
+		names := sortedServiceNames(grouped)
+		if len(names) != 0 {
+			t.Errorf("expected 0 names, got %d", len(names))
+		}
+	})
+
+	t.Run("single service", func(t *testing.T) {
+		grouped := map[string][]TaskRecord{
+			"web": {{ServiceName: "web"}},
+		}
+		names := sortedServiceNames(grouped)
+		if len(names) != 1 || names[0] != "web" {
+			t.Errorf("expected [web], got %v", names)
+		}
+	})
+}
+
+func TestNewConstants(t *testing.T) {
+	t.Run("deployment statuses", func(t *testing.T) {
+		if statusStopping != "stopping" {
+			t.Errorf("expected stopping, got %s", statusStopping)
+		}
+		if statusStopped != "stopped" {
+			t.Errorf("expected stopped, got %s", statusStopped)
+		}
+	})
+
+	t.Run("task types", func(t *testing.T) {
+		if taskTypeStopAndRemove != "stop_and_remove" {
+			t.Errorf("expected stop_and_remove, got %s", taskTypeStopAndRemove)
+		}
+	})
+
+	t.Run("registry key", func(t *testing.T) {
+		if keyRegistry != "config/registry" {
+			t.Errorf("expected config/registry, got %s", keyRegistry)
+		}
+	})
+}
+
 func assertSliceEqual(t *testing.T, expected, got []string) {
 	t.Helper()
 	if len(expected) != len(got) {

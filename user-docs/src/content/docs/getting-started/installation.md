@@ -32,7 +32,7 @@ The script installs:
 | Role | What gets installed |
 |------|-------------------|
 | Engine | `banyan-cli`, etcd |
-| Agent | `banyan-cli`, containerd, nerdctl, CNI plugins |
+| Agent | `banyan-cli`, containerd, nerdctl, CNI plugins, BuildKit |
 
 Supported distros: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux. Architectures: x86_64, ARM64.
 
@@ -63,7 +63,7 @@ scp banyan-cli user@server:/usr/local/bin/
 When building from source, you still need to install dependencies on each node manually:
 
 - **Engine node**: etcd (`sudo apt-get install etcd-server` on Debian/Ubuntu)
-- **Worker nodes**: containerd and nerdctl (see the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands)
+- **Worker nodes**: containerd, nerdctl, BuildKit (see the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands)
 
 ## Verify
 

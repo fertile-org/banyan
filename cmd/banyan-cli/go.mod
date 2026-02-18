@@ -4,7 +4,8 @@ go 1.24.3
 
 require (
 	github.com/fertile-org/banyan/pkg/vpc v0.0.0
-	github.com/spf13/cobra v1.8.0
+	github.com/google/go-containerregistry v0.20.7
+	github.com/spf13/cobra v1.10.1
 	go.etcd.io/etcd/client/v3 v3.5.21
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -19,7 +20,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/miekg/dns v1.1.69 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
-	github.com/spf13/pflag v1.0.5 // indirect
+	github.com/spf13/pflag v1.0.9 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
 	go.uber.org/multierr v1.11.0 // indirect

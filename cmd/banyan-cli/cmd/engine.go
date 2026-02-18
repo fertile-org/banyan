@@ -3,6 +3,9 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -14,6 +17,7 @@ import (
 
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/vpc/storage"
+	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/spf13/cobra"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -27,6 +31,7 @@ var (
 	engineEtcdPidFile    string
 	engineEtcdLogFile    string
 	engineEtcdClientURLs string
+	engineRegistryPort   string
 )
 
 var engineCmd = &cobra.Command{
@@ -93,6 +98,7 @@ func init() {
 	engineStartCmd.Flags().StringVar(&engineEtcdPidFile, "etcd-pid-file", "/var/run/banyan-etcd.pid", "Etcd PID file")
 	engineStartCmd.Flags().StringVar(&engineEtcdLogFile, "etcd-log-file", "/var/log/banyan-etcd.log", "Etcd log file")
 	engineStartCmd.Flags().StringVar(&engineEtcdClientURLs, "etcd-client-urls", "http://0.0.0.0:2379", "Etcd client URLs")
+	engineStartCmd.Flags().StringVar(&engineRegistryPort, "registry-port", "5000", "Embedded OCI registry port")
 
 	engineStatusCmd.Flags().StringVar(&engineEtcdEndpoints, "etcd", "http://localhost:2379", "Etcd endpoints")
 	engineStatusCmd.Flags().StringVar(&engineEtcdPidFile, "etcd-pid-file", "/var/run/banyan-etcd.pid", "Etcd PID file")
@@ -180,6 +186,26 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Println("VPC initialized")
 
+	// Start embedded OCI registry
+	fmt.Printf("Starting OCI registry on port %s...\n", engineRegistryPort)
+	registryListener, err := startRegistry(ctx, engineRegistryPort)
+	if err != nil {
+		return fmt.Errorf("failed to start registry: %w", err)
+	}
+	fmt.Printf("OCI registry listening on :%s\n", engineRegistryPort)
+
+	// Determine engine IP and store registry URL in etcd
+	engineIP, err := determineEngineIP()
+	if err != nil {
+		return fmt.Errorf("failed to determine engine IP: %w", err)
+	}
+	registryURL := fmt.Sprintf("%s:%s", engineIP, engineRegistryPort)
+	if err := store.Save(ctx, keyRegistry, registryURL); err != nil {
+		return fmt.Errorf("failed to save registry URL: %w", err)
+	}
+	fmt.Printf("Registry URL: %s (saved to etcd)\n", registryURL)
+	_ = registryListener // kept for future graceful shutdown
+
 	fmt.Println("========================================")
 	fmt.Println("Engine is running. Watching for deployments...")
 	fmt.Println("")
@@ -193,6 +219,17 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	go engineLoop(ctx, store)
 
 	<-ctx.Done()
+
+	// Stop etcd on shutdown
+	if isEngineEtcdRunning() {
+		fmt.Println("Stopping etcd...")
+		if err := stopEngineEtcd(); err != nil {
+			fmt.Printf("Warning: Failed to stop etcd: %v\n", err)
+		} else {
+			fmt.Println("etcd stopped")
+		}
+	}
+
 	fmt.Println("Engine stopped")
 	return nil
 }
@@ -232,6 +269,8 @@ func processDeployments(ctx context.Context, store *storage.EtcdStore) {
 			schedulePendingDeployment(ctx, store, &record)
 		case statusDeploying:
 			checkDeployingDeployment(ctx, store, &record)
+		case statusStopping:
+			checkStoppingDeployment(ctx, store, &record)
 		}
 	}
 }
@@ -338,6 +377,54 @@ func checkDeployingDeployment(ctx context.Context, store *storage.EtcdStore, dep
 	}
 }
 
+// checkStoppingDeployment checks if all stop_and_remove tasks for a deployment have completed.
+func checkStoppingDeployment(ctx context.Context, store *storage.EtcdStore, deployment *DeploymentRecord) {
+	tasks := collectDeploymentTasks(ctx, store, deployment.ID)
+
+	totalTasks := 0
+	completedTasks := 0
+	failedTasks := 0
+	var firstError string
+
+	for _, task := range tasks {
+		if task.Type != taskTypeStopAndRemove {
+			continue
+		}
+		totalTasks++
+		switch task.Status {
+		case statusCompleted:
+			completedTasks++
+		case statusFailed:
+			failedTasks++
+			if firstError == "" {
+				firstError = task.Error
+			}
+		}
+	}
+
+	if totalTasks == 0 {
+		return
+	}
+
+	if failedTasks > 0 {
+		deployment.Status = statusFailed
+		deployment.Error = fmt.Sprintf("%d/%d stop tasks failed: %s", failedTasks, totalTasks, firstError)
+		deployment.UpdatedAt = time.Now()
+		if err := store.Save(ctx, keyDeployments+deployment.ID, deployment); err == nil {
+			fmt.Printf("[Engine] Deployment '%s' stop FAILED: %s\n", deployment.Name, deployment.Error)
+		}
+		return
+	}
+
+	if completedTasks == totalTasks {
+		deployment.Status = statusStopped
+		deployment.UpdatedAt = time.Now()
+		if err := store.Save(ctx, keyDeployments+deployment.ID, deployment); err == nil {
+			fmt.Printf("[Engine] Deployment '%s' is STOPPED (%d containers removed)\n", deployment.Name, completedTasks)
+		}
+	}
+}
+
 // listAvailableAgents returns all registered agents.
 func listAvailableAgents(ctx context.Context, store *storage.EtcdStore) ([]NodeRecord, error) {
 	keys, err := store.List(ctx, keyNodes)
@@ -411,17 +498,109 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 		if err := store.Get(ctx, key, &record); err != nil {
 			continue
 		}
-		svcCount := len(record.Services)
-		totalReplicas := 0
-		for _, svc := range record.Services {
-			totalReplicas += svc.Replicas
+
+		// Collect all tasks for this deployment and filter to create_and_start
+		allTasks := collectDeploymentTasks(ctx, store, record.ID)
+		var tasks []TaskRecord
+		for _, t := range allTasks {
+			if t.Type == taskTypeCreateAndStart {
+				tasks = append(tasks, t)
+			}
 		}
-		fmt.Printf("  - %s (status: %s, services: %d, replicas: %d)\n",
-			record.Name, record.Status, svcCount, totalReplicas)
+
+		// Count healthy vs total
+		healthy := 0
+		for _, t := range tasks {
+			if t.ContainerStatus == statusRunning {
+				healthy++
+			}
+		}
+
+		fmt.Printf("  - %s (status: %s, containers: %d/%d healthy)\n",
+			record.Name, record.Status, healthy, len(tasks))
+
+		// Group by service and print per-container detail
+		grouped := groupTasksByService(tasks)
+		for _, svcName := range sortedServiceNames(grouped) {
+			fmt.Printf("    %s:\n", svcName)
+			for _, t := range grouped[svcName] {
+				containerStatus := t.ContainerStatus
+				if containerStatus == "" {
+					containerStatus = "pending"
+				}
+				checkedInfo := ""
+				if !t.ContainerCheckedAt.IsZero() {
+					ago := time.Since(t.ContainerCheckedAt).Truncate(time.Second)
+					checkedInfo = fmt.Sprintf(" (checked %s ago)", ago)
+				}
+				fmt.Printf("      %s on %s: %s%s\n", t.ContainerName, t.AgentID, containerStatus, checkedInfo)
+			}
+		}
 	}
 
 	fmt.Println("\n========================================")
 	return nil
+}
+
+// --- registry helpers ---
+
+// startRegistry starts an in-memory OCI registry on the given port.
+// The server shuts down gracefully when ctx is cancelled.
+func startRegistry(ctx context.Context, port string) (net.Listener, error) {
+	handler := registry.New()
+
+	listener, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		return nil, fmt.Errorf("failed to listen on port %s: %w", port, err)
+	}
+
+	server := &http.Server{Handler: handler}
+	go func() {
+		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Registry server error: %v\n", err)
+		}
+	}()
+
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx)
+	}()
+
+	return listener, nil
+}
+
+// determineEngineIP extracts the host from engineEtcdClientURLs.
+// If the host is 0.0.0.0, it auto-detects the first non-loopback IPv4 address.
+func determineEngineIP() (string, error) {
+	parsed, err := url.Parse(engineEtcdClientURLs)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse etcd client URL %q: %w", engineEtcdClientURLs, err)
+	}
+
+	host := parsed.Hostname()
+	if host != "0.0.0.0" && host != "" {
+		return host, nil
+	}
+
+	// Auto-detect first non-loopback IPv4 address
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "", fmt.Errorf("failed to get interface addresses: %w", err)
+	}
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		ip := ipNet.IP
+		if ip.IsLoopback() || ip.To4() == nil {
+			continue
+		}
+		return ip.String(), nil
+	}
+	return "", fmt.Errorf("no non-loopback IPv4 address found")
 }
 
 // --- etcd management helpers ---

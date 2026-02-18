@@ -4,6 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -24,6 +27,8 @@ var (
 	agentDataDir        string
 	agentNodeName       string
 	agentPidFile        string
+	agentAPIPort        string
+	agentAPIAddress     string
 )
 
 var agentCmd = &cobra.Command{
@@ -86,6 +91,8 @@ func init() {
 	agentStartCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "http://localhost:2379", "Engine endpoint")
 	agentStartCmd.Flags().StringVar(&agentNodeName, "node-name", "", "Node name (defaults to hostname)")
 	agentStartCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
+	agentStartCmd.Flags().StringVar(&agentAPIPort, "api-port", "9090", "Agent API server port")
+	agentStartCmd.Flags().StringVar(&agentAPIAddress, "api-address", "", "Agent API address override (e.g. 192.168.1.10:9090)")
 
 	agentStatusCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "http://localhost:2379", "Engine endpoint")
 	agentStatusCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
@@ -199,12 +206,19 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Container runtime: nerdctl (%s)\n", nerdctlPath)
 	}
 
+	// Determine API address for this agent
+	apiAddr := agentAPIAddress
+	if apiAddr == "" {
+		apiAddr = nodeName + ":" + agentAPIPort
+	}
+
 	// Register node
 	node := &NodeRecord{
-		Name:      nodeName,
-		Status:    "ready",
-		LastSeen:  time.Now(),
-		CreatedAt: time.Now(),
+		Name:       nodeName,
+		Status:     "ready",
+		APIAddress: apiAddr,
+		LastSeen:   time.Now(),
+		CreatedAt:  time.Now(),
 	}
 	if err := store.Save(ctx, keyNodes+nodeName, node); err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
@@ -230,6 +244,12 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 
 	// Start heartbeat
 	go agentHeartbeat(ctx, store, nodeName)
+
+	// Start container health monitoring
+	go containerHealthLoop(ctx, store, nodeName)
+
+	// Start agent HTTP server for log streaming
+	go agentHTTPServer(ctx, &NerdctlLogProvider{}, agentAPIPort)
 
 	<-ctx.Done()
 
@@ -310,6 +330,8 @@ func executeTask(ctx context.Context, task *TaskRecord) (*TaskResultRecord, erro
 	switch task.Type {
 	case taskTypeCreateAndStart:
 		return executeCreateAndStart(ctx, task)
+	case taskTypeStopAndRemove:
+		return executeStopAndRemove(ctx, task)
 	default:
 		return nil, fmt.Errorf("unknown task type: %s", task.Type)
 	}
@@ -317,10 +339,10 @@ func executeTask(ctx context.Context, task *TaskRecord) (*TaskResultRecord, erro
 
 // executeCreateAndStart pulls the image and runs the container.
 func executeCreateAndStart(ctx context.Context, task *TaskRecord) (*TaskResultRecord, error) {
-	// Pull the image
+	// Pull the image from registry (--insecure-registry is safe for both HTTP and HTTPS registries)
 	fmt.Printf("[Agent]   Pulling image %s...\n", task.Image)
-	if err := runCommand(ctx, "nerdctl", "pull", task.Image); err != nil {
-		return nil, fmt.Errorf("failed to pull image: %w", err)
+	if err := runCommand(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
+		return nil, fmt.Errorf("failed to pull image %s: %v", task.Image, err)
 	}
 
 	// Build nerdctl run command
@@ -388,6 +410,162 @@ func agentHeartbeat(ctx context.Context, store *storage.EtcdStore, nodeName stri
 			node.Status = "ready"
 			store.Save(ctx, keyNodes+nodeName, &node)
 		}
+	}
+}
+
+// containerHealthLoop periodically checks the status of containers managed by this agent.
+// For each completed create_and_start task, it runs nerdctl inspect and updates the task record.
+func containerHealthLoop(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			checkContainerHealth(ctx, store, nodeName)
+		}
+	}
+}
+
+// checkContainerHealth inspects all completed create_and_start tasks on this node
+// and updates their container status in etcd.
+func checkContainerHealth(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+	taskPrefix := keyTasks + nodeName + "/"
+	keys, err := store.List(ctx, taskPrefix)
+	if err != nil {
+		return
+	}
+
+	for _, key := range keys {
+		var task TaskRecord
+		if err := store.Get(ctx, key, &task); err != nil {
+			continue
+		}
+
+		// Only check completed create_and_start tasks
+		if task.Type != taskTypeCreateAndStart || task.Status != statusCompleted {
+			continue
+		}
+
+		status := getContainerStatus(ctx, task.ContainerName)
+		task.ContainerStatus = status
+		task.ContainerCheckedAt = time.Now()
+		store.Save(ctx, key, &task)
+	}
+}
+
+// executeStopAndRemove forcefully removes a container using nerdctl.
+// "Not found" errors are ignored since the container may already be gone.
+func executeStopAndRemove(ctx context.Context, task *TaskRecord) (*TaskResultRecord, error) {
+	fmt.Printf("[Agent]   Removing container %s...\n", task.ContainerName)
+
+	cmd := exec.CommandContext(ctx, "nerdctl", "rm", "-f", task.ContainerName)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		// Ignore "not found" errors — container may already be gone
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "No such container") {
+			fmt.Printf("[Agent]   Container %s already removed\n", task.ContainerName)
+			return &TaskResultRecord{}, nil
+		}
+		return nil, fmt.Errorf("failed to remove container: %s", errMsg)
+	}
+
+	return &TaskResultRecord{}, nil
+}
+
+// agentHTTPServer starts an HTTP server for the agent API (e.g., log streaming).
+// It listens on the given port and shuts down gracefully when the context is cancelled.
+func agentHTTPServer(ctx context.Context, logProvider LogProvider, apiPort string) {
+	mux := http.NewServeMux()
+
+	// GET /v1/logs/{container}?follow=true&tail=100
+	mux.HandleFunc("/v1/logs/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Extract container name from path: /v1/logs/<container>
+		containerName := strings.TrimPrefix(r.URL.Path, "/v1/logs/")
+		containerName = strings.TrimSuffix(containerName, "/")
+		if containerName == "" {
+			http.Error(w, "container name required", http.StatusBadRequest)
+			return
+		}
+
+		// Parse query params
+		query := r.URL.Query()
+		follow := query.Get("follow") == "true"
+		tail := 0
+		if tailStr := query.Get("tail"); tailStr != "" {
+			if v, err := strconv.Atoi(tailStr); err == nil && v > 0 {
+				tail = v
+			}
+		}
+
+		opts := LogOptions{
+			Follow: follow,
+			Tail:   tail,
+		}
+
+		// Use request context so stream stops if client disconnects
+		reqCtx := r.Context()
+		reader, err := logProvider.StreamLogs(reqCtx, containerName, opts)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("failed to stream logs: %v", err), http.StatusInternalServerError)
+			return
+		}
+		defer reader.Close()
+
+		// Set headers for chunked streaming
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Transfer-Encoding", "chunked")
+		w.WriteHeader(http.StatusOK)
+
+		flusher, canFlush := w.(http.Flusher)
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := reader.Read(buf)
+			if n > 0 {
+				if _, writeErr := w.Write(buf[:n]); writeErr != nil {
+					return
+				}
+				if canFlush {
+					flusher.Flush()
+				}
+			}
+			if readErr != nil {
+				if readErr != io.EOF {
+					fmt.Fprintf(w, "\n[error reading logs: %v]\n", readErr)
+					if canFlush {
+						flusher.Flush()
+					}
+				}
+				return
+			}
+		}
+	})
+
+	server := &http.Server{
+		Addr:    net.JoinHostPort("", apiPort),
+		Handler: mux,
+	}
+
+	// Graceful shutdown when context is cancelled
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		server.Shutdown(shutdownCtx)
+	}()
+
+	fmt.Printf("Agent API server listening on :%s\n", apiPort)
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		fmt.Printf("Agent API server error: %v\n", err)
 	}
 }
 

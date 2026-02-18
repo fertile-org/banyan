@@ -41,17 +41,20 @@ Then your app grows. You want your services spread across separate servers, or r
 ```yaml
 services:
   web:
-    image: nginx:alpine
+    build: ./web
     ports:
       - "80:80"
 
   api:
-    image: hashicorp/http-echo:latest
+    build: ./api
     ports:
-      - "3000:3000"
+      - "8080:8080"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
 
   db:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
 ```
 
 **banyan.yaml** — distributed across your cluster:
@@ -61,19 +64,31 @@ name: my-app
 
 services:
   web:
-    image: nginx:alpine
-    replicas: 3
+    build: ./web
     ports:
       - "80:80"
+    depends_on:
+      - api
 
   api:
-    image: hashicorp/http-echo:latest
-    replicas: 2
+    build: ./api
+    replicas: 3
     ports:
-      - "3000:3000"
+      - "8080:8080"
+    env:
+      - DB_HOST=my-app-db-0
+      - DB_PORT=5432
+    depends_on:
+      - db
 
   db:
-    image: postgres:16-alpine
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    env:
+      - POSTGRES_USER=banyan
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=app
 ```
 
 Same `services`. Same `image`. Same `ports`. Same `env`. Banyan spreads them across your servers automatically — and `replicas` lets you run multiple copies when you need them.
@@ -109,6 +124,7 @@ No package managers. No plugins. One binary does everything.
 
 - **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
 - **Single binary** — `banyan-cli` is the Engine, the Agent, and the deploy tool. Build once, copy to your servers, done.
+- **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
 - **Automatic distribution** — Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
 - **Proven foundations** — etcd for state coordination. containerd for running containers. No experimental runtimes.
 

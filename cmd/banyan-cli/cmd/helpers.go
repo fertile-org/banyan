@@ -1,7 +1,12 @@
 package cmd
 
 import (
+	"bytes"
+	"context"
 	"fmt"
+	"os/exec"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -87,4 +92,76 @@ func buildNerdctlRunArgs(task *TaskRecord) []string {
 	args = append(args, task.Image)
 	args = append(args, task.Command...)
 	return args
+}
+
+// getContainerStatus runs nerdctl inspect to get the container's current status.
+// Returns "running", "exited", "paused", etc., or "not_found" if the container doesn't exist.
+func getContainerStatus(ctx context.Context, containerName string) string {
+	cmd := exec.CommandContext(ctx, "nerdctl", "inspect", "--format", "{{.State.Status}}", containerName)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "not_found"
+	}
+	status := strings.TrimSpace(stdout.String())
+	if status == "" {
+		return "not_found"
+	}
+	return status
+}
+
+// groupTasksByService groups tasks by their ServiceName and returns them
+// with service names sorted alphabetically for stable output.
+func groupTasksByService(tasks []TaskRecord) map[string][]TaskRecord {
+	grouped := make(map[string][]TaskRecord)
+	for _, task := range tasks {
+		grouped[task.ServiceName] = append(grouped[task.ServiceName], task)
+	}
+	return grouped
+}
+
+// sortedServiceNames returns sorted service names from a grouped tasks map.
+func sortedServiceNames(grouped map[string][]TaskRecord) []string {
+	names := make([]string, 0, len(grouped))
+	for name := range grouped {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// collectDeploymentTasks gathers all tasks for a given deployment across all agents.
+func collectDeploymentTasks(ctx context.Context, store interface {
+	List(ctx context.Context, prefix string) ([]string, error)
+	Get(ctx context.Context, key string, dest interface{}) error
+}, deploymentID string) []TaskRecord {
+	nodeKeys, err := store.List(ctx, keyNodes)
+	if err != nil {
+		return nil
+	}
+
+	var tasks []TaskRecord
+	for _, nodeKey := range nodeKeys {
+		var node NodeRecord
+		if err := store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+
+		taskKeys, err := store.List(ctx, keyTasks+node.Name+"/")
+		if err != nil {
+			continue
+		}
+
+		for _, taskKey := range taskKeys {
+			var task TaskRecord
+			if err := store.Get(ctx, taskKey, &task); err != nil {
+				continue
+			}
+			if task.DeploymentID == deploymentID {
+				tasks = append(tasks, task)
+			}
+		}
+	}
+	return tasks
 }

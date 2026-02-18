@@ -7,7 +7,7 @@ import (
 func TestBuildServiceRecords(t *testing.T) {
 	t.Run("defaults replicas to 1 when zero", func(t *testing.T) {
 		manifest := map[string]ManifestService{
-			"web": {Image: "nginx:latest", Replicas: 0},
+			"web": {Image: "nginx:latest"},
 		}
 		services := buildServiceRecords(manifest)
 		if services["web"].Replicas != 1 {
@@ -17,7 +17,7 @@ func TestBuildServiceRecords(t *testing.T) {
 
 	t.Run("preserves explicit replicas", func(t *testing.T) {
 		manifest := map[string]ManifestService{
-			"web": {Image: "nginx:latest", Replicas: 3},
+			"web": {Image: "nginx:latest", Deploy: &ManifestDeploy{Replicas: 3}},
 		}
 		services := buildServiceRecords(manifest)
 		if services["web"].Replicas != 3 {
@@ -28,12 +28,12 @@ func TestBuildServiceRecords(t *testing.T) {
 	t.Run("maps all fields correctly", func(t *testing.T) {
 		manifest := map[string]ManifestService{
 			"api": {
-				Image:     "my-api:v1",
-				Replicas:  2,
-				Ports:     []string{"8080:80"},
-				Env:       []string{"DB=postgres"},
-				Command:   []string{"serve"},
-				DependsOn: []string{"db"},
+				Image:       "my-api:v1",
+				Deploy:      &ManifestDeploy{Replicas: 2},
+				Ports:       []string{"8080:80"},
+				Environment: []string{"DB=postgres"},
+				Command:     []string{"serve"},
+				DependsOn:   []string{"db"},
 			},
 		}
 		services := buildServiceRecords(manifest)

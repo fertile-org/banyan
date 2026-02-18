@@ -14,16 +14,14 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Services | `services:` | `services:` | Same |
 | Image | `image:` | `image:` | Same |
 | Ports | `ports: ["80:80"]` | `ports: ["80:80"]` | Same format |
-| Environment | `environment:` | `env:` | Shorter key name |
+| Environment | `environment:` | `environment:` | Same |
 | Command | `command:` | `command:` | Same |
 | Dependencies | `depends_on:` | `depends_on:` | Same (informational) |
-| Replicas | `deploy.replicas:` | `replicas:` | Top-level, not nested |
+| Replicas | `deploy.replicas:` | `deploy.replicas:` | Same |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
 | Build | `build:` | `build:` | Same syntax (context + dockerfile) |
 | Volumes | `volumes:` | -- | Not yet supported |
 | Networks | `networks:` | -- | Managed automatically |
-
-The biggest difference: `replicas` is a top-level field on each service, not buried under `deploy`. This keeps the manifest flat and readable.
 
 ## Structure
 
@@ -34,10 +32,11 @@ services:
   <service-name>:           # One or more services
     image: <image>          # Required (unless build is set)
     build: <context-path>   # Build from Dockerfile
-    replicas: <number>      # Default: 1
+    deploy:
+      replicas: <number>    # Default: 1
     ports:
       - "<host>:<container>"
-    env:
+    environment:
       - KEY=value
     command:
       - <arg1>
@@ -61,9 +60,9 @@ services:
 |-------|------|----------|---------|-------------|
 | `image` | string | Conditional | -- | Container image. Required unless `build` is set. Any registry works: `nginx:alpine`, `ghcr.io/org/app:v1`. |
 | `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
-| `replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
+| `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
-| `env` | list | No | -- | Environment variables in `KEY=value` format. |
+| `environment` | list | No | -- | Environment variables in `KEY=value` format. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
 | `depends_on` | list | No | -- | Services that should start first. Currently informational only. |
 
@@ -107,10 +106,11 @@ services:
 
   api:
     build: ./api
-    replicas: 3
+    deploy:
+      replicas: 3
     ports:
       - "8080:8080"
-    env:
+    environment:
       - DB_HOST=my-app-db-0
       - DB_PORT=5432
     depends_on:
@@ -118,16 +118,15 @@ services:
 
   db:
     image: postgres:15-alpine
-    replicas: 1
     ports:
       - "5432:5432"
-    env:
+    environment:
       - POSTGRES_USER=banyan
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=app
 ```
 
-This shows `build:` for custom services, `image:` for off-the-shelf databases, `replicas` for scaling, `env` for configuration, and `depends_on` for ordering.
+This shows `build:` for custom services, `image:` for off-the-shelf databases, `deploy.replicas` for scaling, `environment` for configuration, and `depends_on` for ordering.
 
 ### Build from source
 

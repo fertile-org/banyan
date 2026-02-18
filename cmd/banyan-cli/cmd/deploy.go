@@ -43,10 +43,11 @@ Example banyan.yaml:
         - api
     api:
       build: ./api
-      replicas: 3
+      deploy:
+        replicas: 3
       ports:
         - "8080:8080"
-      env:
+      environment:
         - DB_HOST=my-app-db-0
         - DB_PORT=5432
       depends_on:
@@ -55,7 +56,7 @@ Example banyan.yaml:
       image: postgres:15-alpine
       ports:
         - "5432:5432"
-      env:
+      environment:
         - POSTGRES_USER=banyan
         - POSTGRES_PASSWORD=secret
         - POSTGRES_DB=app
@@ -106,13 +107,26 @@ type BanyanManifest struct {
 
 // ManifestService represents a service in the manifest
 type ManifestService struct {
-	Image       string         `yaml:"image"`
-	Build       *ManifestBuild `yaml:"build,omitempty"`
-	Replicas    int            `yaml:"replicas,omitempty"`
-	Ports       []string       `yaml:"ports,omitempty"`
-	Env         []string       `yaml:"env,omitempty"`
-	Command     []string       `yaml:"command,omitempty"`
-	DependsOn   []string       `yaml:"depends_on,omitempty"`
+	Image       string          `yaml:"image"`
+	Build       *ManifestBuild  `yaml:"build,omitempty"`
+	Deploy      *ManifestDeploy `yaml:"deploy,omitempty"`
+	Ports       []string        `yaml:"ports,omitempty"`
+	Environment []string        `yaml:"environment,omitempty"`
+	Command     []string        `yaml:"command,omitempty"`
+	DependsOn   []string        `yaml:"depends_on,omitempty"`
+}
+
+// ManifestDeploy represents deploy configuration (matches Docker Compose).
+type ManifestDeploy struct {
+	Replicas int `yaml:"replicas,omitempty"`
+}
+
+// GetReplicas returns the replica count from deploy config, defaulting to 0 (caller handles default).
+func (s ManifestService) GetReplicas() int {
+	if s.Deploy != nil {
+		return s.Deploy.Replicas
+	}
+	return 0
 }
 
 // ManifestBuild represents build configuration for a service.

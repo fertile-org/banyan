@@ -55,10 +55,11 @@ services:
 
   api:
     build: ./api
-    replicas: 3
+    deploy:
+      replicas: 3
     ports:
       - "8080:8080"
-    env:
+    environment:
       - DB_HOST=my-app-db-0
       - DB_PORT=5432
     depends_on:
@@ -68,13 +69,13 @@ services:
     image: postgres:15-alpine
     ports:
       - "5432:5432"
-    env:
+    environment:
       - POSTGRES_USER=banyan
       - POSTGRES_PASSWORD=secret
       - POSTGRES_DB=app
 ```
 
-If you've written a `docker-compose.yml` before, this should look familiar. Services with `build:` are built locally and pushed to the Engine's registry. Services with `image:` are pulled directly. `replicas` tells Banyan how many instances to run.
+If you've written a `docker-compose.yml` before, this should look familiar. Services with `build:` are built locally and pushed to the Engine's registry. Services with `image:` are pulled directly. `deploy.replicas` tells Banyan how many instances to run.
 
 ## 4. Deploy
 

@@ -23,12 +23,16 @@ type banyanConfig struct {
 }
 
 type banyanService struct {
-	Image       string            `yaml:"image"`
-	Replicas    int               `yaml:"replicas"`
-	Ports       []string          `yaml:"ports"`
-	Environment map[string]string `yaml:"environment"`
-	DependsOn   []string          `yaml:"depends_on"`
+	Image       string             `yaml:"image"`
+	Deploy      *banyanDeploy      `yaml:"deploy"`
+	Ports       []string           `yaml:"ports"`
+	Environment map[string]string  `yaml:"environment"`
+	DependsOn   []string           `yaml:"depends_on"`
 	HealthCheck *banyanHealthCheck `yaml:"healthcheck"`
+}
+
+type banyanDeploy struct {
+	Replicas int `yaml:"replicas"`
 }
 
 type banyanHealthCheck struct {
@@ -47,7 +51,10 @@ func (p *MemoryBanyanParser) Parse(banyanContent string) ([]domain.Service, erro
 
 	var services []domain.Service
 	for name, svc := range config.Services {
-		replicas := svc.Replicas
+		replicas := 0
+		if svc.Deploy != nil {
+			replicas = svc.Deploy.Replicas
+		}
 		if replicas == 0 {
 			replicas = 1 // Default
 		}

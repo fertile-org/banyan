@@ -7,19 +7,21 @@ services:
   # Simple web server
   web:
     image: nginx:alpine
-    replicas: 2
+    deploy:
+      replicas: 2
     ports:
       - "80:80"
 
   # API service
   api:
     image: alpine:latest
-    replicas: 2
+    deploy:
+      replicas: 2
     command:
       - sh
       - -c
       - "echo 'API running' && sleep infinity"
-    env:
+    environment:
       - APP_ENV=test
       - LOG_LEVEL=debug
     depends_on:
@@ -28,10 +30,9 @@ services:
   # Background worker
   worker:
     image: alpine:latest
-    replicas: 1
     command:
       - sh
       - -c
       - "echo 'Worker running' && sleep infinity"
-    env:
+    environment:
       - WORKER_ID=1

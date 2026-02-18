@@ -15,7 +15,7 @@ import (
 func buildServiceRecords(manifest map[string]ManifestService) map[string]ServiceRecord {
 	services := make(map[string]ServiceRecord, len(manifest))
 	for name, svc := range manifest {
-		replicas := svc.Replicas
+		replicas := svc.GetReplicas()
 		if replicas == 0 {
 			replicas = 1
 		}
@@ -23,7 +23,7 @@ func buildServiceRecords(manifest map[string]ManifestService) map[string]Service
 			Image:       svc.Image,
 			Replicas:    replicas,
 			Ports:       svc.Ports,
-			Environment: svc.Env,
+			Environment: svc.Environment,
 			Command:     svc.Command,
 			DependsOn:   svc.DependsOn,
 		}

@@ -149,89 +149,105 @@
 
 **Design**: [docs/engine/vpc-coordinator.md](engine/vpc-coordinator.md)
 
-- [ ] Domain layer (ContainerNetwork, NetworkProvisionSpec)
-- [ ] Inbound port (VPCCoordinatorService interface)
-- [ ] Outbound ports (interfaces wrapping `pkg/vpc/` types)
-- [ ] Use cases (NetworkProvisioner, IPAllocator, SecurityPolicyManager)
-- [ ] Adapters (thin wrappers around `pkg/vpc/` implementations)
-- [ ] Unit tests
-
-**Note**: VPC Coordinator is an ADAPTER that uses `pkg/vpc/`. It does NOT re-implement VPC.
+- [x] Domain layer (ContainerNetwork, NetworkProvisionSpec)
+- [x] Inbound port (VPCCoordinatorService interface)
+- [x] Outbound ports (interfaces wrapping `pkg/vpc/` types)
+- [x] Use cases (NetworkProvisioner, IPAllocator, SecurityPolicyManager)
+- [x] Adapters (thin wrappers around `pkg/vpc/` implementations)
+- [x] Unit tests
 
 ### 3.5 State Manager
 
 **Design**: [docs/engine/state-manager.md](engine/state-manager.md)
 
-- [ ] Domain layer (DesiredState, ActualState, StateDrift, ServiceState)
-- [ ] Inbound ports (StateService, ReconcilerService interfaces)
-- [ ] Outbound ports (StateRepository, AgentQuerier, ActionDispatcher)
-- [ ] Use cases (StateTracker, DriftDetector, Reconciler)
-- [ ] Adapters (MemoryStateRepository or EtcdStateRepository, gRPCAgentQuerier)
-- [ ] Unit tests
+- [x] Domain layer (DesiredState, ActualState, StateDrift, ServiceState)
+- [x] Inbound ports (StateService, ReconcilerService interfaces)
+- [x] Outbound ports (StateRepository, AgentQuerier, ActionDispatcher)
+- [x] Use cases (StateTracker, DriftDetector, Reconciler)
+- [x] Adapters (MemoryStateRepository, MemoryAgentQuerier, MemoryDispatcher)
+- [x] Unit tests
 
 ### 3.6 Orchestrator
 
 **Design**: [docs/engine/orchestrator.md](engine/orchestrator.md)
 
-- [ ] Domain layer (Deployment entity, DeploymentStatus, DeploymentPhase, ServiceInstance)
-- [ ] Inbound port (OrchestratorService interface)
-- [ ] Outbound ports (ParserService, RegistryService, PluginService, VPCService, StateService, TaskDispatcher)
-- [ ] Use case (DeploymentWorkflow implementation)
-- [ ] Adapters (internal adapters to other Engine components, gRPCTaskDispatcher)
-- [ ] Unit tests
+- [x] Domain layer (Deployment entity, DeploymentStatus, DeploymentPhase, ServiceInstance)
+- [x] Inbound port (OrchestratorService interface)
+- [x] Outbound ports (ParserService, RegistryService, PluginService, VPCService, StateService, TaskDispatcher)
+- [x] Use case (DeploymentWorkflow implementation)
+- [x] Adapters (MemoryDeploymentRepository, MemoryAgentDispatcher, MemoryScheduler, MemoryPluginExecutor, MemoryBanyanParser)
+- [x] Unit tests
 
 ### 3.7 Engine gRPC Server
 
-- [ ] Proto definitions (`api/proto/engine/`)
-  - [ ] `deploy.proto` - Deployment API
-  - [ ] `status.proto` - Status queries
-  - [ ] `agent.proto` - Agent registration/heartbeat
-- [ ] gRPC server implementation (`pkg/engine/grpc/`)
-- [ ] Unit tests
+- [x] Server configuration (`pkg/engine/server/config/`)
+- [x] gRPC server implementation (`pkg/engine/server/grpc/`)
+- [x] Service factory
+- [x] Unit tests
 
-**Status**: 🔶 IN PROGRESS (3/7 complete)
+**Note**: Proto definitions for Engine-Agent communication (deploy.proto, status.proto, agent.proto) are not needed for MVP — etcd-based communication is used instead.
 
-**Note on VPC Coordinator**: This component uses `pkg/vpc/` package (which is complete). The VPC Coordinator is a **facade** that coordinates IP allocation, DNS registration, and security policy management at the Engine level. It does NOT re-implement VPC - it orchestrates the existing VPC managers.
+**Status**: ✅ COMPLETE
 
 ---
 
 ## Phase 4: Integration & Orchestration
 
-**Goal**: Full system integration and end-to-end testing.
+**Goal**: Wire CLI binaries to real components and validate end-to-end.
 
-### 4.1 Engine-Agent Communication
+### 4.1 Integration Tests (In-Memory) ✅ COMPLETE
 
-- [ ] Agent registration flow (Agent → Engine)
-- [ ] Heartbeat mechanism
-- [ ] Task dispatch (Engine → Agent)
-- [ ] Status reporting (Agent → Engine)
+- [x] Agent lifecycle test (`test/integration/integration/run_agent_lifecycle_integration.go`)
+- [x] Simple deployment test (`test/integration/integration/run_simple_deployment_integration.go`)
+- [x] Network provisioning test (`test/integration/integration/run_network_provisioning_integration.go`)
+- [x] Health monitoring test (`test/integration/integration/run_health_monitoring_integration.go`)
+- [x] State reconciliation test (`test/integration/integration/run_state_reconciliation_integration.go`)
+- [x] Engine component tests (`test/integration/engine/`)
+- [x] Agent task executor test (`test/integration/agent/`)
 
-### 4.2 Deployment Flow
+**Note**: These tests use in-memory adapters. They prove the component logic works but do not test real Engine-Agent communication.
 
-- [ ] Parse banyan.yml → Select agents → Provision network → Dispatch tasks
-- [ ] Plugin hooks (pre_deploy, post_deploy)
-- [ ] Container lifecycle management
-- [ ] Service discovery via DNS
+### 4.2 CLI Wiring (Real Adapters) ✅ COMPLETE
 
-### 4.3 Health & Reconciliation
+The CLI binaries now use etcd-based communication for the full task execution loop:
 
-- [ ] Health check failures trigger restart
-- [ ] State drift detection
-- [ ] Automatic reconciliation
+```
+deploy writes to etcd → Engine polls & orchestrates → Agent polls & executes → containers run
+```
 
-### 4.4 Integration Tests
+**4.2.1 Wire Engine Start** (`cmd/banyan-cli/cmd/engine.go`):
+- [x] Replaced Memory* adapters with etcd polling loop (3s interval)
+- [x] Scheduler reads agents from etcd, round-robin task assignment
+- [x] Engine polls `/deployments/` prefix for pending deployments
+- [x] Engine creates tasks at `/tasks/<agent>/<task-id>` for agents
+- [x] Engine checks task completion and updates deployment status
 
-- [ ] Agent lifecycle test (`test/integration/agent/`)
-- [ ] Engine component integration (`test/integration/engine/`)
-- [ ] Full deployment workflow (`test/integration/`)
+**4.2.2 Wire Agent Start** (`cmd/banyan-cli/cmd/agent.go`):
+- [x] Agent polls `/tasks/<node-name>/` for pending tasks (2s interval)
+- [x] Executes tasks via nerdctl (pull + run)
+- [x] Reports task results to etcd (completed/failed)
+- [x] Heartbeat loop updates node LastSeen every 15s
+- [x] Registers node on start, marks offline on shutdown
 
-### 4.5 E2E Tests
+**4.2.3 Wire Deploy Command** (`cmd/banyan-cli/cmd/deploy.go`):
+- [x] Writes DeploymentRecord with status "pending" to etcd
+- [x] Polls for deployment status changes (2s interval, 2min timeout)
+- [x] Reports progress to user (deploying → running/failed)
 
-- [ ] Multi-node deployment (`test/e2e/`)
+**4.2.4 Shared Types & Helpers** (`cmd/banyan-cli/cmd/types.go`, `helpers.go`):
+- [x] Shared etcd protocol types (DeploymentRecord, TaskRecord, NodeRecord, ServiceRecord)
+- [x] Extracted pure logic into testable functions (buildServiceRecords, buildTasksForDeployment, determineDeploymentStatus, buildNerdctlRunArgs)
+- [x] Unit tests for all helper functions (14 tests)
+
+### 4.3 E2E Tests ❌ NOT STARTED
+
+**Infrastructure exists**: `test/e2e/docker-compose.yml` (1 Engine + 2 Workers)
+
+- [ ] Multi-node deployment
 - [ ] Rolling updates
 - [ ] Failure recovery
 
-**Status**: ❌ NOT STARTED
+**Status**: 🔶 IN PROGRESS (4.1-4.2 complete, 4.3 not started)
 
 ---
 
@@ -241,19 +257,20 @@
 |-------|------------|--------|
 | 1. Foundation | Shared Domain, Infrastructure | ✅ Complete |
 | 2. Agent | Container, Network, Security, Health, Task, Server | ✅ Complete |
-| 3. Engine | Parser ✅, Registry ✅, Plugin ✅, VPC ❌, State ❌, Orchestrator ❌, gRPC ❌ | 🔶 In Progress |
-| 4. Integration | Communication, Deployment, Reconciliation, Tests | ❌ Not Started |
+| 3. Engine | Parser, Registry, Plugin, VPC, State, Orchestrator, Server | ✅ Complete |
+| 4. Integration | In-memory tests ✅, CLI wiring ✅, E2E ❌ | 🔶 In Progress |
+| 5. DNS | Service Registry, DNS Manager, CoreDNS | ✅ Complete |
+| 6. Production | Debug, Metrics, Flow Logs, Multi-CNI, Policies | ❌ Not Started |
 
 ---
 
-## Next Steps
+## Next Steps (MVP-1 Release)
 
-1. **Phase 3.4**: Implement VPC Coordinator - [design doc](engine/vpc-coordinator.md)
-2. **Phase 3.5**: Implement State Manager - [design doc](engine/state-manager.md)
-3. **Phase 3.6**: Implement Orchestrator - [design doc](engine/orchestrator.md)
-4. **Phase 3.7**: Implement Engine gRPC Server
+1. **Phase 4.3**: E2E tests — validate full flow in Docker-in-Docker
+2. Update E2E `docker-compose.yml` and entrypoint scripts for the new CLI commands
+3. Test: `banyan-cli engine start` → `banyan-cli agent start` → `banyan-cli deploy -f banyan.yaml`
 
 ---
 
-*Document Version: 1.0*
-*Date: 2026-01-01*
+*Document Version: 2.1*
+*Last Updated: 2026-02-14*

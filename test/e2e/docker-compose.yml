@@ -2,12 +2,15 @@ version: '3.8'
 
 # Banyan E2E Test Environment
 # 1 Engine + 2 Agents
+#
+# Pre-requisite: Build banyan-cli binary first:
+#   cd cmd/banyan-cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../../test/e2e/bin/banyan-cli .
 
 services:
   engine:
     build:
-      context: ../..
-      dockerfile: test/e2e/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: banyan-engine
     hostname: engine
     privileged: true
@@ -29,8 +32,8 @@ services:
 
   worker-1:
     build:
-      context: ../..
-      dockerfile: test/e2e/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: banyan-worker-1
     hostname: worker-1
     privileged: true
@@ -50,8 +53,8 @@ services:
 
   worker-2:
     build:
-      context: ../..
-      dockerfile: test/e2e/Dockerfile
+      context: .
+      dockerfile: Dockerfile
     container_name: banyan-worker-2
     hostname: worker-2
     privileged: true

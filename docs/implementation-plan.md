@@ -828,41 +828,45 @@ go test ./pkg/engine/grpc/... -v
 
 ## Phase 4: Integration & Orchestration
 
-### 4.1 Engine-Agent Integration
+### Current Status
 
-**Target**: Verify complete Engine-Agent communication
+Integration tests (4.1) verify the logic using in-memory adapters — they prove the components work correctly in isolation. However, the CLI binaries (`banyan-cli engine start`, `banyan-cli agent start`, `banyan-cli deploy`) currently use Memory* adapters and do **not** wire up the real task execution loop. Phase 4.2 (CLI Wiring) bridges this gap by replacing in-memory mocks with etcd-backed state and real containerd execution, enabling the E2E flow.
+
+### 4.1 Integration Tests (In-Memory) ✅ COMPLETE
+
+**Target**: Verify component logic with in-memory adapters
 
 **Test Directory**: `test/integration/`
 
 **Test Scenarios**:
 
-1. **Agent Lifecycle**
+1. **Agent Lifecycle** ✅
    ```
    Agent starts → Registers with Engine → Sends heartbeats →
    Engine tracks in registry → Agent disconnects → Engine marks unhealthy
    ```
 
-2. **Simple Deployment**
+2. **Simple Deployment** ✅
    ```
    User submits banyan.yml → Engine parses → Selects agent →
    Dispatches container task → Agent creates container →
    Reports status → Engine updates state
    ```
 
-3. **Network Provisioning**
+3. **Network Provisioning** ✅
    ```
    Deployment includes network config → VPC Coordinator provisions →
    Agent configures network namespace → Container gets IP →
    Security rules applied
    ```
 
-4. **Health Monitoring**
+4. **Health Monitoring** ✅
    ```
    Container deployed with health check → Agent monitors →
    Health check fails → Agent reports → Engine triggers restart
    ```
 
-5. **State Reconciliation**
+5. **State Reconciliation** ✅
    ```
    Container crashes externally → Agent detects → Reports to Engine →
    State Manager detects drift → Orchestrator reconciles
@@ -879,23 +883,102 @@ go test ./test/integration/... -v -tags=integration -run TestDeploymentWorkflow
 
 ---
 
-### 4.2 End-to-End Testing
+### 4.2 CLI Wiring (Real Adapters) ❌ NOT STARTED
 
-**Target**: Complete system validation
+**Target**: Wire the CLI binaries to use real Engine/Agent components with etcd-backed state, replacing in-memory mocks so the full task execution loop works end-to-end.
+
+**Problem**: The CLI commands currently:
+- `engine start` initializes Memory* adapters (MemoryAgentDispatcher, MemoryScheduler, etc.) then sits idle
+- `agent start` connects to etcd and registers a node, but does NOT use any `pkg/agent` components (container, health, network, security, task)
+- `deploy` parses banyan.yaml and writes metadata to etcd, but nothing picks it up
+
+**Required**: The task execution loop:
+```
+deploy writes to etcd → Engine watches & orchestrates → Agent watches & executes → containers run
+```
+
+#### 4.2.1 Wire Engine Start Command
+
+**File**: `cmd/banyan-cli/cmd/engine.go`
+
+**What to change**:
+- [ ] Replace `MemoryAgentDispatcher` with an etcd-backed task dispatcher that writes tasks to `/tasks/<agent-id>/<task-id>` in etcd
+- [ ] Replace `MemoryScheduler` with a scheduler that reads registered agents from etcd (using Agent Registry)
+- [ ] Replace `MemoryBanyanParser` with the real `pkg/engine/parser` (ComposeGo adapter)
+- [ ] Add an etcd watcher loop: watch `/deployments/` for new deployments, trigger the Orchestrator
+- [ ] Add an etcd watcher for agent registration: watch `/nodes/` for agent join/leave, update Registry
+- [ ] Add a reconciliation loop: periodically compare desired vs actual state, dispatch corrective tasks
+- [ ] Wire the Engine gRPC server (`pkg/engine/server/`) to accept agent connections (optional for MVP — etcd-based communication is sufficient)
+
+#### 4.2.2 Wire Agent Start Command
+
+**File**: `cmd/banyan-cli/cmd/agent.go`
+
+**What to change**:
+- [ ] Initialize `pkg/agent/container` with real containerd adapter
+- [ ] Initialize `pkg/agent/network` with VPC CNI adapter
+- [ ] Initialize `pkg/agent/security` with VPC security adapter
+- [ ] Initialize `pkg/agent/health` with HTTP/TCP/Exec checkers
+- [ ] Initialize `pkg/agent/task` TaskExecutor wired to all above components
+- [ ] Add an etcd watcher loop: watch `/tasks/<node-name>/` for new tasks, execute via TaskExecutor
+- [ ] Report task results back to etcd (write to `/task-results/<task-id>`)
+- [ ] Report container health status to etcd periodically
+- [ ] Add heartbeat loop: periodically update `/nodes/<name>/heartbeat` in etcd
+
+#### 4.2.3 Wire Deploy Command
+
+**File**: `cmd/banyan-cli/cmd/deploy.go`
+
+**What to change**:
+- [ ] Use the real `pkg/engine/parser` to parse banyan.yaml instead of custom yaml.Unmarshal
+- [ ] Write a proper deployment request to etcd that the Engine watcher can pick up
+- [ ] Wait for Engine to acknowledge the deployment (watch `/deployments/<id>/status`)
+- [ ] Stream deployment progress to the user (watching task completions)
+
+#### 4.2.4 Etcd Key Schema
+
+Define a consistent etcd key schema for Engine-Agent communication:
+
+```
+/banyan/
+├── deployments/<id>              # Deployment spec (written by deploy cmd)
+├── deployments/<id>/status       # Deployment status (written by Engine)
+├── services/<deployment>/<name>  # Service specs
+├── nodes/<name>                  # Agent registration
+├── nodes/<name>/heartbeat        # Agent heartbeat (updated periodically)
+├── tasks/<agent-id>/<task-id>    # Tasks for agent (written by Engine, read by Agent)
+├── task-results/<task-id>        # Task results (written by Agent, read by Engine)
+├── state/desired/<deployment>    # Desired state (written by Engine)
+├── state/actual/<agent>/<svc>    # Actual state (written by Agent)
+└── vpc/                          # VPC state (existing, managed by pkg/vpc)
+```
+
+**Standalone Testing**:
+```bash
+# Build and test locally (requires etcd + containerd)
+sudo banyan-cli engine start &
+sudo banyan-cli agent start --engine http://localhost:2379 &
+banyan-cli deploy --file test/e2e/examples/banyan.yaml
+```
+
+---
+
+### 4.3 End-to-End Testing
+
+**Target**: Complete system validation using Docker-in-Docker
 
 **Test Directory**: `test/e2e/`
 
 **Prerequisites**:
-- Multi-node environment (3+ nodes)
-- etcd cluster
-- containerd on each node
-- Network connectivity between nodes
+- Docker installed (uses docker-compose for multi-node simulation)
+- Test infrastructure already exists: `test/e2e/docker-compose.yml`, `Dockerfile`, entrypoint scripts
 
 **Test Scenarios**:
 
 1. **Multi-Service Deployment**
-   - Deploy multi-container application
-   - Verify inter-service communication
+   - Deploy multi-container application via `banyan-cli deploy`
+   - Verify containers are running on worker nodes
+   - Verify inter-service communication via DNS
    - Test service discovery
 
 2. **Rolling Update**
@@ -905,7 +988,8 @@ go test ./test/integration/... -v -tags=integration -run TestDeploymentWorkflow
 
 3. **Failure Recovery**
    - Kill agent node
-   - Verify workload migration
+   - Verify Engine detects drift
+   - Verify workload migration to healthy agent
    - Node recovery and rejoin
 
 4. **Network Policies**
@@ -915,8 +999,14 @@ go test ./test/integration/... -v -tags=integration -run TestDeploymentWorkflow
 
 **E2E Test Commands**:
 ```bash
-# E2E test suite (requires full environment)
-go test ./test/e2e/... -v -tags=e2e -timeout=30m
+# Using existing Docker infrastructure
+cd test/e2e
+./run-e2e.sh
+
+# Or manually
+docker-compose up -d
+docker-compose exec engine banyan-cli deploy --file /examples/banyan.yaml
+docker-compose exec engine banyan-cli engine status
 ```
 
 ---
@@ -1112,12 +1202,16 @@ testdata/
 - [x] VPC Coordinator: provision container networks
 - [x] Orchestrator: execute deployment workflow
 
-### Phase 4: Integration & Orchestration ✅
-- [x] Agent Lifecycle integration test
-- [x] Simple Deployment integration test
-- [x] Network Provisioning integration test
-- [x] Health Monitoring integration test
-- [x] State Reconciliation integration test
+### Phase 4: Integration & Orchestration 🔶
+- [x] Agent Lifecycle integration test (in-memory)
+- [x] Simple Deployment integration test (in-memory)
+- [x] Network Provisioning integration test (in-memory)
+- [x] Health Monitoring integration test (in-memory)
+- [x] State Reconciliation integration test (in-memory)
+- [ ] Wire Engine start: real adapters, etcd watchers, reconciliation loop
+- [ ] Wire Agent start: real pkg/agent components, task watcher, heartbeat
+- [ ] Wire Deploy command: use real parser, trigger Engine orchestrator
+- [ ] Define etcd key schema for Engine-Agent communication
 - [ ] E2E: Multi-node deployment
 - [ ] E2E: Rolling updates
 - [ ] E2E: Failure recovery

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/vpc/storage"
@@ -12,11 +11,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Deploy configuration
 var (
 	deployFile         string
 	deployEtcdEndpoint string
 	deployDryRun       bool
+	deployNoWait       bool
 )
 
 var deployCmd = &cobra.Command{
@@ -32,14 +31,9 @@ Example banyan.yaml:
       replicas: 3
       ports:
         - 80:80
-      resources:
-        memory: 256Mi
-        cpu: 0.5
     api:
       image: my-api:v1
       replicas: 2
-      ports:
-        - 8080:8080
       env:
         - DATABASE_URL=postgres://db:5432/app
 
@@ -55,90 +49,38 @@ func init() {
 	deployCmd.Flags().StringVarP(&deployFile, "file", "f", "banyan.yaml", "Path to banyan.yaml manifest")
 	deployCmd.Flags().StringVar(&deployEtcdEndpoint, "etcd", "http://localhost:2379", "Engine etcd endpoint")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Validate manifest without deploying")
+	deployCmd.Flags().BoolVar(&deployNoWait, "no-wait", false, "Don't wait for deployment to complete")
 }
 
 // BanyanManifest represents the banyan.yaml structure
 type BanyanManifest struct {
-	Name     string                   `yaml:"name"`
-	Version  string                   `yaml:"version,omitempty"`
-	Services map[string]ServiceConfig `yaml:"services"`
-	Networks map[string]NetworkConfig `yaml:"networks,omitempty"`
+	Name     string                       `yaml:"name"`
+	Version  string                       `yaml:"version,omitempty"`
+	Services map[string]ManifestService   `yaml:"services"`
+	Networks map[string]ManifestNetwork   `yaml:"networks,omitempty"`
 }
 
-// ServiceConfig represents a service in the manifest
-type ServiceConfig struct {
-	Image       string             `yaml:"image"`
-	Replicas    int                `yaml:"replicas,omitempty"`
-	Ports       []string           `yaml:"ports,omitempty"`
-	Env         []string           `yaml:"env,omitempty"`
-	Command     []string           `yaml:"command,omitempty"`
-	Resources   ResourceConfig     `yaml:"resources,omitempty"`
-	HealthCheck *HealthCheckConfig `yaml:"health_check,omitempty"`
-	DependsOn   []string           `yaml:"depends_on,omitempty"`
+// ManifestService represents a service in the manifest
+type ManifestService struct {
+	Image       string   `yaml:"image"`
+	Replicas    int      `yaml:"replicas,omitempty"`
+	Ports       []string `yaml:"ports,omitempty"`
+	Env         []string `yaml:"env,omitempty"`
+	Command     []string `yaml:"command,omitempty"`
+	DependsOn   []string `yaml:"depends_on,omitempty"`
 }
 
-// ResourceConfig represents resource limits
-type ResourceConfig struct {
-	Memory string `yaml:"memory,omitempty"`
-	CPU    string `yaml:"cpu,omitempty"`
-}
-
-// HealthCheckConfig represents health check configuration
-type HealthCheckConfig struct {
-	HTTP     string `yaml:"http,omitempty"`
-	TCP      string `yaml:"tcp,omitempty"`
-	Interval string `yaml:"interval,omitempty"`
-	Timeout  string `yaml:"timeout,omitempty"`
-}
-
-// NetworkConfig represents network configuration
-type NetworkConfig struct {
+// ManifestNetwork represents network configuration
+type ManifestNetwork struct {
 	CIDR   string `yaml:"cidr,omitempty"`
 	Driver string `yaml:"driver,omitempty"`
-}
-
-// Deployment represents a deployment in the system
-type Deployment struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	Services  []string  `json:"services"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-// DeployService represents a service in a deployment
-type DeployService struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	DeploymentID string        `json:"deployment_id"`
-	Image        string        `json:"image"`
-	Replicas     int           `json:"replicas"`
-	Status       string        `json:"status"`
-	Ports        []PortMapping `json:"ports,omitempty"`
-	Environment  []EnvVar      `json:"environment,omitempty"`
-	CreatedAt    time.Time     `json:"created_at"`
-	UpdatedAt    time.Time     `json:"updated_at"`
-}
-
-// PortMapping represents a port mapping
-type PortMapping struct {
-	HostPort      string `json:"host_port"`
-	ContainerPort string `json:"container_port"`
-	Protocol      string `json:"protocol"`
-}
-
-// EnvVar represents an environment variable
-type EnvVar struct {
-	Name  string `json:"name"`
-	Value string `json:"value"`
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Deploy")
 	fmt.Println("========================================")
 
-	// Read manifest
+	// Read and parse manifest
 	fmt.Printf("Reading manifest: %s\n", deployFile)
 	data, err := os.ReadFile(deployFile)
 	if err != nil {
@@ -150,7 +92,6 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse manifest: %w", err)
 	}
 
-	// Validate manifest
 	if manifest.Name == "" {
 		return fmt.Errorf("manifest must have a name")
 	}
@@ -158,14 +99,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("manifest must define at least one service")
 	}
 
+	// Build deployment record
+	deploymentID := fmt.Sprintf("%s-%d", manifest.Name, time.Now().Unix())
+	services := buildServiceRecords(manifest.Services)
+
 	fmt.Printf("Application: %s\n", manifest.Name)
 	fmt.Printf("Services: %d\n", len(manifest.Services))
-	for name, svc := range manifest.Services {
-		replicas := svc.Replicas
-		if replicas == 0 {
-			replicas = 1
-		}
-		fmt.Printf("  - %s: %s (replicas: %d)\n", name, svc.Image, replicas)
+	for name, svc := range services {
+		fmt.Printf("  - %s: %s (replicas: %d)\n", name, svc.Image, svc.Replicas)
 	}
 
 	if deployDryRun {
@@ -173,9 +114,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Connect to Engine
+	// Connect to etcd
 	fmt.Printf("\nConnecting to Engine at %s...\n", deployEtcdEndpoint)
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	store, err := storage.NewEtcdStore([]string{deployEtcdEndpoint}, "/banyan")
@@ -183,76 +124,64 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}
 
-	// Create deployment
-	deployment := &Deployment{
-		ID:        fmt.Sprintf("%s-%d", manifest.Name, time.Now().Unix()),
+	// Save deployment record
+	record := &DeploymentRecord{
+		ID:        deploymentID,
 		Name:      manifest.Name,
-		Status:    "pending",
+		Status:    statusPending,
+		Services:  services,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
-	// Create services
-	fmt.Println("\nCreating services...")
-	for serviceName, svcConfig := range manifest.Services {
-		replicas := svcConfig.Replicas
-		if replicas == 0 {
-			replicas = 1
-		}
-
-		service := &DeployService{
-			ID:           fmt.Sprintf("%s-%s", manifest.Name, serviceName),
-			Name:         serviceName,
-			DeploymentID: deployment.ID,
-			Image:        svcConfig.Image,
-			Replicas:     replicas,
-			Status:       "pending",
-			CreatedAt:    time.Now(),
-			UpdatedAt:    time.Now(),
-		}
-
-		// Parse ports
-		for _, portStr := range svcConfig.Ports {
-			parts := strings.Split(portStr, ":")
-			if len(parts) == 2 {
-				service.Ports = append(service.Ports, PortMapping{
-					HostPort:      parts[0],
-					ContainerPort: parts[1],
-					Protocol:      "tcp",
-				})
-			}
-		}
-
-		// Parse environment variables
-		for _, envStr := range svcConfig.Env {
-			parts := strings.SplitN(envStr, "=", 2)
-			if len(parts) == 2 {
-				service.Environment = append(service.Environment, EnvVar{
-					Name:  parts[0],
-					Value: parts[1],
-				})
-			}
-		}
-
-		if err := store.Save(ctx, "/services/"+service.ID, service); err != nil {
-			return fmt.Errorf("failed to save service %s: %w", serviceName, err)
-		}
-		fmt.Printf("  Created service: %s\n", serviceName)
-
-		deployment.Services = append(deployment.Services, service.ID)
+	if err := store.Save(ctx, keyDeployments+deploymentID, record); err != nil {
+		return fmt.Errorf("failed to create deployment: %w", err)
 	}
 
-	// Save deployment
-	deployment.Status = "deploying"
-	if err := store.Save(ctx, "/deployments/"+deployment.ID, deployment); err != nil {
-		return fmt.Errorf("failed to save deployment: %w", err)
+	fmt.Printf("\nDeployment '%s' created (ID: %s)\n", manifest.Name, deploymentID)
+
+	if deployNoWait {
+		fmt.Println("Use 'banyan-cli engine status' to check deployment status.")
+		return nil
 	}
 
-	fmt.Println("\n========================================")
-	fmt.Printf("Deployment '%s' created successfully!\n", manifest.Name)
-	fmt.Printf("Deployment ID: %s\n", deployment.ID)
-	fmt.Println("\nThe Engine will schedule containers to available agents.")
-	fmt.Println("Use 'banyan-cli status' to check deployment status.")
+	// Poll for status changes
+	fmt.Println("Waiting for deployment to complete...")
+	return waitForDeployment(ctx, store, deploymentID)
+}
 
-	return nil
+func waitForDeployment(ctx context.Context, store storage.StateStore, deploymentID string) error {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	lastStatus := ""
+	for {
+		select {
+		case <-ctx.Done():
+			fmt.Println("\nTimeout waiting for deployment.")
+			return fmt.Errorf("deployment timed out")
+		case <-ticker.C:
+			var record DeploymentRecord
+			if err := store.Get(ctx, keyDeployments+deploymentID, &record); err != nil {
+				continue // retry
+			}
+
+			if record.Status != lastStatus {
+				lastStatus = record.Status
+				switch record.Status {
+				case statusDeploying:
+					fmt.Println("  Status: deploying (tasks dispatched to agents)")
+				case statusRunning:
+					fmt.Println("  Status: running")
+					fmt.Println("\n========================================")
+					fmt.Printf("Deployment '%s' is RUNNING!\n", record.Name)
+					return nil
+				case statusFailed:
+					fmt.Printf("  Status: FAILED (%s)\n", record.Error)
+					fmt.Println("\n========================================")
+					return fmt.Errorf("deployment failed: %s", record.Error)
+				}
+			}
+		}
+	}
 }

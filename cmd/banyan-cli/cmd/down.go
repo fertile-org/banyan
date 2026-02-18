@@ -6,9 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 var (
@@ -65,18 +66,22 @@ func runDown(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve engine endpoint from config
-	engineURL := types.GetCLIEngineEndpoint(configPath)
-	if engineURL == "" {
+	engineAddr := types.GetCLIEngineEndpoint(configPath)
+	if engineAddr == "" {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
 	password := types.GetConfigPassword(configPath)
-	client := NewEngineClient(engineURL, password)
+	client, err := NewEngineClient(engineAddr, password)
+	if err != nil {
+		return fmt.Errorf("failed to connect to engine: %w", err)
+	}
+	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Connecting to Engine at %s...\n", engineURL)
+	fmt.Printf("Connecting to Engine at %s...\n", engineAddr)
 	resp, err := client.Down(ctx, appName, args)
 	if err != nil {
 		return fmt.Errorf("failed to stop deployment: %w", err)
@@ -136,4 +141,3 @@ func waitForDown(ctx context.Context, client *EngineClient, appName string) erro
 		}
 	}
 }
-

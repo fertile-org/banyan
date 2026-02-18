@@ -8,9 +8,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 var (
@@ -64,8 +65,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	var manifest types.BanyanManifest
-	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		return fmt.Errorf("failed to parse manifest: %w", err)
+	if parseErr := yaml.Unmarshal(data, &manifest); parseErr != nil {
+		return fmt.Errorf("failed to parse manifest: %w", parseErr)
 	}
 
 	if manifest.Name == "" {
@@ -75,7 +76,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("manifest must define at least one service")
 	}
 
-	for name, svc := range manifest.Services {
+	for name, svc := range manifest.Services { //nolint:gocritic // map iteration
 		if svc.Image == "" && svc.Build == nil {
 			return fmt.Errorf("service %q must have either 'image' or 'build'", name)
 		}
@@ -83,8 +84,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Build images for services with build config
 	manifestDir := filepath.Dir(deployFile)
-	if err := buildServiceImages(manifestDir, manifest.Name, manifest.Services); err != nil {
-		return err
+	if buildErr := buildServiceImages(manifestDir, manifest.Name, manifest.Services); buildErr != nil {
+		return buildErr
 	}
 
 	if deployDryRun {
@@ -99,13 +100,17 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Resolve engine endpoint from config
-	engineURL := types.GetCLIEngineEndpoint(configPath)
-	if engineURL == "" {
+	engineAddr := types.GetCLIEngineEndpoint(configPath)
+	if engineAddr == "" {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
 	password := types.GetConfigPassword(configPath)
-	client := NewEngineClient(engineURL, password)
+	client, err := NewEngineClient(engineAddr, password)
+	if err != nil {
+		return fmt.Errorf("failed to connect to engine: %w", err)
+	}
+	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -117,8 +122,8 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Push built images to registry
-	if err := pushServiceImages(info.RegistryURL, manifest.Services); err != nil {
-		return err
+	if pushErr := pushServiceImages(info.RegistryUrl, manifest.Services); pushErr != nil {
+		return pushErr
 	}
 
 	// Print deployment info
@@ -129,14 +134,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  - %s: %s (replicas: %d)\n", name, svc.Image, svc.Replicas)
 	}
 
-	// Deploy via engine API
-	fmt.Printf("\nConnecting to Engine at %s...\n", engineURL)
+	// Deploy via engine gRPC
+	fmt.Printf("\nConnecting to Engine at %s...\n", engineAddr)
 	resp, err := client.Deploy(ctx, manifest)
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %w", err)
 	}
 
-	fmt.Printf("Deployment '%s' created (ID: %s)\n", manifest.Name, resp.DeploymentID)
+	fmt.Printf("Deployment '%s' created (ID: %s)\n", manifest.Name, resp.DeploymentId)
 
 	if deployNoWait {
 		fmt.Println("Use 'banyan-cli status' to check deployment status.")
@@ -193,7 +198,7 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 // buildServiceImages builds Docker images for services that have a build config.
 func buildServiceImages(manifestDir, appName string, services map[string]types.ManifestService) error {
 	needsBuild := false
-	for _, svc := range services {
+	for _, svc := range services { //nolint:gocritic // map iteration
 		if svc.Build != nil {
 			needsBuild = true
 			break
@@ -205,7 +210,7 @@ func buildServiceImages(manifestDir, appName string, services map[string]types.M
 
 	fmt.Println("\nBuilding images...")
 
-	for name, svc := range services {
+	for name, svc := range services { //nolint:gocritic // map iteration
 		if svc.Build == nil {
 			continue
 		}
@@ -251,7 +256,7 @@ func buildImage(imageName, contextPath, dockerfile string) error {
 // pushServiceImages pushes locally-built images to the registry.
 func pushServiceImages(registryURL string, services map[string]types.ManifestService) error {
 	hasBuild := false
-	for _, svc := range services {
+	for _, svc := range services { //nolint:gocritic // map iteration
 		if svc.Build != nil {
 			hasBuild = true
 			break
@@ -268,7 +273,7 @@ func pushServiceImages(registryURL string, services map[string]types.ManifestSer
 
 	fmt.Printf("\nPushing images to registry %s...\n", registryURL)
 
-	for name, svc := range services {
+	for name, svc := range services { //nolint:gocritic // map iteration
 		if svc.Build == nil {
 			continue
 		}
@@ -314,4 +319,3 @@ func pushImage(image string) error {
 	}
 	return nil
 }
-

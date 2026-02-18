@@ -94,23 +94,23 @@ Same `services`. Same `image`. Same `ports`. Same `env`. Banyan spreads them acr
 
 ```bash
 # On your control plane server
-sudo banyan-cli engine start
+sudo banyan-engine start
 
 # On each worker server
-sudo banyan-cli agent start --node-name agent-1
+sudo banyan-agent start --node-name agent-1
 
 # From anywhere
 banyan-cli deploy -f banyan.yaml
 ```
 
-No package managers. No plugins. One binary does everything.
+No package managers. No plugins. Three focused binaries — engine, agent, and CLI.
 
 <CardGrid>
   <Card title="Familiar syntax" icon="document">
     If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
   </Card>
-  <Card title="Single binary" icon="setting">
-    `banyan-cli` is the Engine, the Agent, and the deploy tool. Build once, copy to your servers, done.
+  <Card title="Simple tooling" icon="setting">
+    Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` for workers, `banyan-cli` for deployments. Install only what each server needs.
   </Card>
   <Card title="Built-in image registry" icon="star">
     No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
@@ -119,7 +119,7 @@ No package managers. No plugins. One binary does everything.
     Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
   </Card>
   <Card title="Proven foundations" icon="approve-check">
-    etcd for state coordination. containerd for running containers. No experimental runtimes.
+    gRPC for communication, etcd for state storage, containerd for running containers. No experimental runtimes.
   </Card>
 </CardGrid>
 

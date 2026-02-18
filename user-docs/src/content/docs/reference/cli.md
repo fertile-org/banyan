@@ -1,50 +1,44 @@
 ---
 title: CLI Reference
-description: All banyan-cli commands and flags.
+description: All commands and flags for banyan-engine, banyan-agent, and banyan-cli.
 sidebar:
   order: 1
 ---
 
-## banyan-cli
+Banyan uses three binaries:
 
-```
-banyan-cli [command]
-```
-
-| Command | Description |
-|---------|-------------|
-| `engine` | Manage the Engine (control plane) |
-| `agent` | Manage the Agent (worker node) |
-| `deploy` | Deploy applications from a manifest |
-| `down` | Stop and remove deployed services |
-| `logs` | Stream container logs |
-
-One binary, three roles.
+| Binary | Role | Install on |
+|--------|------|------------|
+| `banyan-engine` | Control plane (etcd, gRPC server, scheduling) | Engine node |
+| `banyan-agent` | Worker (task execution, container management) | Worker nodes |
+| `banyan-cli` | Client (deploy, status, logs) | Any machine |
 
 ---
 
-## engine
+## banyan-engine
 
 Run on your control plane node.
 
-### engine init
+### init
 
-Prepare the Engine node: creates data directories and verifies etcd is installed.
+Prepare the Engine node: creates data directories, verifies etcd is installed, and configures the cluster password.
 
 ```bash
-sudo banyan-cli engine init
+sudo banyan-engine init
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
 
-### engine start
+During init, you'll be prompted to set a cluster password. This password is stored in `/etc/banyan/banyan.yaml` and must match on all agents and CLI clients.
 
-Start the Engine. Launches etcd, initializes networking, and watches for deployments.
+### start
+
+Start the Engine. Launches etcd, initializes networking, starts the gRPC server, and watches for deployments.
 
 ```bash
-sudo banyan-cli engine start
+sudo banyan-engine start
 ```
 
 Runs in the foreground. Stop with `Ctrl+C`.
@@ -53,40 +47,185 @@ Runs in the foreground. Stop with `Ctrl+C`.
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
 | `--etcd` | `http://localhost:2379` | Etcd endpoint |
-| `--etcd-client-urls` | `http://0.0.0.0:2379` | Etcd listen address. Use `http://0.0.0.0:2379` for remote access. |
+| `--etcd-client-urls` | `http://0.0.0.0:2379` | Etcd listen address |
 | `--etcd-data-dir` | `/var/lib/banyan/etcd` | Etcd data directory |
 | `--etcd-pid-file` | `/var/run/banyan-etcd.pid` | Etcd PID file |
 | `--etcd-log-file` | `/var/log/banyan-etcd.log` | Etcd log file |
+| `--grpc-port` | `50051` | Engine gRPC server port |
 | `--vpc-cidr` | `10.0.0.0/16` | VPC network CIDR range |
-| `--registry-port` | `5000` | Embedded OCI registry port for built images |
+| `--registry-port` | `5000` | Embedded OCI registry port |
 
-### engine stop
+### stop
 
 Stop the Engine and etcd.
 
 ```bash
-sudo banyan-cli engine stop
+sudo banyan-engine stop
 ```
 
-### engine status
+### status
 
-Show connected agents and active deployments.
+Show Engine status (agents, deployments, containers). Connects to etcd directly.
 
 ```bash
-banyan-cli engine status
+banyan-engine status
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--etcd` | `http://localhost:2379` | Etcd endpoint |
+| `--etcd-pid-file` | `/var/run/banyan-etcd.pid` | Etcd PID file |
+
+---
+
+## banyan-agent
+
+Run on each worker node.
+
+### init
+
+Prepare the worker node: creates data directories, verifies containerd and nerdctl are installed, and configures the engine connection and password.
+
+```bash
+sudo banyan-agent init
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--data-dir` | `/var/lib/banyan` | Data directory |
+
+During init, you'll be prompted for the engine host, gRPC port (default: 50051), and the cluster password.
+
+### start
+
+Start the Agent. Connects to the Engine via gRPC, registers the node, and begins executing tasks.
+
+```bash
+sudo banyan-agent start --node-name worker-1
+```
+
+The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `init`). Runs in the foreground. Stop with `Ctrl+C`.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--data-dir` | `/var/lib/banyan` | Data directory |
+| `--engine` | (from config) | Engine gRPC endpoint override (e.g. `192.168.1.10:50051`) |
+| `--node-name` | hostname | Name for this node. Must be unique in the cluster. |
+| `--pid-file` | `/var/run/banyan-agent.pid` | Agent PID file |
+| `--api-port` | `50052` | Agent gRPC server port (used for log streaming from engine) |
+| `--api-address` | | Agent API address override (e.g. `192.168.1.10:50052`) |
+
+### stop
+
+Stop the Agent.
+
+```bash
+sudo banyan-agent stop
+```
+
+### status
+
+Show the Agent's connection status.
+
+```bash
+banyan-agent status
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--engine` | (from config) | Engine gRPC endpoint override |
+
+---
+
+## banyan-cli
+
+Run on any machine to manage deployments. Before using deploy/status/down/logs commands, run `banyan-cli init` once to configure the engine connection.
+
+### init
+
+Configure the CLI: prompts for engine host, gRPC port, and cluster password.
+
+```bash
+sudo banyan-cli init
+```
+
+Configuration is stored in `/etc/banyan/banyan.yaml`. Run this once on any machine where you want to use `banyan-cli` commands.
+
+### deploy
+
+Deploy an application from a `banyan.yaml` manifest.
+
+```bash
+banyan-cli deploy -f banyan.yaml
+```
+
+Sends the deployment to the Engine via gRPC, then waits for agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
+
+Services with a `build:` directive are built locally with `nerdctl build`, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--file` | `-f` | `banyan.yaml` | Path to the manifest file |
+| `--dry-run` | | `false` | Validate the manifest without deploying |
+| `--no-wait` | | `false` | Submit and exit immediately |
+
+Examples:
+
+```bash
+# Deploy locally
+banyan-cli deploy -f banyan.yaml
+
+# Validate without deploying
+banyan-cli deploy -f banyan.yaml --dry-run
+
+# Submit and return immediately
+banyan-cli deploy -f banyan.yaml --no-wait
+```
+
+### down
+
+Stop and remove services from a deployment.
+
+```bash
+banyan-cli down --name my-app
+```
+
+Creates `stop_and_remove` tasks for each running container and waits for agents to complete them. By default, stops all services. Pass service names as arguments to stop only specific ones.
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--name` | | | Application name to stop |
+| `--file` | `-f` | | Path to manifest (reads app name from file) |
+| `--no-wait` | | `false` | Submit stop tasks and exit immediately |
+
+Examples:
+
+```bash
+# Stop all services by name
+banyan-cli down --name my-app
+
+# Stop all services (read name from manifest)
+banyan-cli down -f banyan.yaml
+
+# Stop specific services only
+banyan-cli down --name my-app web db
+```
+
+### status
+
+Show cluster status: connected agents, active deployments, and container health.
+
+```bash
+banyan-cli status
+```
 
 Example output:
 
 ```
-Banyan Engine - Status
+Banyan Cluster - Status
 ========================================
-etcd: RUNNING
-Connection: OK
+Engine: RUNNING
+Connection: 192.168.1.10:50051
 
 Agents: 2
   - worker-1 (status: ready, last seen: 3s ago)
@@ -106,140 +245,7 @@ Deployments: 1
 ========================================
 ```
 
----
-
-## agent
-
-Run on each worker node.
-
-### agent init
-
-Prepare the worker node: creates data directories and verifies containerd and nerdctl are installed.
-
-```bash
-sudo banyan-cli agent init
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--data-dir` | `/var/lib/banyan` | Data directory |
-
-### agent start
-
-Start the Agent. Connects to the Engine, registers the node, and begins executing tasks.
-
-```bash
-sudo banyan-cli agent start --node-name worker-1
-```
-
-The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `agent init`). Runs in the foreground. Stop with `Ctrl+C`.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--engine` | (from config) | Engine etcd endpoint override. Normally set via `agent init`. |
-| `--node-name` | hostname | Name for this node. Must be unique in the cluster. |
-| `--pid-file` | `/var/run/banyan-agent.pid` | Agent PID file |
-| `--api-port` | `9090` | Agent API server port (used for remote log streaming) |
-| `--api-address` | | Agent API address override (e.g. `192.168.1.10:9090`) |
-
-### agent stop
-
-Stop the Agent.
-
-```bash
-sudo banyan-cli agent stop
-```
-
-### agent status
-
-Show the Agent's connection status.
-
-```bash
-banyan-cli agent status
-```
-
-Engine endpoint is read from `/etc/banyan/banyan.yaml`.
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--engine` | (from config) | Engine etcd endpoint override |
-
----
-
-## deploy
-
-Deploy an application from a `banyan.yaml` manifest.
-
-```bash
-banyan-cli deploy -f banyan.yaml
-```
-
-Writes the deployment to etcd, then waits for the Engine to schedule and Agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
-
-Services with a `build:` directive are built locally with `nerdctl build`, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--file` | `-f` | `banyan.yaml` | Path to the manifest file |
-| `--etcd` | | `http://localhost:2379` | Engine etcd endpoint |
-| `--dry-run` | | `false` | Validate the manifest without deploying |
-| `--no-wait` | | `false` | Submit and exit immediately |
-
-Examples:
-
-```bash
-# Deploy locally
-banyan-cli deploy -f banyan.yaml
-
-# Deploy to a remote engine
-banyan-cli deploy -f banyan.yaml --etcd http://192.168.1.10:2379
-
-# Validate without deploying
-banyan-cli deploy -f banyan.yaml --dry-run
-
-# Submit and return immediately
-banyan-cli deploy -f banyan.yaml --no-wait
-```
-
----
-
-## down
-
-Stop and remove services from a deployment.
-
-```bash
-banyan-cli down --name my-app
-```
-
-Creates `stop_and_remove` tasks for each running container and waits for agents to complete them. By default, stops all services. Pass service names as arguments to stop only specific ones.
-
-| Flag | Short | Default | Description |
-|------|-------|---------|-------------|
-| `--name` | | | Application name to stop |
-| `--file` | `-f` | | Path to manifest (reads app name from file) |
-| `--etcd` | | `http://localhost:2379` | Engine etcd endpoint |
-| `--no-wait` | | `false` | Submit stop tasks and exit immediately |
-
-Examples:
-
-```bash
-# Stop all services by name
-banyan-cli down --name my-app
-
-# Stop all services (read name from manifest)
-banyan-cli down -f banyan.yaml
-
-# Stop specific services only
-banyan-cli down --name my-app web db
-
-# Stop specific services (read name from manifest)
-banyan-cli down -f banyan.yaml web
-```
-
----
-
-## logs
+### logs
 
 Stream container logs by name.
 
@@ -247,13 +253,12 @@ Stream container logs by name.
 banyan-cli logs <container-name>
 ```
 
-Tries to read logs locally first. If the container is not found on the local machine, queries the cluster via etcd to find which agent runs it, then streams logs from that agent's API.
+The CLI requests logs from the Engine via gRPC. The Engine proxies them from the agent running the container.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--follow` | `-f` | `false` | Follow log output (like `tail -f`) |
 | `--tail` | | `0` | Number of lines from the end (`0` means all) |
-| `--etcd` | | `http://localhost:2379` | etcd endpoint for cluster lookup |
 
 Examples:
 
@@ -266,7 +271,4 @@ banyan-cli logs my-app-web-0 -f
 
 # Show last 100 lines and follow
 banyan-cli logs my-app-web-0 -f --tail 100
-
-# Query a remote cluster
-banyan-cli logs my-app-web-0 --etcd http://192.168.1.10:2379
 ```

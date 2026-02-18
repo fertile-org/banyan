@@ -1,0 +1,18 @@
+syntax = "proto3";
+package banyan.v1;
+option go_package = "github.com/fertile-org/banyan/pkg/rpc/banyanpb";
+
+// AgentService is hosted by the agent and called by the engine for log streaming.
+service AgentService {
+  rpc StreamLogs(StreamLogsRequest) returns (stream StreamLogsResponse);
+}
+
+message StreamLogsRequest {
+  string container_name = 1;
+  bool follow = 2;
+  int32 tail = 3;
+}
+
+message StreamLogsResponse {
+  bytes data = 1;
+}

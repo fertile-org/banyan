@@ -28,9 +28,9 @@ Status: **Done**
 Per-container health status, logs, and visibility from the CLI.
 
 - Agent monitors container health after deployment (running, exited, restarting)
-- Agent reports per-container status back to Engine via etcd
-- `engine status` shows per-service and per-container status (not just aggregate)
-- CLI command to stream container logs from agents
+- Agent reports per-container status back to Engine via gRPC
+- `banyan-cli status` shows per-service and per-container status (not just aggregate)
+- CLI command to stream container logs from agents (via engine gRPC proxy)
 - Detect and surface failed containers (e.g. exited immediately after start)
 - `banyan-cli down` command to stop and remove all containers for a deployment
 
@@ -40,14 +40,15 @@ Per-container health status, logs, and visibility from the CLI.
 
 Status: **Done**
 
-Secure communication between CLI, Engine, and Agents.
+Secure gRPC communication between CLI, Engine, and Agents.
 
-- password authentication for agent-to-engine connections
-- password authentication for CLI-to-engine commands
-- password authentication for CLI-to-agent commands
-- Credential configuration config file (/etc/banyan/banyan.yaml), which should have 3 sections: `security`, `engine`, `agent`. the security section should include fields for `auth_type` (only support `password` for now), and `password`.
-  - The agent section should include fields for `engine_host` and `engine_port`.
-- update init command of engine/agent to ask for password and store it in the config file, also ask for engine host/port in agent init (with default values)
+- All inter-component communication uses gRPC with password authentication
+- Agent → Engine: password in gRPC metadata on every call
+- CLI → Engine: password in gRPC metadata on every call
+- Engine → Agent: session token authentication for log streaming
+- Config file at `/etc/banyan/banyan.yaml` with sections: `security`, `engine`, `agent`, `cli`
+- `init` commands for engine, agent, and CLI prompt for credentials and connection info
+- Three separate binaries: `banyan-engine`, `banyan-agent`, `banyan-cli`
 
 ---
 

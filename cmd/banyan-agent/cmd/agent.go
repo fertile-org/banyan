@@ -3,23 +3,23 @@ package cmd
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
-	"io"
-	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/types"
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
 	"github.com/spf13/cobra"
-	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 // Agent configuration flags.
@@ -35,6 +35,12 @@ var (
 // configPath is the default path to the Banyan config file.
 var configPath = types.DefaultConfigPath
 
+// trackedContainer holds info about containers created by this agent.
+type trackedContainer struct {
+	containerName string
+	taskID        string
+}
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Agent dependencies",
@@ -47,7 +53,7 @@ var startCmd = &cobra.Command{
 	Long: `Start the Banyan Agent on this worker node.
 
 This command:
-  1. Connects to the Engine (etcd)
+  1. Connects to the Engine via gRPC
   2. Registers this node
   3. Watches for tasks and executes them (pull images, create containers)
   4. Reports task results and heartbeat`,
@@ -74,13 +80,13 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&agentDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
-	startCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "http://localhost:2379", "Engine endpoint")
+	startCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "localhost:50051", "Engine gRPC endpoint")
 	startCmd.Flags().StringVar(&agentNodeName, "node-name", "", "Node name (defaults to hostname)")
 	startCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
-	startCmd.Flags().StringVar(&agentAPIPort, "api-port", "9090", "Agent API server port")
-	startCmd.Flags().StringVar(&agentAPIAddress, "api-address", "", "Agent API address override (e.g. 192.168.1.10:9090)")
+	startCmd.Flags().StringVar(&agentAPIPort, "api-port", "50052", "Agent gRPC server port")
+	startCmd.Flags().StringVar(&agentAPIAddress, "api-address", "", "Agent API address override (e.g. 192.168.1.10:50052)")
 
-	statusCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "http://localhost:2379", "Engine endpoint")
+	statusCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "localhost:50051", "Engine gRPC endpoint")
 	statusCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
 }
 
@@ -102,7 +108,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\n1. Creating directories...")
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Printf("   [WARN] Failed to create %s: %v\n", dir, err)
 		} else {
 			fmt.Printf("   [OK] %s\n", dir)
@@ -130,7 +136,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n4. Checking CNI plugins...")
 	cniPlugins := []string{"bridge", "loopback", "host-local", "portmap"}
 	for _, plugin := range cniPlugins {
-		pluginPath := filepath.Join("/opt/cni/bin", plugin)
+		pluginPath := "/opt/cni/bin/" + plugin
 		if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
 			fmt.Printf("   [WARN] %s not found\n", plugin)
 		} else {
@@ -151,10 +157,10 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("   [OK] Engine host: %s\n", engineHost)
 
-		fmt.Print("   Engine etcd port (default: 2379): ")
+		fmt.Print("   Engine gRPC port (default: 50051): ")
 		enginePort := types.ReadLine()
 		if enginePort == "" {
-			enginePort = "2379"
+			enginePort = "50051"
 		}
 		fmt.Printf("   [OK] Engine port: %s\n", enginePort)
 
@@ -175,7 +181,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		if err := types.SaveConfig(configPath, cfg); err != nil {
+		if err := types.SaveConfig(configPath, &cfg); err != nil {
 			fmt.Printf("   [WARN] Failed to save config: %v\n", err)
 		} else {
 			fmt.Printf("   [OK] Config saved to %s\n", configPath)
@@ -223,23 +229,33 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Wait for engine connection
+	// Get password from config
+	password := types.GetConfigPassword(configPath)
+	if password == "" {
+		return fmt.Errorf("authentication required. Set password in %s", configPath)
+	}
+
+	// Generate session token for engine→agent auth
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return fmt.Errorf("failed to generate session token: %w", err)
+	}
+	sessionToken := hex.EncodeToString(tokenBytes)
+
+	// Connect to engine via gRPC
 	fmt.Printf("Connecting to Engine at %s...\n", agentEngineEndpoint)
-	if err := waitForAgentEtcd(ctx, agentEngineEndpoint, 30*time.Second); err != nil {
+	client, err := newEngineClient(agentEngineEndpoint, password)
+	if err != nil {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}
+	defer client.Close()
+
+	// Wait for engine to be ready by retrying Health check
+	fmt.Println("Waiting for Engine gRPC to be ready...")
+	if waitErr := waitForEngineGRPC(ctx, client, 30*time.Second); waitErr != nil {
+		return fmt.Errorf("engine not ready: %w", waitErr)
+	}
 	fmt.Println("Connected to Engine")
-
-	// Initialize storage
-	store, err := storage.NewEtcdStore([]string{agentEngineEndpoint}, "/banyan")
-	if err != nil {
-		return fmt.Errorf("failed to connect to etcd: %w", err)
-	}
-
-	// Verify authentication
-	if err := types.VerifyAuth(ctx, store, configPath); err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
-	}
 
 	// Check for nerdctl
 	nerdctlPath, err := exec.LookPath("nerdctl")
@@ -257,24 +273,18 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Register node
-	node := &types.NodeRecord{
-		Name:       nodeName,
-		Status:     "ready",
-		APIAddress: apiAddr,
-		LastSeen:   time.Now(),
-		CreatedAt:  time.Now(),
-	}
-	if err := store.Save(ctx, types.KeyNodes+nodeName, node); err != nil {
+	registryURL, err := client.Register(ctx, nodeName, apiAddr, sessionToken)
+	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
-	fmt.Printf("Node registered: %s\n", nodeName)
+	fmt.Printf("Node registered: %s (registry: %s)\n", nodeName, registryURL)
 
 	// Write PID file
 	pidDir := filepath.Dir(agentPidFile)
-	if err := os.MkdirAll(pidDir, 0755); err != nil {
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create PID directory: %w", err)
 	}
-	if err := os.WriteFile(agentPidFile, []byte(strconv.Itoa(os.Getpid())), 0600); err != nil {
+	if err := os.WriteFile(agentPidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 
@@ -283,35 +293,56 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	fmt.Println("")
 	fmt.Println("Press Ctrl+C to stop")
 
+	// Container tracker (filled by task execution)
+	containers := &containerTracker{}
+
 	// Start the task execution loop
-	go agentLoop(ctx, store, nodeName)
+	go agentLoop(ctx, client, nodeName, containers)
 
 	// Start heartbeat
-	go agentHeartbeat(ctx, store, nodeName)
+	go agentHeartbeat(ctx, client, nodeName, sessionToken)
 
 	// Start container health monitoring
-	go containerHealthLoop(ctx, store, nodeName)
+	go containerHealthLoop(ctx, client, nodeName, containers)
 
-	// Start agent HTTP server for log streaming
-	go agentHTTPServer(ctx, &NerdctlLogProvider{}, agentAPIPort)
+	// Start agent gRPC server for log streaming
+	go startAgentGRPC(ctx, &NerdctlLogProvider{}, agentAPIPort, sessionToken)
 
 	<-ctx.Done()
 
-	// Cleanup: update status then close etcd connection to stop goroutine warnings
+	// Cleanup
 	os.Remove(agentPidFile)
-	node.Status = "offline"
-	node.LastSeen = time.Now()
-	saveCtx, saveCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	store.Save(saveCtx, types.KeyNodes+nodeName, node)
-	saveCancel()
-	store.Close()
+	client.Close()
 
 	fmt.Println("Agent stopped")
 	return nil
 }
 
-// agentLoop polls etcd for tasks assigned to this agent and executes them.
-func agentLoop(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+// containerTracker tracks containers created by this agent.
+type containerTracker struct {
+	containers []trackedContainer
+	mu         sync.Mutex
+}
+
+func (t *containerTracker) Add(containerName, taskID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.containers = append(t.containers, trackedContainer{
+		containerName: containerName,
+		taskID:        taskID,
+	})
+}
+
+func (t *containerTracker) List() []trackedContainer {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	result := make([]trackedContainer, len(t.containers))
+	copy(result, t.containers)
+	return result
+}
+
+// agentLoop polls the engine for tasks assigned to this agent and executes them.
+func agentLoop(ctx context.Context, client *engineClient, nodeName string, containers *containerTracker) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
@@ -320,51 +351,68 @@ func agentLoop(ctx context.Context, store *storage.EtcdStore, nodeName string) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			processTasks(ctx, store, nodeName)
+			processTasks(ctx, client, nodeName, containers)
 		}
 	}
 }
 
-// processTasks finds and executes pending tasks for this agent.
-func processTasks(ctx context.Context, store *storage.EtcdStore, nodeName string) {
-	taskPrefix := types.KeyTasks + nodeName + "/"
-	keys, err := store.List(ctx, taskPrefix)
+// processTasks polls and executes pending tasks for this agent.
+func processTasks(ctx context.Context, client *engineClient, nodeName string, containers *containerTracker) {
+	tasks, err := client.PollTasks(ctx, nodeName)
 	if err != nil {
 		return
 	}
 
-	for _, key := range keys {
-		var task types.TaskRecord
-		if err := store.Get(ctx, key, &task); err != nil {
-			continue
+	for _, pbTask := range tasks {
+		// Report running (best-effort)
+		if err := client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusRunning, "", pbTask.ContainerName, nil); err != nil {
+			fmt.Printf("[Agent] WARNING: failed to report running for task %s: %v\n", pbTask.Id, err)
 		}
 
-		if task.Status != types.StatusPending {
-			continue
-		}
+		fmt.Printf("[Agent] Executing task %s: %s (image: %s)\n", pbTask.Id, pbTask.Type, pbTask.Image)
 
-		// Mark as running
-		task.Status = types.StatusRunning
-		task.UpdatedAt = time.Now()
-		store.Save(ctx, key, &task)
-
-		fmt.Printf("[Agent] Executing task %s: %s (image: %s)\n", task.ID, task.Type, task.Image)
-
-		result, err := executeTask(ctx, &task)
+		task := pbTaskToLocal(pbTask)
+		result, err := executeTask(ctx, task)
 		if err != nil {
-			task.Status = types.StatusFailed
-			task.Error = err.Error()
-			task.UpdatedAt = time.Now()
-			store.Save(ctx, key, &task)
-			fmt.Printf("[Agent] Task %s FAILED: %v\n", task.ID, err)
+			if reportErr := client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusFailed, err.Error(), pbTask.ContainerName, nil); reportErr != nil {
+				fmt.Printf("[Agent] WARNING: failed to report failure for task %s: %v\n", pbTask.Id, reportErr)
+			}
+			fmt.Printf("[Agent] Task %s FAILED: %v\n", pbTask.Id, err)
 			continue
 		}
 
-		task.Status = types.StatusCompleted
-		task.Result = result
-		task.UpdatedAt = time.Now()
-		store.Save(ctx, key, &task)
-		fmt.Printf("[Agent] Task %s COMPLETED (container: %s)\n", task.ID, task.ContainerName)
+		var pbResult *banyanpb.TaskResult
+		if result != nil {
+			pbResult = &banyanpb.TaskResult{ContainerId: result.ContainerID}
+		}
+		if err := client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusCompleted, "", pbTask.ContainerName, pbResult); err != nil {
+			fmt.Printf("[Agent] WARNING: failed to report completion for task %s: %v\n", pbTask.Id, err)
+		}
+
+		// Track containers created by create_and_start tasks
+		if pbTask.Type == types.TaskTypeCreateAndStart {
+			containers.Add(pbTask.ContainerName, pbTask.Id)
+		}
+
+		fmt.Printf("[Agent] Task %s COMPLETED (container: %s)\n", pbTask.Id, pbTask.ContainerName)
+	}
+}
+
+// pbTaskToLocal converts a protobuf TaskRecord to a local types.TaskRecord for execution.
+func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
+	return &types.TaskRecord{
+		ID:            pb.Id,
+		DeploymentID:  pb.DeploymentId,
+		ServiceName:   pb.ServiceName,
+		ReplicaIndex:  int(pb.ReplicaIndex),
+		AgentID:       pb.AgentId,
+		Type:          pb.Type,
+		Status:        pb.Status,
+		Image:         pb.Image,
+		ContainerName: pb.ContainerName,
+		Ports:         pb.Ports,
+		Environment:   pb.Environment,
+		Command:       pb.Command,
 	}
 }
 
@@ -405,7 +453,7 @@ func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.
 func executeStopAndRemove(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
 	fmt.Printf("[Agent]   Removing container %s...\n", task.ContainerName)
 
-	rmCmd := exec.CommandContext(ctx, "nerdctl", "rm", "-f", task.ContainerName)
+	rmCmd := exec.CommandContext(ctx, "nerdctl", "rm", "-f", task.ContainerName) //nolint:gosec // container name comes from engine
 	var stderr bytes.Buffer
 	rmCmd.Stderr = &stderr
 	if err := rmCmd.Run(); err != nil {
@@ -476,7 +524,7 @@ func getContainerStatus(ctx context.Context, containerName string) string {
 	return status
 }
 
-func agentHeartbeat(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+func agentHeartbeat(ctx context.Context, client *engineClient, nodeName, sessionToken string) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
@@ -485,18 +533,14 @@ func agentHeartbeat(ctx context.Context, store *storage.EtcdStore, nodeName stri
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			var node types.NodeRecord
-			if err := store.Get(ctx, types.KeyNodes+nodeName, &node); err != nil {
-				continue
+			if err := client.Heartbeat(ctx, nodeName, sessionToken); err != nil {
+				fmt.Printf("[Agent] WARNING: heartbeat failed: %v\n", err)
 			}
-			node.LastSeen = time.Now()
-			node.Status = "ready"
-			store.Save(ctx, types.KeyNodes+nodeName, &node)
 		}
 	}
 }
 
-func containerHealthLoop(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+func containerHealthLoop(ctx context.Context, client *engineClient, nodeName string, containers *containerTracker) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
@@ -505,122 +549,28 @@ func containerHealthLoop(ctx context.Context, store *storage.EtcdStore, nodeName
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			checkContainerHealth(ctx, store, nodeName)
+			checkContainerHealth(ctx, client, nodeName, containers)
 		}
 	}
 }
 
-func checkContainerHealth(ctx context.Context, store *storage.EtcdStore, nodeName string) {
-	taskPrefix := types.KeyTasks + nodeName + "/"
-	keys, err := store.List(ctx, taskPrefix)
-	if err != nil {
+func checkContainerHealth(ctx context.Context, client *engineClient, nodeName string, containers *containerTracker) {
+	tracked := containers.List()
+	if len(tracked) == 0 {
 		return
 	}
 
-	for _, key := range keys {
-		var task types.TaskRecord
-		if err := store.Get(ctx, key, &task); err != nil {
-			continue
-		}
-
-		if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted {
-			continue
-		}
-
-		status := getContainerStatus(ctx, task.ContainerName)
-		task.ContainerStatus = status
-		task.ContainerCheckedAt = time.Now()
-		store.Save(ctx, key, &task)
-	}
-}
-
-// agentHTTPServer starts an HTTP server for log streaming.
-func agentHTTPServer(ctx context.Context, logProvider types.LogProvider, apiPort string) {
-	mux := http.NewServeMux()
-
-	mux.HandleFunc("/v1/logs/", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		containerName := strings.TrimPrefix(r.URL.Path, "/v1/logs/")
-		containerName = strings.TrimSuffix(containerName, "/")
-		if containerName == "" {
-			http.Error(w, "container name required", http.StatusBadRequest)
-			return
-		}
-
-		query := r.URL.Query()
-		follow := query.Get("follow") == "true"
-		tail := 0
-		if tailStr := query.Get("tail"); tailStr != "" {
-			if v, err := strconv.Atoi(tailStr); err == nil && v > 0 {
-				tail = v
-			}
-		}
-
-		opts := types.LogOptions{
-			Follow: follow,
-			Tail:   tail,
-		}
-
-		reqCtx := r.Context()
-		reader, err := logProvider.StreamLogs(reqCtx, containerName, opts)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("failed to stream logs: %v", err), http.StatusInternalServerError)
-			return
-		}
-		defer reader.Close()
-
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.Header().Set("Transfer-Encoding", "chunked")
-		w.WriteHeader(http.StatusOK)
-
-		flusher, canFlush := w.(http.Flusher)
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := reader.Read(buf)
-			if n > 0 {
-				if _, writeErr := w.Write(buf[:n]); writeErr != nil {
-					return
-				}
-				if canFlush {
-					flusher.Flush()
-				}
-			}
-			if readErr != nil {
-				if readErr != io.EOF {
-					fmt.Fprintf(w, "\n[error reading logs: %v]\n", readErr)
-					if canFlush {
-						flusher.Flush()
-					}
-				}
-				return
-			}
-		}
-	})
-
-	var handler http.Handler = mux
-	if password := types.GetConfigPassword(configPath); password != "" {
-		handler = types.BasicAuthMiddleware(mux, password)
+	var statuses []*banyanpb.ContainerStatus
+	for _, c := range tracked {
+		status := getContainerStatus(ctx, c.containerName)
+		statuses = append(statuses, &banyanpb.ContainerStatus{
+			ContainerName: c.containerName,
+			Status:        status,
+		})
 	}
 
-	server := &http.Server{
-		Addr:    net.JoinHostPort("", apiPort),
-		Handler: handler,
-	}
-
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		server.Shutdown(shutdownCtx)
-	}()
-
-	fmt.Printf("Agent API server listening on :%s\n", apiPort)
-	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		fmt.Printf("Agent API server error: %v\n", err)
+	if err := client.ReportContainerHealth(ctx, nodeName, statuses); err != nil {
+		fmt.Printf("[Agent] WARNING: failed to report container health: %v\n", err)
 	}
 }
 
@@ -672,33 +622,24 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Print("Engine connection: ")
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   []string{agentEngineEndpoint},
-		DialTimeout: 5 * time.Second,
-	})
-	if err == nil {
-		defer client.Close()
-		_, err = client.Status(ctx, agentEngineEndpoint)
-		if err == nil {
-			fmt.Println("OK")
-
-			if password := types.GetConfigPassword(configPath); password != "" {
-				store, storeErr := storage.NewEtcdStore([]string{agentEngineEndpoint}, "/banyan")
-				if storeErr == nil {
-					if authErr := types.VerifyAuth(ctx, store, configPath); authErr != nil {
-						fmt.Printf("Authentication: FAILED (%v)\n", authErr)
-					} else {
-						fmt.Println("Authentication: OK")
-					}
-				}
-			}
-		} else {
-			fmt.Printf("FAILED (%v)\n", err)
-		}
+	password := types.GetConfigPassword(configPath)
+	if password == "" {
+		fmt.Println("NOT CONFIGURED (no password)")
 	} else {
-		fmt.Printf("FAILED (%v)\n", err)
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		client, err := newEngineClient(agentEngineEndpoint, password)
+		if err != nil {
+			fmt.Printf("FAILED (%v)\n", err)
+		} else {
+			defer client.Close()
+			if err := client.Health(ctx); err != nil {
+				fmt.Printf("FAILED (%v)\n", err)
+			} else {
+				fmt.Println("OK")
+				fmt.Println("Authentication: OK")
+			}
+		}
 	}
 
 	fmt.Println("========================================")
@@ -724,23 +665,21 @@ func isAgentRunning() bool {
 	return process.Signal(syscall.Signal(0)) == nil
 }
 
-func waitForAgentEtcd(ctx context.Context, endpoint string, timeout time.Duration) error {
+// waitForEngineGRPC retries a health check to verify the engine gRPC server is ready.
+func waitForEngineGRPC(ctx context.Context, client *engineClient, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		client, err := clientv3.New(clientv3.Config{
-			Endpoints:   []string{endpoint},
-			DialTimeout: 2 * time.Second,
-		})
+		hbCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err := client.Health(hbCtx)
+		cancel()
 		if err == nil {
-			ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
-			_, err = client.Status(ctx2, endpoint)
-			cancel()
-			client.Close()
-			if err == nil {
-				return nil
-			}
+			return nil
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	return fmt.Errorf("timeout waiting for etcd")
+	return fmt.Errorf("timeout waiting for engine gRPC")
 }

@@ -1,148 +1,148 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
+	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
 )
 
-// EngineClient is an HTTP client for the Engine API.
+// EngineClient is a gRPC client for the Engine API.
 type EngineClient struct {
-	BaseURL  string
-	Password string
-	Client   *http.Client
+	conn   *grpc.ClientConn
+	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient creates a new engine API client.
-func NewEngineClient(baseURL, password string) *EngineClient {
+// NewEngineClient creates a new engine gRPC client.
+func NewEngineClient(engineAddr, password string) (*EngineClient, error) {
+	conn, err := grpc.NewClient(engineAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
+	}
+
 	return &EngineClient{
-		BaseURL:  baseURL,
-		Password: password,
-		Client:   &http.Client{Timeout: 30 * time.Second},
-	}
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}, nil
 }
 
-// Deploy creates a new deployment via the engine API.
-func (c *EngineClient) Deploy(ctx context.Context, manifest types.BanyanManifest) (*types.DeployResponse, error) {
-	req := types.DeployRequest{Manifest: manifest}
-	var resp types.DeployResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/deploy", req, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+// Close closes the gRPC connection.
+func (c *EngineClient) Close() {
+	c.conn.Close()
 }
 
-// Down stops services in a deployment via the engine API.
-func (c *EngineClient) Down(ctx context.Context, name string, services []string) (*types.DownResponse, error) {
-	req := types.DownRequest{Name: name, Services: services}
-	var resp types.DownResponse
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/down", req, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+// Deploy creates a new deployment via the engine gRPC API.
+func (c *EngineClient) Deploy(ctx context.Context, manifest types.BanyanManifest) (*banyanpb.DeployRPCResponse, error) {
+	return c.client.Deploy(ctx, &banyanpb.DeployRPCRequest{
+		Manifest: manifestToProto(manifest),
+	})
 }
 
-// Status retrieves cluster status from the engine API.
-func (c *EngineClient) Status(ctx context.Context) (*types.StatusResponse, error) {
-	var resp types.StatusResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/status", nil, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+// Down stops services in a deployment via the engine gRPC API.
+func (c *EngineClient) Down(ctx context.Context, name string, services []string) (*banyanpb.DownRPCResponse, error) {
+	return c.client.Down(ctx, &banyanpb.DownRPCRequest{
+		Name:     name,
+		Services: services,
+	})
 }
 
-// Info retrieves engine info (registry URL, API port).
-func (c *EngineClient) Info(ctx context.Context) (*types.InfoResponse, error) {
-	var resp types.InfoResponse
-	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/info", nil, &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
+// Status retrieves cluster status from the engine gRPC API.
+func (c *EngineClient) Status(ctx context.Context) (*banyanpb.GetStatusResponse, error) {
+	return c.client.GetStatus(ctx, &banyanpb.GetStatusRequest{})
 }
 
-// StreamLogs streams logs for a container from the engine API.
+// Info retrieves engine info (registry URL).
+func (c *EngineClient) Info(ctx context.Context) (*banyanpb.GetInfoResponse, error) {
+	return c.client.GetInfo(ctx, &banyanpb.GetInfoRequest{})
+}
+
+// StreamLogs streams logs for a container from the engine gRPC API.
 func (c *EngineClient) StreamLogs(ctx context.Context, container string, follow bool, tail int) (io.ReadCloser, error) {
-	url := fmt.Sprintf("%s/api/v1/logs/%s?follow=%t&tail=%d", c.BaseURL, container, follow, tail)
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	stream, err := c.client.GetLogs(ctx, &banyanpb.GetLogsRequest{
+		ContainerName: container,
+		Follow:        follow,
+		Tail:          int32(tail), //nolint:gosec // tail count is always small
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to stream logs: %w", err)
 	}
-
-	if c.Password != "" {
-		req.SetBasicAuth("banyan", c.Password)
-	}
-
-	// Use a client without timeout for streaming
-	streamClient := &http.Client{}
-	resp, err := streamClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to engine: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		return nil, fmt.Errorf("engine returned status %d: %s", resp.StatusCode, string(body))
-	}
-
-	return resp.Body, nil
+	return &grpcLogStreamReader{stream: stream}, nil
 }
 
-// doJSON performs a JSON request to the engine API.
-func (c *EngineClient) doJSON(ctx context.Context, method, path string, body interface{}, dest interface{}) error {
-	url := c.BaseURL + path
+// Health checks if the engine is healthy.
+func (c *EngineClient) Health(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err := c.client.Health(ctx, &banyanpb.HealthRequest{})
+	return err
+}
 
-	var reqBody io.Reader
-	if body != nil {
-		data, err := json.Marshal(body)
-		if err != nil {
-			return fmt.Errorf("failed to marshal request: %w", err)
-		}
-		reqBody = bytes.NewReader(data)
+// grpcLogStreamReader wraps a gRPC server-streaming response as io.ReadCloser.
+type grpcLogStreamReader struct {
+	stream grpc.ServerStreamingClient[banyanpb.GetLogsResponse]
+	buf    []byte
+}
+
+func (r *grpcLogStreamReader) Read(p []byte) (int, error) {
+	if len(r.buf) > 0 {
+		n := copy(p, r.buf)
+		r.buf = r.buf[n:]
+		return n, nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, url, reqBody)
+	resp, err := r.stream.Recv()
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return 0, err
 	}
 
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+	n := copy(p, resp.Data)
+	if n < len(resp.Data) {
+		r.buf = resp.Data[n:]
 	}
-	if c.Password != "" {
-		req.SetBasicAuth("banyan", c.Password)
-	}
+	return n, nil
+}
 
-	resp, err := c.Client.Do(req)
-	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		var errResp types.ErrorResponse
-		if json.Unmarshal(respBody, &errResp) == nil && errResp.Error != "" {
-			return fmt.Errorf("%s", errResp.Error)
-		}
-		return fmt.Errorf("engine returned status %d: %s", resp.StatusCode, string(respBody))
-	}
-
-	if dest != nil {
-		if err := json.Unmarshal(respBody, dest); err != nil {
-			return fmt.Errorf("failed to decode response: %w", err)
-		}
-	}
-
+func (r *grpcLogStreamReader) Close() error {
 	return nil
+}
+
+// manifestToProto converts types.BanyanManifest to proto Manifest.
+func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
+	services := make(map[string]*banyanpb.ManifestService, len(m.Services))
+	for name, svc := range m.Services { //nolint:gocritic // map iteration
+		ms := &banyanpb.ManifestService{
+			Image:       svc.Image,
+			Ports:       svc.Ports,
+			Environment: svc.Environment,
+			Command:     svc.Command,
+			DependsOn:   svc.DependsOn,
+		}
+		if svc.Build != nil {
+			ms.Build = &banyanpb.ManifestBuild{
+				Context:    svc.Build.Context,
+				Dockerfile: svc.Build.Dockerfile,
+			}
+		}
+		if svc.Deploy != nil {
+			ms.Deploy = &banyanpb.ManifestDeploy{
+				Replicas: int32(svc.Deploy.Replicas), //nolint:gosec // replica count is always small
+			}
+		}
+		services[name] = ms
+	}
+	return &banyanpb.Manifest{
+		Name:     m.Name,
+		Version:  m.Version,
+		Services: services,
+	}
 }

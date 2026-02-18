@@ -4,10 +4,10 @@ import "gopkg.in/yaml.v3"
 
 // BanyanManifest represents the banyan.yaml structure.
 type BanyanManifest struct {
-	Name     string                     `yaml:"name"`
-	Version  string                     `yaml:"version,omitempty"`
 	Services map[string]ManifestService `yaml:"services"`
 	Networks map[string]ManifestNetwork `yaml:"networks,omitempty"`
+	Name     string                     `yaml:"name"`
+	Version  string                     `yaml:"version,omitempty"`
 }
 
 // ManifestService represents a service in the manifest.
@@ -27,7 +27,7 @@ type ManifestDeploy struct {
 }
 
 // GetReplicas returns the replica count from deploy config, defaulting to 0 (caller handles default).
-func (s ManifestService) GetReplicas() int {
+func (s *ManifestService) GetReplicas() int {
 	if s.Deploy != nil {
 		return s.Deploy.Replicas
 	}

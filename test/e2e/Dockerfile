@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y \
     iptables \
     iproute2 \
     curl \
+    netcat-openbsd \
     procps \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*

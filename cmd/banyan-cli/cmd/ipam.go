@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/fertile-org/banyan/pkg/vpc/ipam"
 	"github.com/spf13/cobra"
+
+	"github.com/fertile-org/banyan/pkg/vpc/ipam"
 )
 
 var ipamCmd = &cobra.Command{

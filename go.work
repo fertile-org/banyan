@@ -12,6 +12,7 @@ use (
 	./pkg/agent/server
 	./pkg/agent/task
 	./pkg/engine
+	./pkg/rpc
 	./pkg/shared/domain
 	./pkg/shared/infrastructure
 	./pkg/types

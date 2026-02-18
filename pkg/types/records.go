@@ -46,33 +46,33 @@ type DeploymentRecord struct {
 // ServiceRecord describes a service within a deployment.
 type ServiceRecord struct {
 	Image       string   `json:"image"`
-	Replicas    int      `json:"replicas"`
 	Ports       []string `json:"ports,omitempty"`
 	Environment []string `json:"env,omitempty"`
 	Command     []string `json:"command,omitempty"`
 	DependsOn   []string `json:"depends_on,omitempty"`
+	Replicas    int      `json:"replicas"`
 }
 
 // TaskRecord is stored at /tasks/<agent-id>/<task-id> in etcd.
 type TaskRecord struct {
-	ID                 string            `json:"id"`
+	ContainerCheckedAt time.Time         `json:"container_checked_at,omitempty"`
+	UpdatedAt          time.Time         `json:"updated_at"`
+	CreatedAt          time.Time         `json:"created_at"`
+	Result             *TaskResultRecord `json:"result,omitempty"`
 	DeploymentID       string            `json:"deployment_id"`
+	ContainerName      string            `json:"container_name"`
+	Error              string            `json:"error,omitempty"`
+	ID                 string            `json:"id"`
+	ContainerStatus    string            `json:"container_status,omitempty"`
 	ServiceName        string            `json:"service_name"`
-	ReplicaIndex       int               `json:"replica_index"`
 	AgentID            string            `json:"agent_id"`
 	Type               string            `json:"type"`
 	Status             string            `json:"status"`
 	Image              string            `json:"image"`
-	ContainerName      string            `json:"container_name"`
+	Command            []string          `json:"command,omitempty"`
 	Ports              []string          `json:"ports,omitempty"`
 	Environment        []string          `json:"env,omitempty"`
-	Command            []string          `json:"command,omitempty"`
-	Result             *TaskResultRecord `json:"result,omitempty"`
-	ContainerStatus    string            `json:"container_status,omitempty"`
-	ContainerCheckedAt time.Time         `json:"container_checked_at,omitempty"`
-	CreatedAt          time.Time         `json:"created_at"`
-	UpdatedAt          time.Time         `json:"updated_at"`
-	Error              string            `json:"error,omitempty"`
+	ReplicaIndex       int               `json:"replica_index"`
 }
 
 // TaskResultRecord stores the outcome of task execution.
@@ -82,11 +82,11 @@ type TaskResultRecord struct {
 
 // NodeRecord is stored at /nodes/<name> in etcd.
 type NodeRecord struct {
+	LastSeen   time.Time `json:"last_seen"`
+	CreatedAt  time.Time `json:"created_at"`
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
 	APIAddress string    `json:"api_address,omitempty"`
-	LastSeen   time.Time `json:"last_seen"`
-	CreatedAt  time.Time `json:"created_at"`
 }
 
 // LogProvider retrieves container logs.

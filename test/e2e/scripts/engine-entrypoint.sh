@@ -16,10 +16,10 @@ security:
     auth_type: password
     password: ${E2E_PASSWORD}
 engine:
-    api_port: "8443"
+    grpc_port: "50051"
 cli:
     engine_host: localhost
-    engine_port: "8443"
+    engine_port: "50051"
 EOF
 chmod 600 /etc/banyan/banyan.yaml
 
@@ -27,6 +27,6 @@ chmod 600 /etc/banyan/banyan.yaml
 echo "Initializing engine..."
 echo "" | banyan-engine init
 
-# Start engine (this will also start etcd and the HTTP API)
+# Start engine (this will also start etcd and the gRPC server)
 echo "Starting engine..."
 exec banyan-engine start --etcd-client-urls http://0.0.0.0:2379

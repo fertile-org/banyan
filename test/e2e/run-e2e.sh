@@ -25,13 +25,13 @@ cleanup() {
 # Trap for cleanup on exit
 trap cleanup EXIT
 
-# Wait for a container's health check to pass
+# Wait for engine to be healthy via CLI status check
 wait_for_healthy() {
     local container=$1
     local max_wait=$2
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
-        if docker exec "$container" curl -sf http://localhost:2379/health >/dev/null 2>&1; then
+        if docker exec "$container" banyan-cli status >/dev/null 2>&1; then
             return 0
         fi
         echo "  Waiting for $container... (${elapsed}s)"
@@ -97,8 +97,8 @@ echo "========================================="
 echo ""
 echo "Cluster is running. You can interact with it:"
 echo "  docker exec banyan-engine banyan-engine status"
-echo "  docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml --engine http://localhost:8443"
-echo "  docker exec banyan-engine banyan-cli status --engine http://localhost:8443"
+echo "  docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml"
+echo "  docker exec banyan-engine banyan-cli status"
 echo "  docker exec banyan-worker-1 nerdctl ps"
 echo ""
 echo "To stop the cluster:"

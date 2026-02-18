@@ -60,12 +60,12 @@ Requires sudo privileges for installation.`,
 
 // Flags for etcd start
 var (
-	etcdDataDir            string
-	etcdListenClientURLs   string
+	etcdDataDir             string
+	etcdListenClientURLs    string
 	etcdAdvertiseClientURLs string
-	etcdName               string
-	etcdPidFile            string
-	etcdLogFile            string
+	etcdName                string
+	etcdPidFile             string
+	etcdLogFile             string
 )
 
 // Flags for etcd status
@@ -108,14 +108,14 @@ func runEtcdStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create data directory
-	if err := os.MkdirAll(etcdDataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create data directory: %w", err)
+	if mkdirErr := os.MkdirAll(etcdDataDir, 0o755); mkdirErr != nil {
+		return fmt.Errorf("failed to create data directory: %w", mkdirErr)
 	}
 
 	// Create log file directory
 	logDir := filepath.Dir(etcdLogFile)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log directory: %w", err)
+	if mkdirErr := os.MkdirAll(logDir, 0o755); mkdirErr != nil {
+		return fmt.Errorf("failed to create log directory: %w", mkdirErr)
 	}
 
 	// Prepare etcd command
@@ -132,7 +132,7 @@ func runEtcdStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open log file
-	logFile, err := os.OpenFile(etcdLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(etcdLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -148,20 +148,20 @@ func runEtcdStart(cmd *cobra.Command, args []string) error {
 	etcdProcess.Stdout = logFile
 	etcdProcess.Stderr = logFile
 
-	if err := etcdProcess.Start(); err != nil {
-		return fmt.Errorf("failed to start etcd: %w", err)
+	if startErr := etcdProcess.Start(); startErr != nil {
+		return fmt.Errorf("failed to start etcd: %w", startErr)
 	}
 
 	// Write PID file
 	pidDir := filepath.Dir(etcdPidFile)
-	if err := os.MkdirAll(pidDir, 0755); err != nil {
-		etcdProcess.Process.Kill()
-		return fmt.Errorf("failed to create PID directory: %w", err)
+	if mkdirErr := os.MkdirAll(pidDir, 0o755); mkdirErr != nil {
+		_ = etcdProcess.Process.Kill()
+		return fmt.Errorf("failed to create PID directory: %w", mkdirErr)
 	}
 
-	if err := os.WriteFile(etcdPidFile, []byte(fmt.Sprintf("%d", etcdProcess.Process.Pid)), 0644); err != nil {
-		etcdProcess.Process.Kill()
-		return fmt.Errorf("failed to write PID file: %w", err)
+	if writeErr := os.WriteFile(etcdPidFile, []byte(fmt.Sprintf("%d", etcdProcess.Process.Pid)), 0o600); writeErr != nil {
+		_ = etcdProcess.Process.Kill()
+		return fmt.Errorf("failed to write PID file: %w", writeErr)
 	}
 
 	fmt.Printf("etcd started with PID %d\n", etcdProcess.Process.Pid)
@@ -170,7 +170,7 @@ func runEtcdStart(cmd *cobra.Command, args []string) error {
 	time.Sleep(2 * time.Second)
 
 	// Check if process is still alive
-	if err := etcdProcess.Process.Signal(syscall.Signal(0)); err != nil {
+	if sigErr := etcdProcess.Process.Signal(syscall.Signal(0)); sigErr != nil {
 		return fmt.Errorf("etcd process died shortly after start. Check log file: %s", etcdLogFile)
 	}
 
@@ -280,8 +280,8 @@ func runEtcdStatus(cmd *cobra.Command, args []string) error {
 	for _, endpoint := range endpoints {
 		fmt.Printf("Endpoint: %s\n", endpoint)
 
-		statusResp, err := client.Status(ctx, endpoint)
-		if err != nil {
+		statusResp, statusErr := client.Status(ctx, endpoint)
+		if statusErr != nil {
 			fmt.Printf("  Status: ✗ UNHEALTHY\n")
 			fmt.Printf("  Error: %v\n\n", err)
 			continue
@@ -362,7 +362,7 @@ func runEtcdSetup(cmd *cobra.Command, args []string) error {
 	fmt.Printf("   URL: %s\n", downloadURL)
 
 	// Download to /tmp
-	tmpFile := filepath.Join("/tmp", filename)
+	tmpFile := "/tmp/" + filename
 	downloadCmd := exec.Command("wget", "-q", "-O", tmpFile, downloadURL)
 	if err := downloadCmd.Run(); err != nil {
 		// Try curl if wget fails
@@ -376,7 +376,7 @@ func runEtcdSetup(cmd *cobra.Command, args []string) error {
 	fmt.Println("✓ Download complete")
 
 	// Extract to /tmp
-	extractDir := filepath.Join("/tmp", fmt.Sprintf("etcd-%s-%s-%s", etcdVersion, platform, archName))
+	extractDir := "/tmp/" + fmt.Sprintf("etcd-%s-%s-%s", etcdVersion, platform, archName)
 	os.RemoveAll(extractDir) // Clean up any existing directory
 
 	fmt.Println("📂 Extracting archive...")
@@ -408,10 +408,10 @@ func runEtcdSetup(cmd *cobra.Command, args []string) error {
 
 	// Make executable
 	chmodEtcd := exec.Command("sudo", "chmod", "+x", "/usr/local/bin/etcd")
-	chmodEtcd.Run()
+	_ = chmodEtcd.Run()
 
 	chmodEtcdctl := exec.Command("sudo", "chmod", "+x", "/usr/local/bin/etcdctl")
-	chmodEtcdctl.Run()
+	_ = chmodEtcdctl.Run()
 
 	fmt.Println("✓ Installation complete")
 

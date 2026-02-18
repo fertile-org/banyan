@@ -7,8 +7,9 @@ import (
 	"net"
 	"strings"
 
-	"github.com/fertile-org/banyan/pkg/vpc/debug"
 	"github.com/spf13/cobra"
+
+	"github.com/fertile-org/banyan/pkg/vpc/debug"
 )
 
 var debugCmd = &cobra.Command{

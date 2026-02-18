@@ -17,19 +17,20 @@ sudo apt-get install etcd-server    # Debian/Ubuntu
 
 ### Engine starts but agents cannot connect
 
-Make sure etcd listens on all interfaces, not just localhost:
+Agents connect to the Engine's gRPC port (default: 50051). Check:
 
-```bash
-sudo banyan-cli engine start --etcd-client-urls http://0.0.0.0:2379
-```
+1. The Engine is running and the gRPC server started successfully (look for "Engine gRPC server listening on :50051" in the output).
 
-Verify from the worker machine:
+2. The agent's config has the correct engine host and port. Check `/etc/banyan/banyan.yaml` on the worker:
+   ```yaml
+   agent:
+     engine_host: <engine-ip>
+     engine_port: "50051"
+   ```
 
-```bash
-curl http://<engine-ip>:2379/health
-```
+3. Port 50051 is open in your firewall between workers and the engine.
 
-If this fails, check that port 2379 is open in your firewall.
+4. The agent and engine have the same cluster password.
 
 ### "VPC initialization: failed to write Flannel config"
 
@@ -80,13 +81,13 @@ If this fails, the worker may not have internet access or the image registry may
 
 The Engine is waiting for Agents to complete their tasks. Check:
 
-1. Are agents connected? Run `banyan-cli engine status`.
+1. Are agents connected? Run `banyan-cli status`.
 2. Check agent logs for errors in the terminal where `agent start` is running.
 3. Verify agents can pull the images specified in your manifest.
 
 ### Deployment fails immediately
 
-Check the error message in `engine status`. Common causes:
+Check the error message in `banyan-cli status`. Common causes:
 
 - **Image not found**: The image name in `banyan.yaml` is wrong or the registry is unreachable from workers.
 - **Port conflict**: Another container is already using the same host port.
@@ -98,7 +99,7 @@ The deploy command waits up to 2 minutes by default. If your images are large, t
 ```bash
 banyan-cli deploy -f banyan.yaml --no-wait
 # Check later:
-banyan-cli engine status
+banyan-cli status
 ```
 
 ### Containers are running but the application doesn't work
@@ -114,11 +115,11 @@ Banyan deploys containers but does not manage application-level networking betwe
 Engine and Agent commands need root access because they manage system services (etcd, containerd):
 
 ```bash
-sudo banyan-cli engine start
-sudo banyan-cli agent start --node-name <name>
+sudo banyan-engine start
+sudo banyan-agent start --node-name <name>
 ```
 
-The `deploy` and `engine status` commands do not require root.
+The `banyan-cli deploy` and `banyan-cli status` commands do not require root (but `banyan-cli init` does, to write `/etc/banyan/banyan.yaml`).
 
 ### Checking logs
 

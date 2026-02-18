@@ -25,6 +25,10 @@ build/
 # Integration test binaries
 run_*_integration
 
+# CLI binaries built in repo root
+vpc-cli
+banyan-cli
+
 # IDE files
 .vscode/
 .idea/

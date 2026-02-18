@@ -102,7 +102,7 @@ services:
       - "80:80"
 
   api:
-    image: my-registry/api:v1
+    image: hashicorp/http-echo:latest
     replicas: 2
     env:
       - APP_ENV=production

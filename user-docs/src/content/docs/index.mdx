@@ -42,7 +42,7 @@ services:
       - "80:80"
 
   api:
-    image: my-registry/api:latest
+    image: hashicorp/http-echo:latest
     ports:
       - "3000:3000"
 
@@ -63,7 +63,7 @@ services:
       - "80:80"
 
   api:
-    image: my-registry/api:latest
+    image: hashicorp/http-echo:latest
     replicas: 2
     ports:
       - "3000:3000"

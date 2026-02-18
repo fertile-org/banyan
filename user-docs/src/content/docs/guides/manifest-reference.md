@@ -100,7 +100,7 @@ services:
       - "80:80"
 
   api:
-    image: my-registry/api:latest
+    image: hashicorp/http-echo:latest
     replicas: 2
     ports:
       - "3000:3000"
@@ -134,7 +134,7 @@ name: pipeline
 
 services:
   worker:
-    image: my-registry/worker:latest
+    image: hashicorp/http-echo:latest
     replicas: 5
     env:
       - QUEUE_URL=amqp://rabbitmq:5672
@@ -145,7 +145,7 @@ services:
       - jobs
 
   scheduler:
-    image: my-registry/scheduler:latest
+    image: hashicorp/http-echo:latest
     replicas: 1
     env:
       - SCHEDULE_INTERVAL=60s

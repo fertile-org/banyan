@@ -18,6 +18,7 @@
 <p align="center">
   <a href="https://fertile-org.github.io/banyan/">Documentation</a> &middot;
   <a href="https://fertile-org.github.io/banyan/getting-started/quickstart/">Quickstart</a> &middot;
+  <a href="https://fertile-org.github.io/banyan/roadmap/">Roadmap</a> &middot;
   <a href="./DEVELOPMENT.md">Development</a>
 </p>
 
@@ -45,7 +46,7 @@ services:
       - "80:80"
 
   api:
-    image: my-registry/api:latest
+    image: hashicorp/http-echo:latest
     ports:
       - "3000:3000"
 
@@ -66,7 +67,7 @@ services:
       - "80:80"
 
   api:
-    image: my-registry/api:latest
+    image: hashicorp/http-echo:latest
     replicas: 2
     ports:
       - "3000:3000"

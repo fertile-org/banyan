@@ -21,7 +21,20 @@ Deploy containers across multiple servers using a familiar YAML manifest.
 
 ---
 
-## Milestone 2 — Basic Security
+## Milestone 2 — Service Observability
+
+Per-container health status, logs, and visibility from the CLI.
+
+- Agent monitors container health after deployment (running, exited, restarting)
+- Agent reports per-container status back to Engine via etcd
+- `engine status` shows per-service and per-container status (not just aggregate)
+- CLI command to stream container logs from agents
+- Detect and surface failed containers (e.g. exited immediately after start)
+- `banyan-cli down` command to stop and remove all containers for a deployment
+
+---
+
+## Milestone 3 — Basic Security
 
 Secure communication between CLI, Engine, and Agents.
 
@@ -32,7 +45,7 @@ Secure communication between CLI, Engine, and Agents.
 
 ---
 
-## Milestone 3 — Metrics Collection
+## Milestone 4 — Metrics Collection
 
 Collect and store resource metrics from every node and container.
 
@@ -44,7 +57,7 @@ Collect and store resource metrics from every node and container.
 
 ---
 
-## Milestone 4 — Auto-Scaling and Redeployment
+## Milestone 5 — Auto-Scaling and Redeployment
 
 Scale services based on metrics and support zero-downtime updates.
 
@@ -57,7 +70,7 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 5 — Monitoring Dashboard and CLI
+## Milestone 6 — Monitoring Dashboard and CLI
 
 Give operators visibility into the cluster through a web UI and CLI commands.
 
@@ -70,7 +83,7 @@ Give operators visibility into the cluster through a web UI and CLI commands.
 
 ---
 
-## Milestone 6 — Advanced Security
+## Milestone 7 — Advanced Security
 
 Stronger authentication model for production environments.
 
@@ -81,7 +94,7 @@ Stronger authentication model for production environments.
 
 ---
 
-## Milestone 7 — Advanced Metrics and Dashboard Enhancements
+## Milestone 8 — Advanced Metrics and Dashboard Enhancements
 
 Deeper observability and richer operational tooling.
 

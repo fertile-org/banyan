@@ -1,5 +1,7 @@
 # Example Banyan deployment file
-# Similar to docker-compose but with replicas for scaling
+# Familiar docker-compose syntax with replicas for multi-server deployment
+
+name: my-app
 
 services:
   web:
@@ -9,13 +11,13 @@ services:
       - "80:80"
 
   api:
-    image: myapp/api:v1
+    image: hashicorp/http-echo:latest
     replicas: 3
     ports:
       - "8080:8080"
-    environment:
-      LOG_LEVEL: info
-      DB_HOST: db.internal
+    env:
+      - LOG_LEVEL=info
+      - DB_HOST=db.internal
     depends_on:
       - web
       - db
@@ -25,12 +27,7 @@ services:
     replicas: 1
     ports:
       - "5432:5432"
-    environment:
-      POSTGRES_USER: banyan
-      POSTGRES_PASSWORD: secret
-      POSTGRES_DB: app
-    volumes:
-      - db-data:/var/lib/postgresql/data
-
-volumes:
-  db-data:
+    env:
+      - POSTGRES_USER=banyan
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=app

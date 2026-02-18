@@ -39,12 +39,20 @@
   height: auto;
 }
 
-/* Full-page background image */
+/* Full-page background image with opacity */
 body {
+  position: relative;
+  min-height: 100vh;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
   background-image: url("/page-background.png");
   background-size: cover;
   background-position: center;
   background-repeat: no-repeat;
-  background-attachment: fixed;
-  min-height: 100vh;
+  opacity: 0.5;
+  z-index: -1;
 }

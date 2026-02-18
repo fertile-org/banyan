@@ -1,10 +1,10 @@
-<p align="center">
-  <img src="user-docs/src/assets/logo.png" alt="Banyan" width="160">
-</p>
+<div align="center">
+  <img src="user-docs/src/assets/logo.png" alt="Banyan" width="240">
+</div>
 
 <h1 align="center">Banyan</h1>
 
-<p align="center"><strong>Docker Compose that scales.</strong></p>
+<p align="center"><strong>Docker Compose syntax that scales.</strong></p>
 
 <p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
 
@@ -20,15 +20,15 @@
 
 ## From one server to many
 
-You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and everything works.
+You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and everything works on one machine.
 
-Then you need a second server.
+Then your app grows. You want your services spread across separate servers, or running multiple replicas to handle load. Either way, you need more than one machine.
 
-**Banyan makes that step simple.** Take the YAML syntax you already know, add `replicas`, and deploy across your servers.
+**Banyan makes that step simple.** Use the same YAML syntax you already know, and Banyan distributes your services across your servers.
 
 ## Same syntax, more servers
 
-**docker-compose.yml** — one machine:
+**docker-compose.yml** — everything on one machine:
 
 ```yaml
 services:
@@ -36,9 +36,17 @@ services:
     image: nginx:alpine
     ports:
       - "80:80"
+
+  api:
+    image: my-registry/api:latest
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:16-alpine
 ```
 
-**banyan.yaml** — across your cluster:
+**banyan.yaml** — distributed across your cluster:
 
 ```yaml
 name: my-app
@@ -49,9 +57,18 @@ services:
     replicas: 3
     ports:
       - "80:80"
+
+  api:
+    image: my-registry/api:latest
+    replicas: 2
+    ports:
+      - "3000:3000"
+
+  db:
+    image: postgres:16-alpine
 ```
 
-Same `services`. Same `image`. Same `ports`. Same `env`. The only addition is `replicas`.
+Same `services`. Same `image`. Same `ports`. Same `env`. Banyan spreads them across your servers automatically — and `replicas` lets you run multiple copies when you need them.
 
 ## Install
 

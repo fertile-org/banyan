@@ -5,7 +5,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "Banyan",
-      description: "Docker Compose that scales.",
+      description: "Docker Compose syntax that scales.",
       logo: {
         src: "./src/assets/logo.png",
         alt: "Banyan",

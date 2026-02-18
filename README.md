@@ -104,6 +104,10 @@ Full documentation is available at **[fertile-org.github.io/banyan](https://fert
 - [CLI Reference](https://fertile-org.github.io/banyan/reference/cli/)
 - [Troubleshooting](https://fertile-org.github.io/banyan/reference/troubleshooting/)
 
+## Roadmap
+
+See the [Roadmap](https://fertile-org.github.io/banyan/roadmap/) for what's next — metrics, auto-scaling, monitoring, and more.
+
 ## Contributing
 
 See the [Development Guide](./DEVELOPMENT.md) for project structure, build commands, and architecture.

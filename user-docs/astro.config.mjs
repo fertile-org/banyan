@@ -7,7 +7,7 @@ export default defineConfig({
     starlight({
       title: "Banyan",
       description: "Docker Compose syntax that scales.",
-      favicon: "/favicon.svg",
+      favicon: "/og-image.png",
       logo: {
         src: "./src/assets/logo.png",
         alt: "Banyan",

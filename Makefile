@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -24,12 +24,20 @@ run-agent:
 run-cli:
 	go run ./cmd/banyan-cli
 
+# Generate protobuf code
+proto:
+	protoc --proto_path=pkg/rpc/proto/banyan/v1 \
+		--go_out=pkg/rpc/banyanpb --go_opt=paths=source_relative \
+		--go-grpc_out=pkg/rpc/banyanpb --go-grpc_opt=paths=source_relative \
+		pkg/rpc/proto/banyan/v1/*.proto
+
 # Lint and format code
 lint:
 	cd cmd/banyan-engine && $(shell go env GOPATH)/bin/golangci-lint run
 	cd cmd/banyan-agent && $(shell go env GOPATH)/bin/golangci-lint run
 	cd cmd/banyan-cli && $(shell go env GOPATH)/bin/golangci-lint run
 	cd pkg/types && $(shell go env GOPATH)/bin/golangci-lint run
+	cd pkg/rpc && $(shell go env GOPATH)/bin/golangci-lint run
 	cd internal/common && $(shell go env GOPATH)/bin/golangci-lint run
 
 # Auto-fix linting issues
@@ -38,6 +46,7 @@ lint-fix:
 	cd cmd/banyan-agent && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd cmd/banyan-cli && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd pkg/types && $(shell go env GOPATH)/bin/golangci-lint run --fix
+	cd pkg/rpc && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd internal/common && $(shell go env GOPATH)/bin/golangci-lint run --fix
 
 # Run tests

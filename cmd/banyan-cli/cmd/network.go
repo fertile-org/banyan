@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/spf13/cobra"
+
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/vpc/network"
-	"github.com/spf13/cobra"
 )
 
 var networkCmd = &cobra.Command{

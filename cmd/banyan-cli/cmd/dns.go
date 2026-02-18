@@ -9,8 +9,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/spf13/cobra"
+
+	"github.com/fertile-org/banyan/pkg/vpc/dns"
 )
 
 var dnsCmd = &cobra.Command{

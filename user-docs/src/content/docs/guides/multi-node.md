@@ -13,9 +13,11 @@ This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you j
                     +-----------+
                     |  Engine   |  (control plane)
                     |  + etcd   |
+                    |  + gRPC   |
                     +-----+-----+
                           |
               +-----------+-----------+
+              |     gRPC (:50051)     |
               |                       |
         +-----+-----+          +-----+-----+
         |  Worker 1  |          |  Worker 2  |
@@ -24,31 +26,35 @@ This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you j
         +------------+          +------------+
 ```
 
-The Engine orchestrates. Workers run containers. They communicate through etcd.
+The Engine orchestrates. Workers run containers. All communication happens over gRPC with password authentication.
 
 ## Prerequisites
 
-Install `banyan-cli` on all servers. See [Installation](/getting-started/installation/).
+Install the appropriate binaries on each server. See [Installation](/getting-started/installation/).
 
-- **Engine node**: needs etcd
-- **Worker nodes**: need containerd and nerdctl
+- **Engine node**: `banyan-engine`, `banyan-cli`, etcd
+- **Worker nodes**: `banyan-agent`, containerd, nerdctl
+- **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 
 ## 1. Start the Engine
 
 On your Engine server (e.g., `192.168.1.10`):
 
 ```bash
-sudo banyan-cli engine init
-sudo banyan-cli engine start --etcd-client-urls http://0.0.0.0:2379
+sudo banyan-engine init
+sudo banyan-engine start
 ```
 
-The `--etcd-client-urls http://0.0.0.0:2379` makes etcd listen on all interfaces so workers can connect.
+During `init`, you'll set a cluster password. All agents and CLI clients must use the same password.
 
-Verify from a worker machine:
+The Engine starts a gRPC server on port 50051 by default. Verify from another machine:
 
 ```bash
-curl http://192.168.1.10:2379/health
-# {"health":"true"}
+# On the deploy machine, configure the CLI to point at the engine
+sudo banyan-cli init
+# Enter: 192.168.1.10 for host, 50051 for port, and the cluster password
+
+banyan-cli status
 ```
 
 ## 2. Start the Agents
@@ -56,31 +62,40 @@ curl http://192.168.1.10:2379/health
 On Worker 1 (`192.168.1.11`):
 
 ```bash
-sudo banyan-cli agent init
-sudo banyan-cli agent start --node-name worker-1
+sudo banyan-agent init
+# Enter: 192.168.1.10 for engine host, 50051 for port, and the cluster password
+
+sudo banyan-agent start --node-name worker-1
 ```
 
 On Worker 2 (`192.168.1.12`):
 
 ```bash
-sudo banyan-cli agent init
-sudo banyan-cli agent start --node-name worker-2
+sudo banyan-agent init
+sudo banyan-agent start --node-name worker-2
 ```
 
-Each Agent registers with the Engine and starts a heartbeat.
+Each Agent connects to the Engine via gRPC, registers, and starts a heartbeat.
 
 ## 3. Verify the cluster
 
 ```bash
-banyan-cli engine status
+banyan-cli status
 ```
 
 ```
+Banyan Cluster - Status
+========================================
+Engine: RUNNING
+Connection: 192.168.1.10:50051
+
 Agents: 2
   - worker-1 (status: ready, last seen: 2s ago)
   - worker-2 (status: ready, last seen: 3s ago)
 
 Deployments: 0
+
+========================================
 ```
 
 ## 4. Deploy
@@ -121,10 +136,10 @@ services:
 ```
 
 ```bash
-banyan-cli deploy -f banyan.yaml --etcd http://192.168.1.10:2379
+banyan-cli deploy -f banyan.yaml
 ```
 
-Banyan distributes 5 containers across 2 workers using round-robin:
+The CLI connects to the Engine using the host and port configured during `banyan-cli init`. Banyan distributes 5 containers across 2 workers using round-robin:
 
 | Worker 1 | Worker 2 |
 |----------|----------|
@@ -142,24 +157,31 @@ sudo nerdctl ps
 
 ## Deploying from a remote machine
 
-You don't need to run `deploy` from the Engine node. Any machine with `banyan-cli` can deploy as long as it can reach etcd:
+You don't need to run `deploy` from the Engine node. Any machine with `banyan-cli` can deploy as long as it can reach the Engine's gRPC port:
 
 ```bash
-banyan-cli deploy -f banyan.yaml --etcd http://192.168.1.10:2379
+# First configure the CLI (run once)
+sudo banyan-cli init
+# Enter the engine host, port, and password
+
+# Then deploy
+banyan-cli deploy -f banyan.yaml
 ```
 
 ## Adding more workers
 
-1. Install `banyan-cli`, containerd, and nerdctl on the new server.
-2. Run `sudo banyan-cli agent init`
-3. Run `sudo banyan-cli agent start --node-name worker-3`
+1. Install `banyan-agent`, containerd, and nerdctl on the new server.
+2. Run `sudo banyan-agent init` (enter engine host, port, and password)
+3. Run `sudo banyan-agent start --node-name worker-3`
 
-The new worker appears in `engine status` within seconds. Future deployments include it automatically.
+The new worker appears in `banyan-cli status` within seconds. Future deployments include it automatically.
 
 ## Firewall requirements
 
 | Port | Protocol | Direction | Purpose |
 |------|----------|-----------|---------|
-| 2379 | TCP | Workers to Engine | etcd client communication |
+| 50051 | TCP | Agents/CLI → Engine | gRPC (all control plane communication) |
+| 50052 | TCP | Engine → Agents | gRPC (log streaming) |
+| 5000 | TCP | Agents → Engine | OCI registry (image distribution) |
 
 Workers don't need to communicate with each other directly.

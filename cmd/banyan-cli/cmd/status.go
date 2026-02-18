@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/spf13/cobra"
+
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 var statusCmd = &cobra.Command{
@@ -27,13 +28,19 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Cluster - Status")
 	fmt.Println("========================================")
 
-	engineURL := types.GetCLIEngineEndpoint(configPath)
-	if engineURL == "" {
+	engineAddr := types.GetCLIEngineEndpoint(configPath)
+	if engineAddr == "" {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
 	password := types.GetConfigPassword(configPath)
-	client := NewEngineClient(engineURL, password)
+	client, err := NewEngineClient(engineAddr, password)
+	if err != nil {
+		fmt.Printf("Engine: UNREACHABLE (%v)\n", err)
+		fmt.Println("========================================")
+		return nil
+	}
+	defer client.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -46,12 +53,13 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("Engine: RUNNING")
-	fmt.Printf("Connection: %s\n", engineURL)
+	fmt.Printf("Connection: %s\n", engineAddr)
 
 	// Print agents
 	fmt.Printf("\nAgents: %d\n", len(status.Agents))
 	for _, agent := range status.Agents {
-		age := time.Since(agent.LastSeen).Truncate(time.Second)
+		lastSeen := time.Unix(agent.LastSeenUnix, 0)
+		age := time.Since(lastSeen).Truncate(time.Second)
 		fmt.Printf("  - %s (status: %s, last seen: %s ago)\n", agent.Name, agent.Status, age)
 	}
 
@@ -62,15 +70,21 @@ func runStatus(cmd *cobra.Command, args []string) error {
 			d.Name, d.Status, d.Healthy, d.Total)
 
 		// Filter to create_and_start tasks
-		var createTasks []types.TaskRecord
+		var createTasks []*taskInfoForDisplay
 		for _, t := range d.Tasks {
 			if t.Type == types.TaskTypeCreateAndStart {
-				createTasks = append(createTasks, t)
+				createTasks = append(createTasks, &taskInfoForDisplay{
+					ServiceName:            t.ServiceName,
+					ContainerName:          t.ContainerName,
+					AgentID:                t.AgentId,
+					ContainerStatus:        t.ContainerStatus,
+					ContainerCheckedAtUnix: t.ContainerCheckedAtUnix,
+				})
 			}
 		}
 
-		grouped := types.GroupTasksByService(createTasks)
-		for _, svcName := range types.SortedServiceNames(grouped) {
+		grouped := groupTaskInfoByService(createTasks)
+		for _, svcName := range sortedServiceNamesFromInfo(grouped) {
 			fmt.Printf("    %s:\n", svcName)
 			for _, t := range grouped[svcName] {
 				containerStatus := t.ContainerStatus
@@ -78,8 +92,9 @@ func runStatus(cmd *cobra.Command, args []string) error {
 					containerStatus = "pending"
 				}
 				checkedInfo := ""
-				if !t.ContainerCheckedAt.IsZero() {
-					ago := time.Since(t.ContainerCheckedAt).Truncate(time.Second)
+				if t.ContainerCheckedAtUnix > 0 {
+					checkedAt := time.Unix(t.ContainerCheckedAtUnix, 0)
+					ago := time.Since(checkedAt).Truncate(time.Second)
 					checkedInfo = fmt.Sprintf(" (checked %s ago)", ago)
 				}
 				fmt.Printf("      %s on %s: %s%s\n", t.ContainerName, t.AgentID, containerStatus, checkedInfo)
@@ -91,3 +106,35 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// taskInfoForDisplay is a lightweight struct for status display.
+type taskInfoForDisplay struct {
+	ServiceName            string
+	ContainerName          string
+	AgentID                string
+	ContainerStatus        string
+	ContainerCheckedAtUnix int64
+}
+
+func groupTaskInfoByService(tasks []*taskInfoForDisplay) map[string][]*taskInfoForDisplay {
+	grouped := make(map[string][]*taskInfoForDisplay)
+	for _, t := range tasks {
+		grouped[t.ServiceName] = append(grouped[t.ServiceName], t)
+	}
+	return grouped
+}
+
+func sortedServiceNamesFromInfo(grouped map[string][]*taskInfoForDisplay) []string {
+	names := make([]string, 0, len(grouped))
+	for name := range grouped {
+		names = append(names, name)
+	}
+	// Simple sort
+	for i := 0; i < len(names); i++ {
+		for j := i + 1; j < len(names); j++ {
+			if names[i] > names[j] {
+				names[i], names[j] = names[j], names[i]
+			}
+		}
+	}
+	return names
+}

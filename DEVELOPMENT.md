@@ -5,12 +5,13 @@
 ```
 banyan/
 ├── cmd/
-│   ├── banyan-engine/ # Engine binary (control plane: etcd, registry, HTTP API)
-│   ├── banyan-agent/  # Agent binary (worker: task polling, container ops)
-│   ├── banyan-cli/    # CLI binary (thin HTTP client for deploy/down/status/logs)
+│   ├── banyan-engine/ # Engine binary (control plane: etcd, gRPC server, scheduling)
+│   ├── banyan-agent/  # Agent binary (worker: gRPC client, task polling, container ops)
+│   ├── banyan-cli/    # CLI binary (gRPC client for deploy/down/status/logs)
 │                      # (VPC debug commands are in banyan-cli)
 ├── pkg/
 │   ├── types/         # Shared types, config, auth, helpers
+│   ├── rpc/           # gRPC proto definitions and generated code
 │   └── vpc/           # VPC networking library
 ├── internal/
 │   └── common/        # Private shared utilities

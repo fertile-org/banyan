@@ -44,8 +44,10 @@ issues:
   exclude-dirs:
     - bin
     - vendor
+    - banyanpb
   exclude-files:
     - ".*_test.go"
+    - ".*\\.pb\\.go"
   exclude-rules:
     # Exclude some linters from running on tests files
     - path: _test\.go

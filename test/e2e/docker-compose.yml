@@ -18,7 +18,7 @@ services:
       - E2E_PASSWORD=banyan-e2e-secret
     ports:
       - "2379:2379"
-      - "8443:8443"
+      - "50051:50051"
     networks:
       banyan-net:
         ipv4_address: 172.28.0.10
@@ -26,11 +26,11 @@ services:
       - engine-data:/var/lib/banyan
       - ./examples:/examples:ro
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:2379/health"]
+      test: ["CMD", "banyan-cli", "status"]
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 10s
+      start_period: 15s
 
   worker-1:
     build:
@@ -42,7 +42,8 @@ services:
     command: ["/entrypoint-agent.sh"]
     environment:
       - NODE_NAME=worker-1
-      - ENGINE_ENDPOINT=http://engine:2379
+      - ENGINE_HOST=engine
+      - ENGINE_GRPC_PORT=50051
       - E2E_PASSWORD=banyan-e2e-secret
     networks:
       banyan-net:
@@ -64,7 +65,8 @@ services:
     command: ["/entrypoint-agent.sh"]
     environment:
       - NODE_NAME=worker-2
-      - ENGINE_ENDPOINT=http://engine:2379
+      - ENGINE_HOST=engine
+      - ENGINE_GRPC_PORT=50051
       - E2E_PASSWORD=banyan-e2e-secret
     networks:
       banyan-net:

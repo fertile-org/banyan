@@ -75,7 +75,7 @@ Installation directory: /opt/cni/bin (requires sudo)`,
 		if !cniInstalled {
 			// Create CNI bin directory
 			fmt.Printf("Creating directory: %s\n", cniBinDir)
-			if err := os.MkdirAll(cniBinDir, 0755); err != nil {
+			if err := os.MkdirAll(cniBinDir, 0o755); err != nil {
 				return fmt.Errorf("failed to create %s: %w", cniBinDir, err)
 			}
 
@@ -192,7 +192,7 @@ func installFlannelCNIPlugin(arch string) error {
 	}
 
 	// Make executable
-	if err := os.Chmod(flannelBin, 0755); err != nil {
+	if err := os.Chmod(flannelBin, 0o755); err != nil {
 		return fmt.Errorf("failed to make executable: %w", err)
 	}
 
@@ -223,7 +223,7 @@ func installFlannelDaemon(arch string) error {
 	// Extract to temporary directory
 	tmpDir := "/tmp/flannel-extract"
 	os.RemoveAll(tmpDir)
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
@@ -244,7 +244,7 @@ func installFlannelDaemon(arch string) error {
 		return fmt.Errorf("failed to read flanneld: %w", err)
 	}
 
-	if err := os.WriteFile(flanneldDst, data, 0755); err != nil {
+	if err := os.WriteFile(flanneldDst, data, 0o755); err != nil { //nolint:gosec // executable binary needs 0755
 		return fmt.Errorf("failed to install flanneld: %w", err)
 	}
 
@@ -262,7 +262,7 @@ func downloadFile(url, filepath string) error {
 	defer out.Close()
 
 	// Get the data
-	resp, err := http.Get(url)
+	resp, err := http.Get(url) //nolint:gosec // URL comes from hardcoded constants
 	if err != nil {
 		return err
 	}

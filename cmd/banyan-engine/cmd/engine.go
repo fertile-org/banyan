@@ -15,12 +15,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/types"
-	"github.com/fertile-org/banyan/pkg/vpc"
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
 	"github.com/google/go-containerregistry/pkg/registry"
 	"github.com/spf13/cobra"
 	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 // Engine configuration flags.
@@ -33,7 +34,7 @@ var (
 	engineEtcdLogFile    string
 	engineEtcdClientURLs string
 	engineRegistryPort   string
-	engineAPIPort        string
+	engineGRPCPort       string
 )
 
 // configPath is the default path to the Banyan config file.
@@ -53,7 +54,7 @@ var startCmd = &cobra.Command{
 This command:
   1. Starts etcd if not already running
   2. Initializes VPC networking (IPAM, DNS, Security)
-  3. Starts the HTTP API server
+  3. Starts the gRPC server (agents and CLI connect here)
   4. Watches for new deployments and dispatches tasks to agents
   5. Monitors task completion and updates deployment status`,
 	RunE: runEngineStart,
@@ -86,7 +87,7 @@ func init() {
 	startCmd.Flags().StringVar(&engineEtcdLogFile, "etcd-log-file", "/var/log/banyan-etcd.log", "Etcd log file")
 	startCmd.Flags().StringVar(&engineEtcdClientURLs, "etcd-client-urls", "http://0.0.0.0:2379", "Etcd client URLs")
 	startCmd.Flags().StringVar(&engineRegistryPort, "registry-port", "5000", "Embedded OCI registry port")
-	startCmd.Flags().StringVar(&engineAPIPort, "api-port", "8443", "Engine HTTP API port")
+	startCmd.Flags().StringVar(&engineGRPCPort, "grpc-port", "50051", "Engine gRPC port")
 
 	statusCmd.Flags().StringVar(&engineEtcdEndpoints, "etcd", "http://localhost:2379", "Etcd endpoints")
 	statusCmd.Flags().StringVar(&engineEtcdPidFile, "etcd-pid-file", "/var/run/banyan-etcd.pid", "Etcd PID file")
@@ -110,7 +111,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\n1. Creating directories...")
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Printf("   [WARN] Failed to create %s: %v\n", dir, err)
 		} else {
 			fmt.Printf("   [OK] %s\n", dir)
@@ -140,7 +141,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 				AuthType: "password",
 				Password: password,
 			}
-			if err := types.SaveConfig(configPath, cfg); err != nil {
+			if err := types.SaveConfig(configPath, &cfg); err != nil {
 				fmt.Printf("   [WARN] Failed to save config: %v\n", err)
 			} else {
 				fmt.Printf("   [OK] Config saved to %s\n", configPath)
@@ -171,11 +172,11 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Read API port from config if not overridden by flag
-	if !cmd.Flags().Changed("api-port") {
+	// Read gRPC port from config if not overridden by flags
+	if !cmd.Flags().Changed("grpc-port") {
 		cfg, err := types.LoadConfig(configPath)
-		if err == nil && cfg.Engine.APIPort != "" {
-			engineAPIPort = cfg.Engine.APIPort
+		if err == nil && cfg.Engine.GRPCPort != "" {
+			engineGRPCPort = cfg.Engine.GRPCPort
 		}
 	}
 
@@ -205,16 +206,16 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		fmt.Printf("Warning: Failed to load config: %v\n", err)
 	} else if cfg.Security.Password != "" {
 		hash := types.HashPassword(cfg.Security.Password)
-		if err := store.Save(ctx, types.KeyAuthHash, hash); err != nil {
-			return fmt.Errorf("failed to store auth hash: %w", err)
+		if saveErr := store.Save(ctx, types.KeyAuthHash, hash); saveErr != nil {
+			return fmt.Errorf("failed to store auth hash: %w", saveErr)
 		}
 		fmt.Println("Password authentication enabled")
 	}
 
 	// Initialize VPC network
 	fmt.Printf("Initializing VPC network with CIDR %s...\n", engineVPCCIDR)
-	if err := vpc.InitializeNetwork(ctx, []string{engineEtcdEndpoints}, engineVPCCIDR); err != nil {
-		fmt.Printf("Warning: VPC initialization: %v\n", err)
+	if vpcErr := vpc.InitializeNetwork(ctx, []string{engineEtcdEndpoints}, engineVPCCIDR); vpcErr != nil {
+		fmt.Printf("Warning: VPC initialization: %v\n", vpcErr)
 	}
 	fmt.Println("VPC initialized")
 
@@ -232,23 +233,27 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to determine engine IP: %w", err)
 	}
 	registryURL := fmt.Sprintf("%s:%s", engineIP, engineRegistryPort)
-	if err := store.Save(ctx, types.KeyRegistry, registryURL); err != nil {
-		return fmt.Errorf("failed to save registry URL: %w", err)
+	if saveErr := store.Save(ctx, types.KeyRegistry, registryURL); saveErr != nil {
+		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
 	fmt.Printf("Registry URL: %s (saved to etcd)\n", registryURL)
 	_ = registryListener
 
-	// Start Engine HTTP API
+	// Start Engine gRPC server (agents and CLI connect here)
 	password := cfg.Security.Password
-	fmt.Printf("Starting Engine API on port %s...\n", engineAPIPort)
-	startEngineAPI(ctx, store, engineAPIPort, password, registryURL)
-	fmt.Printf("Engine API listening on :%s\n", engineAPIPort)
+	passwordHash := types.HashPassword(password)
+	fmt.Printf("Starting Engine gRPC server on port %s...\n", engineGRPCPort)
+	_, err = startEngineGRPC(ctx, store, engineGRPCPort, passwordHash, registryURL)
+	if err != nil {
+		return fmt.Errorf("failed to start gRPC server: %w", err)
+	}
+	fmt.Printf("Engine gRPC server listening on :%s\n", engineGRPCPort)
 
 	fmt.Println("========================================")
 	fmt.Println("Engine is running. Watching for deployments...")
 	fmt.Println("")
 	fmt.Println("Usage:")
-	fmt.Printf("  Deploy:      banyan-cli deploy --file banyan.yaml --engine http://localhost:%s\n", engineAPIPort)
+	fmt.Printf("  Deploy:      banyan-cli deploy --file banyan.yaml\n")
 	fmt.Println("  Agent start: banyan-agent start --node-name <name>")
 	fmt.Println("")
 	fmt.Println("Press Ctrl+C to stop")
@@ -417,18 +422,18 @@ func checkStoppingDeployment(ctx context.Context, store *storage.EtcdStore, depl
 	failedTasks := 0
 	var firstError string
 
-	for _, task := range tasks {
-		if task.Type != types.TaskTypeStopAndRemove {
+	for i := range tasks {
+		if tasks[i].Type != types.TaskTypeStopAndRemove {
 			continue
 		}
 		totalTasks++
-		switch task.Status {
+		switch tasks[i].Status {
 		case types.StatusCompleted:
 			completedTasks++
 		case types.StatusFailed:
 			failedTasks++
 			if firstError == "" {
-				firstError = task.Error
+				firstError = tasks[i].Error
 			}
 		}
 	}
@@ -474,36 +479,6 @@ func listAvailableAgents(ctx context.Context, store *storage.EtcdStore) ([]types
 		}
 	}
 	return agents, nil
-}
-
-// findDeploymentByName scans all deployments and returns the most recent one matching the given name.
-func findDeploymentByName(ctx context.Context, store *storage.EtcdStore, name string) (*types.DeploymentRecord, string, error) {
-	keys, err := store.List(ctx, types.KeyDeployments)
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to list deployments: %w", err)
-	}
-
-	var best *types.DeploymentRecord
-	var bestKey string
-	for _, key := range keys {
-		var record types.DeploymentRecord
-		if err := store.Get(ctx, key, &record); err != nil {
-			continue
-		}
-		if record.Name != name {
-			continue
-		}
-		if best == nil || record.CreatedAt.After(best.CreatedAt) {
-			r := record
-			best = &r
-			bestKey = key
-		}
-	}
-
-	if best == nil {
-		return nil, "", fmt.Errorf("no deployment found with name %q", name)
-	}
-	return best, bestKey, nil
 }
 
 func runEngineStop(cmd *cobra.Command, args []string) error {
@@ -561,15 +536,15 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 
 		allTasks := types.CollectDeploymentTasks(ctx, store, record.ID)
 		var tasks []types.TaskRecord
-		for _, t := range allTasks {
-			if t.Type == types.TaskTypeCreateAndStart {
-				tasks = append(tasks, t)
+		for i := range allTasks {
+			if allTasks[i].Type == types.TaskTypeCreateAndStart {
+				tasks = append(tasks, allTasks[i])
 			}
 		}
 
 		healthy := 0
-		for _, t := range tasks {
-			if t.ContainerStatus == types.StatusRunning {
+		for i := range tasks {
+			if tasks[i].ContainerStatus == types.StatusRunning {
 				healthy++
 			}
 		}
@@ -580,17 +555,18 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 		grouped := types.GroupTasksByService(tasks)
 		for _, svcName := range types.SortedServiceNames(grouped) {
 			fmt.Printf("    %s:\n", svcName)
-			for _, t := range grouped[svcName] {
-				containerStatus := t.ContainerStatus
+			svcTasks := grouped[svcName]
+			for i := range svcTasks {
+				containerStatus := svcTasks[i].ContainerStatus
 				if containerStatus == "" {
 					containerStatus = "pending"
 				}
 				checkedInfo := ""
-				if !t.ContainerCheckedAt.IsZero() {
-					ago := time.Since(t.ContainerCheckedAt).Truncate(time.Second)
+				if !svcTasks[i].ContainerCheckedAt.IsZero() {
+					ago := time.Since(svcTasks[i].ContainerCheckedAt).Truncate(time.Second)
 					checkedInfo = fmt.Sprintf(" (checked %s ago)", ago)
 				}
-				fmt.Printf("      %s on %s: %s%s\n", t.ContainerName, t.AgentID, containerStatus, checkedInfo)
+				fmt.Printf("      %s on %s: %s%s\n", svcTasks[i].ContainerName, svcTasks[i].AgentID, containerStatus, checkedInfo)
 			}
 		}
 	}
@@ -609,7 +585,7 @@ func startRegistry(ctx context.Context, port string) (net.Listener, error) {
 		return nil, fmt.Errorf("failed to listen on port %s: %w", port, err)
 	}
 
-	server := &http.Server{Handler: handler}
+	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
 			fmt.Printf("Registry server error: %v\n", err)
@@ -620,7 +596,7 @@ func startRegistry(ctx context.Context, port string) (net.Listener, error) {
 		<-ctx.Done()
 		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer shutdownCancel()
-		server.Shutdown(shutdownCtx)
+		_ = server.Shutdown(shutdownCtx)
 	}()
 
 	return listener, nil
@@ -668,13 +644,13 @@ func ensureEngineEtcdRunning() error {
 		return fmt.Errorf("etcd binary not found. Install with: apt install etcd-server")
 	}
 
-	if err := os.MkdirAll(engineEtcdDataDir, 0755); err != nil {
-		return fmt.Errorf("failed to create etcd data directory: %w", err)
+	if mkdirErr := os.MkdirAll(engineEtcdDataDir, 0o755); mkdirErr != nil {
+		return fmt.Errorf("failed to create etcd data directory: %w", mkdirErr)
 	}
 
 	logDir := filepath.Dir(engineEtcdLogFile)
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("failed to create log directory: %w", err)
+	if mkdirErr := os.MkdirAll(logDir, 0o755); mkdirErr != nil {
+		return fmt.Errorf("failed to create log directory: %w", mkdirErr)
 	}
 
 	fmt.Println("Starting etcd...")
@@ -691,7 +667,7 @@ func ensureEngineEtcdRunning() error {
 		"--initial-cluster-state", "new",
 	}
 
-	logFile, err := os.OpenFile(engineEtcdLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile(engineEtcdLogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to open log file: %w", err)
 	}
@@ -707,11 +683,11 @@ func ensureEngineEtcdRunning() error {
 	}
 
 	pidDir := filepath.Dir(engineEtcdPidFile)
-	if err := os.MkdirAll(pidDir, 0755); err != nil {
+	if err := os.MkdirAll(pidDir, 0o755); err != nil {
 		return fmt.Errorf("failed to create PID directory: %w", err)
 	}
 
-	if err := os.WriteFile(engineEtcdPidFile, []byte(strconv.Itoa(etcdProcess.Process.Pid)), 0644); err != nil {
+	if err := os.WriteFile(engineEtcdPidFile, []byte(strconv.Itoa(etcdProcess.Process.Pid)), 0o600); err != nil {
 		return fmt.Errorf("failed to write PID file: %w", err)
 	}
 

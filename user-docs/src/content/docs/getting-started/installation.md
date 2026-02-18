@@ -7,7 +7,7 @@ sidebar:
 
 ## Quick install
 
-The install script detects your OS, downloads `banyan-cli`, and installs all dependencies for the role you choose.
+The install script detects your OS, downloads the Banyan binaries, and installs all dependencies for the role you choose.
 
 **Engine node** (control plane):
 
@@ -31,8 +31,8 @@ The script installs:
 
 | Role | What gets installed |
 |------|-------------------|
-| Engine | `banyan-cli`, etcd |
-| Agent | `banyan-cli`, containerd, nerdctl, CNI plugins, BuildKit |
+| Engine | `banyan-engine`, `banyan-cli`, etcd |
+| Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl, CNI plugins, BuildKit |
 
 Supported distros: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux. Architectures: x86_64, ARM64.
 
@@ -48,16 +48,29 @@ If you prefer to build yourself, you need Go 1.24+ on the build machine only.
 
 ```bash
 git clone https://github.com/fertile-org/banyan.git
-cd banyan/cmd/banyan-cli
-go build -o banyan-cli .
-sudo mv banyan-cli /usr/local/bin/
+cd banyan
+
+# Build all binaries
+cd cmd/banyan-engine && go build -o banyan-engine . && cd ../..
+cd cmd/banyan-agent && go build -o banyan-agent . && cd ../..
+cd cmd/banyan-cli && go build -o banyan-cli . && cd ../..
+
+# Install
+sudo mv cmd/banyan-engine/banyan-engine /usr/local/bin/
+sudo mv cmd/banyan-agent/banyan-agent /usr/local/bin/
+sudo mv cmd/banyan-cli/banyan-cli /usr/local/bin/
 ```
 
 Cross-compile for remote servers:
 
 ```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o banyan-cli .
-scp banyan-cli user@server:/usr/local/bin/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o banyan-engine ./cmd/banyan-engine/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o banyan-agent ./cmd/banyan-agent/
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o banyan-cli ./cmd/banyan-cli/
+
+# Copy the right binaries to each server
+scp banyan-engine banyan-cli user@engine-server:/usr/local/bin/
+scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 ```
 
 When building from source, you still need to install dependencies on each node manually:
@@ -68,7 +81,9 @@ When building from source, you still need to install dependencies on each node m
 ## Verify
 
 ```bash
-banyan-cli --help
+banyan-engine --help   # On engine node
+banyan-agent --help    # On worker nodes
+banyan-cli --help      # On any machine
 ```
 
 ## Next steps

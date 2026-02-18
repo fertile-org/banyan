@@ -12,25 +12,26 @@ Haven't installed yet? Start with [Installation](/getting-started/installation/)
 ## 1. Start the Engine
 
 ```bash
-sudo banyan-cli engine init
-sudo banyan-cli engine start
+sudo banyan-engine init
+sudo banyan-engine start
 ```
 
-The Engine starts etcd and begins watching for deployments. It runs in the foreground — open a new terminal for the next steps.
+The Engine starts etcd, the gRPC server, and begins watching for deployments. It runs in the foreground — open a new terminal for the next steps.
 
 ## 2. Start an Agent
 
 In a second terminal:
 
 ```bash
-sudo banyan-cli agent init
-sudo banyan-cli agent start --node-name local-worker
+sudo banyan-agent init
+sudo banyan-agent start --node-name local-worker
 ```
 
-Verify the connection:
+In a third terminal, initialize the CLI and verify the connection:
 
 ```bash
-banyan-cli engine status
+sudo banyan-cli init
+banyan-cli status
 ```
 
 ```
@@ -93,20 +94,20 @@ Building images...
   Building api → my-app-api:latest
 Images built successfully.
 
-Connecting to Engine at http://localhost:2379...
-
 Pushing images to registry 192.168.1.10:5000...
   Tagging my-app-web:latest → 192.168.1.10:5000/my-app-web:latest
   Pushing 192.168.1.10:5000/my-app-web:latest...
   Tagging my-app-api:latest → 192.168.1.10:5000/my-app-api:latest
   Pushing 192.168.1.10:5000/my-app-api:latest...
 Images pushed successfully.
+
 Application: my-app
 Services: 3
   - web: 192.168.1.10:5000/my-app-web:latest (replicas: 1)
   - api: 192.168.1.10:5000/my-app-api:latest (replicas: 3)
   - db: postgres:15-alpine (replicas: 1)
 
+Connecting to Engine at localhost:50051...
 Deployment 'my-app' created (ID: my-app-1771339609)
 Waiting for deployment to complete...
   Status: deploying (tasks dispatched to agents)
@@ -119,10 +120,15 @@ Deployment 'my-app' is RUNNING!
 ## 5. Verify
 
 ```bash
-banyan-cli engine status
+banyan-cli status
 ```
 
 ```
+Banyan Cluster - Status
+========================================
+Engine: RUNNING
+Connection: localhost:50051
+
 Agents: 1
   - local-worker (status: ready, last seen: 3s ago)
 
@@ -136,6 +142,8 @@ Deployments: 1
       my-app-api-2 on local-worker: running (checked 8s ago)
     db:
       my-app-db-0 on local-worker: running (checked 8s ago)
+
+========================================
 ```
 
 ## 6. View logs
@@ -183,16 +191,16 @@ You can also stop specific services: `banyan-cli down --name my-app web`
 Stop the Agent and Engine with `Ctrl+C` in their terminals, or:
 
 ```bash
-sudo banyan-cli agent stop
-sudo banyan-cli engine stop
+sudo banyan-agent stop
+sudo banyan-engine stop
 ```
 
 ## What just happened
 
-1. The **Engine** received your manifest and created tasks for each container replica.
-2. It assigned tasks to the **Agent** using round-robin scheduling.
-3. The **Agent** pulled images and started containers using containerd.
-4. The deploy command polled until all containers were running, then reported success.
+1. The **CLI** sent your manifest to the **Engine** via gRPC.
+2. The **Engine** created tasks for each container replica and assigned them to the **Agent** using round-robin scheduling.
+3. The **Agent** polled the Engine for tasks, pulled images, and started containers using containerd.
+4. The deploy command polled the Engine until all containers were running, then reported success.
 
 On a single machine this looks like overkill. The value shows up when you add more servers — your `banyan.yaml` doesn't change at all.
 

@@ -3,8 +3,9 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/spf13/cobra"
+
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 var initCmd = &cobra.Command{
@@ -46,17 +47,17 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\n1. Configuring engine connection...")
 
-	fmt.Print("   Engine host (e.g. 192.168.1.10): ")
+	fmt.Print("   Engine host (e.g. localhost): ")
 	engineHost := types.ReadLine()
 	if engineHost == "" {
 		return fmt.Errorf("engine host is required")
 	}
 	fmt.Printf("   [OK] Engine host: %s\n", engineHost)
 
-	fmt.Print("   Engine port (default: 8443): ")
+	fmt.Print("   Engine gRPC port (default: 50051): ")
 	enginePort := types.ReadLine()
 	if enginePort == "" {
-		enginePort = "8443"
+		enginePort = "50051"
 	}
 	fmt.Printf("   [OK] Engine port: %s\n", enginePort)
 
@@ -79,7 +80,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		EnginePort: enginePort,
 	}
 
-	if err := types.SaveConfig(configPath, cfg); err != nil {
+	if err := types.SaveConfig(configPath, &cfg); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
 

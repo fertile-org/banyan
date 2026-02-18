@@ -49,7 +49,7 @@ func TestLoadSaveConfig(t *testing.T) {
 			},
 		}
 
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
@@ -104,7 +104,7 @@ func TestLoadSaveConfig(t *testing.T) {
 			},
 		}
 
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
@@ -131,7 +131,7 @@ func TestGetConfigEngineEndpoint(t *testing.T) {
 		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 
 		cfg := BanyanConfig{}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
@@ -148,16 +148,16 @@ func TestGetConfigEngineEndpoint(t *testing.T) {
 		cfg := BanyanConfig{
 			Agent: AgentConfig{
 				EngineHost: "10.0.0.1",
-				EnginePort: "2380",
+				EnginePort: "50053",
 			},
 		}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
 		result := GetConfigEngineEndpoint(cfgPath)
-		if result != "http://10.0.0.1:2380" {
-			t.Errorf("expected http://10.0.0.1:2380, got %s", result)
+		if result != "10.0.0.1:50053" {
+			t.Errorf("expected 10.0.0.1:50053, got %s", result)
 		}
 	})
 
@@ -170,13 +170,13 @@ func TestGetConfigEngineEndpoint(t *testing.T) {
 				EngineHost: "10.0.0.1",
 			},
 		}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
 		result := GetConfigEngineEndpoint(cfgPath)
-		if result != "http://10.0.0.1:2379" {
-			t.Errorf("expected http://10.0.0.1:2379, got %s", result)
+		if result != "10.0.0.1:50051" {
+			t.Errorf("expected 10.0.0.1:50051, got %s", result)
 		}
 	})
 }
@@ -187,7 +187,7 @@ func TestGetCLIEngineEndpoint(t *testing.T) {
 		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 
 		cfg := BanyanConfig{}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
@@ -207,13 +207,13 @@ func TestGetCLIEngineEndpoint(t *testing.T) {
 				EnginePort: "8443",
 			},
 		}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
 		result := GetCLIEngineEndpoint(cfgPath)
-		if result != "http://10.0.0.1:8443" {
-			t.Errorf("expected http://10.0.0.1:8443, got %s", result)
+		if result != "10.0.0.1:8443" {
+			t.Errorf("expected 10.0.0.1:8443, got %s", result)
 		}
 	})
 
@@ -226,13 +226,13 @@ func TestGetCLIEngineEndpoint(t *testing.T) {
 				EngineHost: "10.0.0.1",
 			},
 		}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 
 		result := GetCLIEngineEndpoint(cfgPath)
-		if result != "http://10.0.0.1:8443" {
-			t.Errorf("expected http://10.0.0.1:8443, got %s", result)
+		if result != "10.0.0.1:50051" {
+			t.Errorf("expected 10.0.0.1:50051, got %s", result)
 		}
 	})
 
@@ -245,7 +245,7 @@ func TestGetCLIEngineEndpoint(t *testing.T) {
 				APIPort: "9999",
 			},
 		}
-		if err := SaveConfig(cfgPath, cfg); err != nil {
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
 			t.Fatalf("SaveConfig failed: %v", err)
 		}
 

@@ -8,8 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/spf13/cobra"
+
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 var (
@@ -53,13 +54,17 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	engineURL := types.GetCLIEngineEndpoint(configPath)
-	if engineURL == "" {
+	engineAddr := types.GetCLIEngineEndpoint(configPath)
+	if engineAddr == "" {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
 	password := types.GetConfigPassword(configPath)
-	client := NewEngineClient(engineURL, password)
+	client, err := NewEngineClient(engineAddr, password)
+	if err != nil {
+		return fmt.Errorf("failed to connect to engine: %w", err)
+	}
+	defer client.Close()
 
 	reader, err := client.StreamLogs(ctx, containerName, logsFollow, logsTail)
 	if err != nil {
@@ -70,4 +75,3 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	_, _ = io.Copy(os.Stdout, reader)
 	return nil
 }
-

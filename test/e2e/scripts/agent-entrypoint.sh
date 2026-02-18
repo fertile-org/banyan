@@ -7,14 +7,11 @@ echo "========================================="
 
 # Get node name from environment or hostname
 NODE_NAME=${NODE_NAME:-$(hostname)}
-ENGINE_ENDPOINT=${ENGINE_ENDPOINT:-http://engine:2379}
+ENGINE_HOST=${ENGINE_HOST:-engine}
+ENGINE_GRPC_PORT=${ENGINE_GRPC_PORT:-50051}
 
 # Default E2E password (must match engine password)
 E2E_PASSWORD=${E2E_PASSWORD:-banyan-e2e-secret}
-
-# Parse host and port from ENGINE_ENDPOINT (e.g. http://engine:2379 → engine / 2379)
-ENGINE_HOST=$(echo "$ENGINE_ENDPOINT" | sed -E 's|https?://([^:]+):.*|\1|')
-ENGINE_PORT=$(echo "$ENGINE_ENDPOINT" | sed -E 's|https?://[^:]+:([0-9]+).*|\1|')
 
 # Write config file with password and engine connection
 echo "Writing config..."
@@ -25,13 +22,13 @@ security:
     password: ${E2E_PASSWORD}
 agent:
     engine_host: ${ENGINE_HOST}
-    engine_port: "${ENGINE_PORT}"
+    engine_port: "${ENGINE_GRPC_PORT}"
 EOF
 chmod 600 /etc/banyan/banyan.yaml
 
-# Wait for engine etcd to be ready
-echo "Waiting for engine at $ENGINE_ENDPOINT..."
-until curl -sf "$ENGINE_ENDPOINT/health" > /dev/null 2>&1 || etcdctl --endpoints="$ENGINE_ENDPOINT" endpoint health > /dev/null 2>&1; do
+# Wait for engine gRPC to be ready (TCP check on gRPC port)
+echo "Waiting for engine gRPC at ${ENGINE_HOST}:${ENGINE_GRPC_PORT}..."
+until nc -z "${ENGINE_HOST}" "${ENGINE_GRPC_PORT}" 2>/dev/null; do
     echo "Engine not ready, waiting..."
     sleep 2
 done

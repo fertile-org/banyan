@@ -8,9 +8,10 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	"github.com/fertile-org/banyan/pkg/vpc/cni"
 	"github.com/fertile-org/banyan/pkg/vpc/storage"
-	"github.com/spf13/cobra"
 )
 
 var cniCmd = &cobra.Command{
@@ -32,10 +33,10 @@ Example:
 		plugin := args[0]
 
 		ctx := context.Background()
-		
+
 		// Get etcd endpoints flag
 		etcdEndpoints, _ := cmd.Flags().GetString("etcd-endpoints")
-		
+
 		// Create store based on whether etcd endpoints provided
 		var store storage.StateStore
 		if etcdEndpoints != "" {
@@ -213,7 +214,7 @@ func startFlannelDaemon(etcdEndpoints string) error {
 	cmd := exec.Command("flanneld", args...)
 
 	// Create log file
-	logFile, err := os.OpenFile("/var/log/flanneld.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	logFile, err := os.OpenFile("/var/log/flanneld.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return fmt.Errorf("failed to create log file: %w", err)
 	}
@@ -228,7 +229,7 @@ func startFlannelDaemon(etcdEndpoints string) error {
 
 	// Save PID for management
 	pidFile := "/var/run/flanneld.pid"
-	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0644); err != nil {
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", cmd.Process.Pid)), 0o600); err != nil {
 		logFile.Close()
 		return fmt.Errorf("failed to save PID: %w", err)
 	}
@@ -263,7 +264,7 @@ func isFlanneldRunning() bool {
 
 func createFlannelSubnetConfig() error {
 	// Create /run/flannel directory
-	if err := os.MkdirAll("/run/flannel", 0755); err != nil {
+	if err := os.MkdirAll("/run/flannel", 0o755); err != nil {
 		return fmt.Errorf("failed to create /run/flannel: %w", err)
 	}
 
@@ -275,7 +276,7 @@ FLANNEL_MTU=1450
 FLANNEL_IPMASQ=true
 `
 
-	if err := os.WriteFile("/run/flannel/subnet.env", []byte(config), 0644); err != nil {
+	if err := os.WriteFile("/run/flannel/subnet.env", []byte(config), 0o600); err != nil {
 		return fmt.Errorf("failed to write subnet config: %w", err)
 	}
 

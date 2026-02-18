@@ -1,0 +1,214 @@
+syntax = "proto3";
+package banyan.v1;
+option go_package = "github.com/fertile-org/banyan/pkg/rpc/banyanpb";
+
+// EngineService is hosted by the engine and called by agents and CLI.
+service EngineService {
+  // Agent RPCs
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc PollTasks(PollTasksRequest) returns (PollTasksResponse);
+  rpc ReportTaskResult(ReportTaskResultRequest) returns (ReportTaskResultResponse);
+  rpc ReportContainerHealth(ReportContainerHealthRequest) returns (ReportContainerHealthResponse);
+
+  // CLI RPCs
+  rpc Deploy(DeployRPCRequest) returns (DeployRPCResponse);
+  rpc Down(DownRPCRequest) returns (DownRPCResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
+  rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
+  rpc Health(HealthRequest) returns (HealthResponse);
+}
+
+// --- Agent messages ---
+
+message RegisterRequest {
+  string agent_name = 1;
+  string api_address = 2;
+  string session_token = 3;
+}
+
+message RegisterResponse {
+  string registry_url = 1;
+}
+
+message HeartbeatRequest {
+  string agent_name = 1;
+  string session_token = 2;
+}
+
+message HeartbeatResponse {}
+
+message PollTasksRequest {
+  string agent_name = 1;
+}
+
+message PollTasksResponse {
+  repeated TaskRecord tasks = 1;
+}
+
+message ReportTaskResultRequest {
+  string task_id = 1;
+  string agent_id = 2;
+  string status = 3;
+  string error = 4;
+  string container_name = 5;
+  TaskResult result = 6;
+}
+
+message TaskResult {
+  string container_id = 1;
+}
+
+message ReportTaskResultResponse {}
+
+message ReportContainerHealthRequest {
+  string agent_name = 1;
+  repeated ContainerStatus containers = 2;
+}
+
+message ContainerStatus {
+  string container_name = 1;
+  string status = 2;
+}
+
+message ReportContainerHealthResponse {}
+
+message TaskRecord {
+  string id = 1;
+  string deployment_id = 2;
+  string service_name = 3;
+  int32 replica_index = 4;
+  string agent_id = 5;
+  string type = 6;
+  string status = 7;
+  string image = 8;
+  string container_name = 9;
+  repeated string ports = 10;
+  repeated string environment = 11;
+  repeated string command = 12;
+}
+
+// --- CLI messages ---
+
+message DeployRPCRequest {
+  Manifest manifest = 1;
+}
+
+message DeployRPCResponse {
+  string deployment_id = 1;
+  string status = 2;
+}
+
+message Manifest {
+  string name = 1;
+  string version = 2;
+  map<string, ManifestService> services = 3;
+}
+
+message ManifestService {
+  string image = 1;
+  ManifestBuild build = 2;
+  ManifestDeploy deploy = 3;
+  repeated string ports = 4;
+  repeated string environment = 5;
+  repeated string command = 6;
+  repeated string depends_on = 7;
+}
+
+message ManifestBuild {
+  string context = 1;
+  string dockerfile = 2;
+}
+
+message ManifestDeploy {
+  int32 replicas = 1;
+}
+
+message DownRPCRequest {
+  string name = 1;
+  repeated string services = 2;
+}
+
+message DownRPCResponse {
+  int32 task_count = 1;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  repeated AgentInfo agents = 1;
+  repeated DeploymentInfo deployments = 2;
+}
+
+message AgentInfo {
+  string name = 1;
+  string status = 2;
+  string api_address = 3;
+  int64 last_seen_unix = 4;
+  int64 created_at_unix = 5;
+}
+
+message DeploymentInfo {
+  string id = 1;
+  string name = 2;
+  string status = 3;
+  map<string, ServiceInfo> services = 4;
+  int64 created_at_unix = 5;
+  int64 updated_at_unix = 6;
+  string error = 7;
+  repeated TaskInfo tasks = 8;
+  int32 healthy = 9;
+  int32 total = 10;
+}
+
+message ServiceInfo {
+  string image = 1;
+  int32 replicas = 2;
+  repeated string ports = 3;
+  repeated string environment = 4;
+  repeated string command = 5;
+  repeated string depends_on = 6;
+}
+
+message TaskInfo {
+  string id = 1;
+  string deployment_id = 2;
+  string service_name = 3;
+  int32 replica_index = 4;
+  string agent_id = 5;
+  string type = 6;
+  string status = 7;
+  string image = 8;
+  string container_name = 9;
+  repeated string ports = 10;
+  repeated string environment = 11;
+  repeated string command = 12;
+  string container_status = 13;
+  int64 container_checked_at_unix = 14;
+  int64 created_at_unix = 15;
+  int64 updated_at_unix = 16;
+  string error = 17;
+}
+
+message GetLogsRequest {
+  string container_name = 1;
+  bool follow = 2;
+  int32 tail = 3;
+}
+
+message GetLogsResponse {
+  bytes data = 1;
+}
+
+message GetInfoRequest {}
+
+message GetInfoResponse {
+  string registry_url = 1;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  string status = 1;
+}

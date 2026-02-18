@@ -33,7 +33,8 @@ type SecurityConfig struct {
 
 // EngineConfig holds engine-specific settings.
 type EngineConfig struct {
-	APIPort string `yaml:"api_port,omitempty"`
+	APIPort  string `yaml:"api_port,omitempty"`
+	GRPCPort string `yaml:"grpc_port,omitempty"`
 }
 
 // AgentConfig holds agent-specific settings.
@@ -69,9 +70,9 @@ func LoadConfig(path string) (BanyanConfig, error) {
 }
 
 // SaveConfig writes the Banyan config to disk with 0600 permissions.
-func SaveConfig(path string, cfg BanyanConfig) error {
+func SaveConfig(path string, cfg *BanyanConfig) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 
@@ -80,7 +81,7 @@ func SaveConfig(path string, cfg BanyanConfig) error {
 		return fmt.Errorf("failed to marshal config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -125,7 +126,7 @@ func GetConfigPassword(configPath string) string {
 	return cfg.Security.Password
 }
 
-// GetConfigEngineEndpoint builds the engine etcd endpoint URL from agent config.
+// GetConfigEngineEndpoint builds the engine gRPC endpoint from agent config.
 // Returns empty string if not configured.
 func GetConfigEngineEndpoint(configPath string) string {
 	cfg, err := LoadConfig(configPath)
@@ -140,13 +141,13 @@ func GetConfigEngineEndpoint(configPath string) string {
 
 	port := cfg.Agent.EnginePort
 	if port == "" {
-		port = "2379"
+		port = "50051"
 	}
 
-	return fmt.Sprintf("http://%s:%s", host, port)
+	return fmt.Sprintf("%s:%s", host, port)
 }
 
-// GetCLIEngineEndpoint builds the engine HTTP API URL from cli config.
+// GetCLIEngineEndpoint builds the engine gRPC endpoint from cli config.
 // Returns empty string if not configured.
 func GetCLIEngineEndpoint(configPath string) string {
 	cfg, err := LoadConfig(configPath)
@@ -161,10 +162,10 @@ func GetCLIEngineEndpoint(configPath string) string {
 
 	port := cfg.CLI.EnginePort
 	if port == "" {
-		port = "8443"
+		port = "50051"
 	}
 
-	return fmt.Sprintf("http://%s:%s", host, port)
+	return fmt.Sprintf("%s:%s", host, port)
 }
 
 // StateStore is a minimal interface for etcd operations used by VerifyAuth and helpers.

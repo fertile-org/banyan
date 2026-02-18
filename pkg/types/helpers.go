@@ -11,7 +11,7 @@ import (
 // Services with 0 replicas default to 1.
 func BuildServiceRecords(manifest map[string]ManifestService) map[string]ServiceRecord {
 	services := make(map[string]ServiceRecord, len(manifest))
-	for name, svc := range manifest {
+	for name, svc := range manifest { //nolint:gocritic // map iteration
 		replicas := svc.GetReplicas()
 		if replicas == 0 {
 			replicas = 1
@@ -62,7 +62,7 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 
 // DetermineDeploymentStatus returns the new deployment status based on task counts.
 // Returns empty string if no status change should occur.
-func DetermineDeploymentStatus(totalTasks, completedTasks, failedTasks int, firstError string) (status string, errMsg string) {
+func DetermineDeploymentStatus(totalTasks, completedTasks, failedTasks int, firstError string) (status, errMsg string) {
 	if totalTasks == 0 {
 		return "", ""
 	}
@@ -78,8 +78,8 @@ func DetermineDeploymentStatus(totalTasks, completedTasks, failedTasks int, firs
 // GroupTasksByService groups tasks by their ServiceName.
 func GroupTasksByService(tasks []TaskRecord) map[string][]TaskRecord {
 	grouped := make(map[string][]TaskRecord)
-	for _, task := range tasks {
-		grouped[task.ServiceName] = append(grouped[task.ServiceName], task)
+	for i := range tasks {
+		grouped[tasks[i].ServiceName] = append(grouped[tasks[i].ServiceName], tasks[i])
 	}
 	return grouped
 }

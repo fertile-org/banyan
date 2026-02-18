@@ -53,8 +53,8 @@ func (c *cmdReadCloser) Read(p []byte) (int, error) {
 func (c *cmdReadCloser) Close() error {
 	c.reader.Close()
 	if c.cmd.Process != nil {
-		c.cmd.Process.Kill()
+		_ = c.cmd.Process.Kill()
 	}
-	c.cmd.Wait()
+	_ = c.cmd.Wait()
 	return nil
 }

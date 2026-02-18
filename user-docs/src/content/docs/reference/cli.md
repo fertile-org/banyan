@@ -129,15 +129,15 @@ sudo banyan-cli agent init
 Start the Agent. Connects to the Engine, registers the node, and begins executing tasks.
 
 ```bash
-sudo banyan-cli agent start --engine http://192.168.1.10:2379 --node-name worker-1
+sudo banyan-cli agent start --node-name worker-1
 ```
 
-Runs in the foreground. Stop with `Ctrl+C`.
+The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `agent init`). Runs in the foreground. Stop with `Ctrl+C`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--engine` | `http://localhost:2379` | Engine etcd endpoint |
+| `--engine` | (from config) | Engine etcd endpoint override. Normally set via `agent init`. |
 | `--node-name` | hostname | Name for this node. Must be unique in the cluster. |
 | `--pid-file` | `/var/run/banyan-agent.pid` | Agent PID file |
 | `--api-port` | `9090` | Agent API server port (used for remote log streaming) |
@@ -156,12 +156,14 @@ sudo banyan-cli agent stop
 Show the Agent's connection status.
 
 ```bash
-banyan-cli agent status --engine http://192.168.1.10:2379
+banyan-cli agent status
 ```
+
+Engine endpoint is read from `/etc/banyan/banyan.yaml`.
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--engine` | `http://localhost:2379` | Engine etcd endpoint |
+| `--engine` | (from config) | Engine etcd endpoint override |
 
 ---
 

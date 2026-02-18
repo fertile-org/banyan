@@ -112,7 +112,7 @@ Or [build from source](https://feritle-banyan.vercel.app/getting-started/install
 sudo banyan-cli engine start
 
 # On each worker server
-sudo banyan-cli agent start --engine http://engine-ip:2379
+sudo banyan-cli agent start --node-name agent-1
 
 # From anywhere
 banyan-cli deploy -f banyan.yaml

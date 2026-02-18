@@ -115,7 +115,7 @@ Engine and Agent commands need root access because they manage system services (
 
 ```bash
 sudo banyan-cli engine start
-sudo banyan-cli agent start --engine http://...
+sudo banyan-cli agent start --node-name <name>
 ```
 
 The `deploy` and `engine status` commands do not require root.

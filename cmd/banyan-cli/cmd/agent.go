@@ -228,10 +228,12 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Printf("Node name: %s\n", nodeName)
 
-	// Use config-based engine endpoint if --engine flag was not explicitly set
+	// Resolve engine endpoint: explicit flag > config file > error
 	if !cmd.Flags().Changed("engine") {
 		if cfgEndpoint := getConfigEngineEndpoint(); cfgEndpoint != "" {
 			agentEngineEndpoint = cfgEndpoint
+		} else {
+			return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli agent init' to set engine host/port, or pass --engine flag")
 		}
 	}
 
@@ -671,6 +673,13 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 		fmt.Printf("RUNNING (PID: %s)\n", strings.TrimSpace(string(pidBytes)))
 	} else {
 		fmt.Println("NOT RUNNING")
+	}
+
+	// Resolve engine endpoint: explicit flag > config file > default
+	if !cmd.Flags().Changed("engine") {
+		if cfgEndpoint := getConfigEngineEndpoint(); cfgEndpoint != "" {
+			agentEngineEndpoint = cfgEndpoint
+		}
 	}
 
 	fmt.Print("Engine connection: ")

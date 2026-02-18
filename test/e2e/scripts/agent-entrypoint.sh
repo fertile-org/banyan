@@ -48,4 +48,4 @@ sleep 2
 
 # Start agent
 echo "Starting agent..."
-exec banyan-cli agent start --engine "$ENGINE_ENDPOINT" --node-name "$NODE_NAME"
+exec banyan-cli agent start --node-name "$NODE_NAME"

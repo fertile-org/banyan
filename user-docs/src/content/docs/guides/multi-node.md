@@ -57,18 +57,14 @@ On Worker 1 (`192.168.1.11`):
 
 ```bash
 sudo banyan-cli agent init
-sudo banyan-cli agent start \
-  --engine http://192.168.1.10:2379 \
-  --node-name worker-1
+sudo banyan-cli agent start --node-name worker-1
 ```
 
 On Worker 2 (`192.168.1.12`):
 
 ```bash
 sudo banyan-cli agent init
-sudo banyan-cli agent start \
-  --engine http://192.168.1.10:2379 \
-  --node-name worker-2
+sudo banyan-cli agent start --node-name worker-2
 ```
 
 Each Agent registers with the Engine and starts a heartbeat.
@@ -155,7 +151,7 @@ banyan-cli deploy -f banyan.yaml --etcd http://192.168.1.10:2379
 
 1. Install `banyan-cli`, containerd, and nerdctl on the new server.
 2. Run `sudo banyan-cli agent init`
-3. Run `sudo banyan-cli agent start --engine http://<engine-ip>:2379 --node-name worker-3`
+3. Run `sudo banyan-cli agent start --node-name worker-3`
 
 The new worker appears in `engine status` within seconds. Future deployments include it automatically.
 

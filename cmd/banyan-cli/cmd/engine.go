@@ -247,7 +247,7 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	fmt.Println("")
 	fmt.Println("Usage:")
 	fmt.Println("  Deploy:      banyan-cli deploy --file banyan.yaml")
-	fmt.Printf("  Agent start: banyan-cli agent start --engine %s\n", engineEtcdEndpoints)
+	fmt.Println("  Agent start: banyan-cli agent start --node-name <name>")
 	fmt.Println("")
 	fmt.Println("Press Ctrl+C to stop")
 

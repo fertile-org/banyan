@@ -318,7 +318,7 @@ verify() {
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         echo "  Start an Agent:"
         echo "    sudo banyan-cli agent init"
-        echo "    sudo banyan-cli agent start --engine http://<engine-ip>:2379"
+        echo "    sudo banyan-cli agent start --node-name <node-name>"
         echo ""
     fi
 }

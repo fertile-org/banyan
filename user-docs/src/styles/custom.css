@@ -38,3 +38,13 @@
   max-width: 200px;
   height: auto;
 }
+
+/* Full-page background image */
+body {
+  background-image: url("/page-background.png");
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+  min-height: 100vh;
+}

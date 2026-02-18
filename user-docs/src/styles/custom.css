@@ -1,0 +1,40 @@
+/* Banyan theme — warm greens and earthy browns matching the logo */
+
+:root {
+  --sl-color-accent-low: #1b2e0b;
+  --sl-color-accent: #5b8c2a;
+  --sl-color-accent-high: #c8e4a4;
+  --sl-color-white: #faf8f5;
+  --sl-color-gray-1: #ede9e3;
+  --sl-color-gray-2: #c4bfb7;
+  --sl-color-gray-3: #8a8478;
+  --sl-color-gray-4: #5c574e;
+  --sl-color-gray-5: #3a3630;
+  --sl-color-gray-6: #272420;
+  --sl-color-black: #1a1816;
+}
+
+:root[data-theme="light"] {
+  --sl-color-accent-low: #dcefc8;
+  --sl-color-accent: #3d6b1a;
+  --sl-color-accent-high: #1b2e0b;
+  --sl-color-white: #1a1816;
+  --sl-color-gray-1: #3a3630;
+  --sl-color-gray-2: #5c574e;
+  --sl-color-gray-3: #8a8478;
+  --sl-color-gray-4: #c4bfb7;
+  --sl-color-gray-5: #ede9e3;
+  --sl-color-gray-6: #f5f2ee;
+  --sl-color-black: #faf8f5;
+}
+
+/* Remove gap between logo and site title in header */
+.site-title {
+  gap: 0.25rem;
+}
+
+/* Hero logo sizing */
+.hero img {
+  max-width: 200px;
+  height: auto;
+}

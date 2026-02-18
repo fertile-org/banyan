@@ -1,112 +1,112 @@
-# Banyan
+<p align="center">
+  <img src="user-docs/src/assets/logo.png" alt="Banyan" width="160">
+</p>
 
-**Docker Compose that scales.** Deploy your containers across multiple servers with a single YAML file.
+<h1 align="center">Banyan</h1>
 
-## Why Banyan?
+<p align="center"><strong>Docker Compose that scales.</strong></p>
 
-You know docker-compose. You use it for local development. But when it's time to deploy to production across multiple servers... suddenly you need Kubernetes, Helm charts, and a DevOps team.
+<p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
 
-**Banyan bridges that gap.** Write a `banyan.yml` that looks almost identical to docker-compose, add `replicas: 3`, and deploy across your servers.
+<p align="center">
+  <a href="https://fertile-org.github.io/banyan/">Documentation</a> &middot;
+  <a href="https://fertile-org.github.io/banyan/getting-started/quickstart/">Quickstart</a> &middot;
+  <a href="./DEVELOPMENT.md">Development</a>
+</p>
 
-## Quick Example
+---
+
+## From one server to many
+
+You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and everything works.
+
+Then you need a second server.
+
+**Banyan makes that step simple.** Take the YAML syntax you already know, add `replicas`, and deploy across your servers.
+
+## Same syntax, more servers
+
+**docker-compose.yml** — one machine:
 
 ```yaml
-# banyan.yml - that's it, one file
 services:
   web:
-    image: myapp:latest
+    image: nginx:alpine
     ports:
-      - "3000:3000"
-    replicas: 3  # ← runs on 3 servers
-    environment:
-      - DATABASE_URL=${DATABASE_URL}
-
-  api:
-    image: myapi:latest
-    replicas: 2
-
-  db:
-    image: postgres:15
-    volumes:
-      - db-data:/var/lib/postgresql/data
-
-volumes:
-  db-data:
+      - "80:80"
 ```
 
-Deploy:
-```bash
-banyan up
+**banyan.yaml** — across your cluster:
+
+```yaml
+name: my-app
+
+services:
+  web:
+    image: nginx:alpine
+    replicas: 3
+    ports:
+      - "80:80"
 ```
 
-That's it. No YAML templating. No resource quotas. No node selectors. Just containers on servers.
+Same `services`. Same `image`. Same `ports`. Same `env`. The only addition is `replicas`.
 
-## Who Is This For?
-
-- **Startups** deploying their first production setup
-- **Small teams** without dedicated DevOps
-- **Developers** who know docker-compose and don't want to learn Kubernetes
-- **Anyone** who thinks "I just want to run 3 instances of my app"
-
-## What Banyan Does
-
-1. **Parses your banyan.yml** (familiar docker-compose syntax)
-2. **Distributes containers** across your servers
-3. **Handles networking** so services can talk to each other
-4. **Manages health** and restarts failed containers
-5. **Scales up/down** when you change replicas
-
-## What Banyan Doesn't Do
-
-- Complex resource scheduling (use Kubernetes)
-- Multi-region deployments (use Kubernetes)
-- Automatic scaling based on metrics (use Kubernetes)
-- Service mesh, sidecars, operators (use Kubernetes)
-
-**If you need those features, you need Kubernetes. That's okay.**
-
-Banyan is for teams who don't need Kubernetes complexity but do need to run containers on more than one server.
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Banyan Engine                             │
-│  ├─ banyan.yml parser                                       │
-│  ├─ deployment orchestrator                                  │
-│  ├─ agent registry                                          │
-│  └─ plugin system                                           │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                        gRPC/REST
-                              │
-┌─────────────────────────────────────────────────────────────┐
-│                    Banyan Agent (per server)                │
-│  ├─ container runtime (containerd)                          │
-│  ├─ health monitoring                                       │
-│  ├─ networking (VPC overlay)                                │
-│  └─ log collection                                          │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Getting Started
+## Install
 
 ```bash
-# Install banyan CLI
-curl -sSL https://get.banyan.dev | sh
+# Engine node (control plane)
+curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role engine
 
-# Install agent on each server
-banyan agent install
-
-# Deploy your services
-banyan up
+# Worker nodes
+curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role agent
 ```
+
+Or [build from source](https://fertile-org.github.io/banyan/getting-started/installation/).
+
+## Three commands to a running cluster
+
+```bash
+# On your control plane server
+sudo banyan-cli engine start
+
+# On each worker server
+sudo banyan-cli agent start --engine http://engine-ip:2379
+
+# From anywhere
+banyan-cli deploy -f banyan.yaml
+```
+
+No package managers. No plugins. One binary does everything.
+
+## Features
+
+- **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
+- **Single binary** — `banyan-cli` is the Engine, the Agent, and the deploy tool. Build once, copy to your servers, done.
+- **Automatic distribution** — Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
+- **Proven foundations** — etcd for state coordination. containerd for running containers. No experimental runtimes.
+
+## Is Banyan right for you?
+
+Banyan is built for teams who:
+
+- Deploy to 1–20 servers
+- Know Docker Compose and want the same simplicity in production
+- Value getting things running over configuring infrastructure
 
 ## Documentation
 
-- [Development Guide](./DEVELOPMENT.md)
-- [Engine Design](./docs/engine/README.md)
-- [banyan.yml Specification](./docs/engine/banyan-parser.md)
+Full documentation is available at **[fertile-org.github.io/banyan](https://fertile-org.github.io/banyan/)**.
+
+- [Installation](https://fertile-org.github.io/banyan/getting-started/installation/)
+- [Quickstart](https://fertile-org.github.io/banyan/getting-started/quickstart/)
+- [Manifest Reference](https://fertile-org.github.io/banyan/guides/manifest-reference/)
+- [Multi-Node Setup](https://fertile-org.github.io/banyan/guides/multi-node/)
+- [CLI Reference](https://fertile-org.github.io/banyan/reference/cli/)
+- [Troubleshooting](https://fertile-org.github.io/banyan/reference/troubleshooting/)
+
+## Contributing
+
+See the [Development Guide](./DEVELOPMENT.md) for project structure, build commands, and architecture.
 
 ## License
 

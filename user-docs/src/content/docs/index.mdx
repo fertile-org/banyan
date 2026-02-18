@@ -1,0 +1,92 @@
+---
+title: Banyan
+description: Docker Compose that scales. Deploy containers across multiple servers with a YAML file you already know how to write.
+template: splash
+hero:
+  tagline: Docker Compose that scales.
+  image:
+    file: ../../assets/logo.png
+  actions:
+    - text: Get Started
+      link: /getting-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/fertile-org/banyan
+      icon: external
+---
+
+import { Card, CardGrid } from "@astrojs/starlight/components";
+
+## From one server to many
+
+You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and everything works.
+
+Then you need a second server.
+
+**Banyan makes that step simple.** Take the YAML syntax you already know, add `replicas`, and deploy across your servers.
+
+## Same syntax, more servers
+
+**docker-compose.yml** — one machine:
+
+```yaml
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+```
+
+**banyan.yaml** — across your cluster:
+
+```yaml
+name: my-app
+
+services:
+  web:
+    image: nginx:alpine
+    replicas: 3
+    ports:
+      - "80:80"
+```
+
+Same `services`. Same `image`. Same `ports`. Same `env`. The only addition is `replicas`.
+
+## Three commands to a running cluster
+
+```bash
+# On your control plane server
+sudo banyan-cli engine start
+
+# On each worker server
+sudo banyan-cli agent start --engine http://engine-ip:2379
+
+# From anywhere
+banyan-cli deploy -f banyan.yaml
+```
+
+No package managers. No plugins. One binary does everything.
+
+<CardGrid>
+  <Card title="Familiar syntax" icon="document">
+    If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
+  </Card>
+  <Card title="Single binary" icon="setting">
+    `banyan-cli` is the Engine, the Agent, and the deploy tool. Build once, copy to your servers, done.
+  </Card>
+  <Card title="Automatic distribution" icon="rocket">
+    Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
+  </Card>
+  <Card title="Proven foundations" icon="approve-check">
+    etcd for state coordination. containerd for running containers. No experimental runtimes.
+  </Card>
+</CardGrid>
+
+## Is Banyan right for you?
+
+**Banyan is built for teams who:**
+
+- Deploy to 1-20 servers
+- Know Docker Compose and want the same simplicity in production
+- Value getting things running over configuring infrastructure

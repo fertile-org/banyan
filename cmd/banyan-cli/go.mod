@@ -3,7 +3,6 @@ module github.com/fertile-org/banyan/cmd/banyan-cli
 go 1.24.3
 
 require (
-	github.com/fertile-org/banyan/pkg/engine v0.0.0
 	github.com/fertile-org/banyan/pkg/vpc v0.0.0
 	github.com/spf13/cobra v1.8.0
 	go.etcd.io/etcd/client/v3 v3.5.21
@@ -17,7 +16,9 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
 	github.com/miekg/dns v1.1.69 // indirect
+	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/spf13/pflag v1.0.5 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
@@ -33,10 +34,9 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
 	google.golang.org/grpc v1.72.1 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
 replace github.com/fertile-org/banyan/pkg/vpc => ../../pkg/vpc
-
-replace github.com/fertile-org/banyan/pkg/engine => ../../pkg/engine
 
 replace github.com/fertile-org/banyan/internal/common => ../../internal/common

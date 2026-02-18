@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -12,8 +13,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/vpc/cni"
-	"github.com/fertile-org/banyan/pkg/vpc/security"
 	"github.com/fertile-org/banyan/pkg/vpc/storage"
 	"github.com/spf13/cobra"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -33,10 +32,9 @@ var agentCmd = &cobra.Command{
 	Long: `Manage the Banyan Agent, which runs on worker nodes.
 
 The Agent manages:
-  - Container runtime (containerd)
-  - CNI networking for pods
-  - Local IPAM lease management
-  - Security policy enforcement
+  - Container runtime (containerd via nerdctl)
+  - Task execution from Engine
+  - Health reporting
 
 Commands:
   init    Initialize Agent dependencies (containerd, CNI)
@@ -48,17 +46,7 @@ Commands:
 var agentInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Agent dependencies",
-	Long: `Initialize the Banyan Agent environment.
-
-This command:
-  1. Creates required directories (/var/lib/banyan, /etc/cni/net.d)
-  2. Checks if containerd is available
-  3. Sets up CNI plugin configuration
-
-Run this once before starting the Agent.
-
-Next step: banyan-cli agent start --engine http://engine-host:2379`,
-	RunE: runAgentInit,
+	RunE:  runAgentInit,
 }
 
 var agentStartCmd = &cobra.Command{
@@ -67,24 +55,22 @@ var agentStartCmd = &cobra.Command{
 	Long: `Start the Banyan Agent on this worker node.
 
 This command:
-  1. Connects to the Engine
-  2. Registers this node with the Engine
-  3. Initializes CNI networking
-  4. Starts listening for container tasks`,
+  1. Connects to the Engine (etcd)
+  2. Registers this node
+  3. Watches for tasks and executes them (pull images, create containers)
+  4. Reports task results and heartbeat`,
 	RunE: runAgentStart,
 }
 
 var agentStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the Banyan Agent",
-	Long:  `Stop the running Banyan Agent.`,
 	RunE:  runAgentStop,
 }
 
 var agentStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Agent status",
-	Long:  `Show the status of the Banyan Agent.`,
 	RunE:  runAgentStatus,
 }
 
@@ -95,15 +81,12 @@ func init() {
 	agentCmd.AddCommand(agentStopCmd)
 	agentCmd.AddCommand(agentStatusCmd)
 
-	// Common flags
 	agentCmd.PersistentFlags().StringVar(&agentDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
-	// Start command flags
 	agentStartCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "http://localhost:2379", "Engine endpoint")
 	agentStartCmd.Flags().StringVar(&agentNodeName, "node-name", "", "Node name (defaults to hostname)")
 	agentStartCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
 
-	// Status command flags
 	agentStatusCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "http://localhost:2379", "Engine endpoint")
 	agentStatusCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
 }
@@ -142,7 +125,16 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   [OK] containerd found at %s\n", containerdPath)
 	}
 
-	fmt.Println("\n3. Checking CNI plugins...")
+	fmt.Println("\n3. Checking nerdctl...")
+	nerdctlPath, err := exec.LookPath("nerdctl")
+	if err != nil {
+		fmt.Println("   [WARN] nerdctl not found in PATH")
+		fmt.Println("   Install from: https://github.com/containerd/nerdctl")
+	} else {
+		fmt.Printf("   [OK] nerdctl found at %s\n", nerdctlPath)
+	}
+
+	fmt.Println("\n4. Checking CNI plugins...")
 	cniPlugins := []string{"bridge", "loopback", "host-local", "portmap"}
 	for _, plugin := range cniPlugins {
 		pluginPath := filepath.Join("/opt/cni/bin", plugin)
@@ -156,7 +148,6 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n========================================")
 	fmt.Println("Initialization complete!")
 	fmt.Println("\nNext step: banyan-cli agent start --engine http://engine-host:2379")
-
 	return nil
 }
 
@@ -198,23 +189,27 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to connect to etcd: %w", err)
 	}
-	fmt.Println("Storage initialized")
 
-	// Initialize VPC components
-	resolver := security.NewRuntimeServiceResolver(store)
-	securityManager := security.NewManager(resolver, false)
-
-	fmt.Println("VPC components initialized: Security")
-
-	// Initialize CNI runtime
-	cniRuntime := cni.NewRuntime(store, securityManager)
-	_ = cniRuntime // Will be used when containers are created
-	fmt.Println("CNI runtime initialized")
-
-	// Register node with Engine
-	if err := registerAgentNode(ctx, store, nodeName); err != nil {
-		fmt.Printf("Warning: Node registration: %v\n", err)
+	// Check for nerdctl
+	nerdctlPath, err := exec.LookPath("nerdctl")
+	if err != nil {
+		fmt.Println("Warning: nerdctl not found. Container operations will fail.")
+		fmt.Println("Install from: https://github.com/containerd/nerdctl")
+	} else {
+		fmt.Printf("Container runtime: nerdctl (%s)\n", nerdctlPath)
 	}
+
+	// Register node
+	node := &NodeRecord{
+		Name:      nodeName,
+		Status:    "ready",
+		LastSeen:  time.Now(),
+		CreatedAt: time.Now(),
+	}
+	if err := store.Save(ctx, keyNodes+nodeName, node); err != nil {
+		return fmt.Errorf("failed to register node: %w", err)
+	}
+	fmt.Printf("Node registered: %s\n", nodeName)
 
 	// Write PID file
 	pidDir := filepath.Dir(agentPidFile)
@@ -226,17 +221,177 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println("========================================")
-	fmt.Println("Agent is running. Ready to receive container tasks.")
+	fmt.Println("Agent is running. Watching for tasks...")
 	fmt.Println("")
 	fmt.Println("Press Ctrl+C to stop")
+
+	// Start the task execution loop
+	go agentLoop(ctx, store, nodeName)
+
+	// Start heartbeat
+	go agentHeartbeat(ctx, store, nodeName)
 
 	<-ctx.Done()
 
 	// Cleanup
 	os.Remove(agentPidFile)
+	// Mark node as offline
+	node.Status = "offline"
+	node.LastSeen = time.Now()
+	saveCtx, saveCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer saveCancel()
+	store.Save(saveCtx, keyNodes+nodeName, node)
+
 	fmt.Println("Agent stopped")
 	return nil
 }
+
+// agentLoop polls etcd for tasks assigned to this agent and executes them.
+func agentLoop(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			processTasks(ctx, store, nodeName)
+		}
+	}
+}
+
+// processTasks finds and executes pending tasks for this agent.
+func processTasks(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+	taskPrefix := keyTasks + nodeName + "/"
+	keys, err := store.List(ctx, taskPrefix)
+	if err != nil {
+		return
+	}
+
+	for _, key := range keys {
+		var task TaskRecord
+		if err := store.Get(ctx, key, &task); err != nil {
+			continue
+		}
+
+		if task.Status != statusPending {
+			continue
+		}
+
+		// Mark as running
+		task.Status = statusRunning
+		task.UpdatedAt = time.Now()
+		store.Save(ctx, key, &task)
+
+		fmt.Printf("[Agent] Executing task %s: %s (image: %s)\n", task.ID, task.Type, task.Image)
+
+		// Execute the task
+		result, err := executeTask(ctx, &task)
+		if err != nil {
+			task.Status = statusFailed
+			task.Error = err.Error()
+			task.UpdatedAt = time.Now()
+			store.Save(ctx, key, &task)
+			fmt.Printf("[Agent] Task %s FAILED: %v\n", task.ID, err)
+			continue
+		}
+
+		task.Status = statusCompleted
+		task.Result = result
+		task.UpdatedAt = time.Now()
+		store.Save(ctx, key, &task)
+		fmt.Printf("[Agent] Task %s COMPLETED (container: %s)\n", task.ID, task.ContainerName)
+	}
+}
+
+// executeTask runs a container using nerdctl.
+func executeTask(ctx context.Context, task *TaskRecord) (*TaskResultRecord, error) {
+	switch task.Type {
+	case taskTypeCreateAndStart:
+		return executeCreateAndStart(ctx, task)
+	default:
+		return nil, fmt.Errorf("unknown task type: %s", task.Type)
+	}
+}
+
+// executeCreateAndStart pulls the image and runs the container.
+func executeCreateAndStart(ctx context.Context, task *TaskRecord) (*TaskResultRecord, error) {
+	// Pull the image
+	fmt.Printf("[Agent]   Pulling image %s...\n", task.Image)
+	if err := runCommand(ctx, "nerdctl", "pull", task.Image); err != nil {
+		return nil, fmt.Errorf("failed to pull image: %w", err)
+	}
+
+	// Build nerdctl run command
+	args := buildNerdctlRunArgs(task)
+
+	// Run the container
+	fmt.Printf("[Agent]   Starting container %s...\n", task.ContainerName)
+	if err := runCommand(ctx, "nerdctl", args...); err != nil {
+		return nil, fmt.Errorf("failed to start container: %w", err)
+	}
+
+	// Get container ID
+	containerID, err := getContainerID(ctx, task.ContainerName)
+	if err != nil {
+		// Container started but we couldn't get the ID — not fatal
+		containerID = "unknown"
+	}
+
+	return &TaskResultRecord{
+		ContainerID: containerID,
+	}, nil
+}
+
+// runCommand executes a command and returns an error if it fails.
+func runCommand(ctx context.Context, name string, args ...string) error {
+	cmd := exec.CommandContext(ctx, name, args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg != "" {
+			return fmt.Errorf("%s: %s", err, errMsg)
+		}
+		return err
+	}
+	return nil
+}
+
+// getContainerID retrieves the container ID by name using nerdctl.
+func getContainerID(ctx context.Context, containerName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "nerdctl", "inspect", "--format", "{{.Id}}", containerName)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(stdout.String()), nil
+}
+
+// agentHeartbeat periodically updates the node's last_seen timestamp in etcd.
+func agentHeartbeat(ctx context.Context, store *storage.EtcdStore, nodeName string) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var node NodeRecord
+			if err := store.Get(ctx, keyNodes+nodeName, &node); err != nil {
+				continue
+			}
+			node.LastSeen = time.Now()
+			node.Status = "ready"
+			store.Save(ctx, keyNodes+nodeName, &node)
+		}
+	}
+}
+
+// --- Agent stop, status, helpers ---
 
 func runAgentStop(cmd *cobra.Command, args []string) error {
 	fmt.Println("Stopping Banyan Agent...")
@@ -328,10 +483,10 @@ func waitForAgentEtcd(ctx context.Context, endpoint string, timeout time.Duratio
 			DialTimeout: 2 * time.Second,
 		})
 		if err == nil {
-			defer client.Close()
 			ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
 			_, err = client.Status(ctx2, endpoint)
 			cancel()
+			client.Close()
 			if err == nil {
 				return nil
 			}
@@ -339,24 +494,4 @@ func waitForAgentEtcd(ctx context.Context, endpoint string, timeout time.Duratio
 		time.Sleep(500 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for etcd")
-}
-
-// AgentNode represents a registered agent node
-type AgentNode struct {
-	ID        string    `json:"id"`
-	Name      string    `json:"name"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-}
-
-func registerAgentNode(ctx context.Context, store storage.StateStore, nodeName string) error {
-	node := &AgentNode{
-		ID:        nodeName,
-		Name:      nodeName,
-		Status:    "ready",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
-	return store.Save(ctx, "/nodes/"+nodeName, node)
 }

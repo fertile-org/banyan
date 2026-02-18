@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -13,16 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/engine/orchestrator/adapters"
-	orchuc "github.com/fertile-org/banyan/pkg/engine/orchestrator/usecases"
-	regadapters "github.com/fertile-org/banyan/pkg/engine/registry/adapters"
-	reguc "github.com/fertile-org/banyan/pkg/engine/registry/usecases"
-	stateadapters "github.com/fertile-org/banyan/pkg/engine/state/adapters"
-	stateuc "github.com/fertile-org/banyan/pkg/engine/state/usecases"
 	"github.com/fertile-org/banyan/pkg/vpc"
-	"github.com/fertile-org/banyan/pkg/vpc/dns"
-	"github.com/fertile-org/banyan/pkg/vpc/ipam"
-	"github.com/fertile-org/banyan/pkg/vpc/security"
 	"github.com/fertile-org/banyan/pkg/vpc/storage"
 	"github.com/spf13/cobra"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -60,15 +50,7 @@ Commands:
 var engineInitCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Engine dependencies",
-	Long: `Initialize the Banyan Engine environment.
-
-This command:
-  1. Creates required directories (/var/lib/banyan)
-  2. Checks if etcd binary is available
-  3. Validates network configuration
-
-Run this once before starting the Engine.`,
-	RunE: runEngineInit,
+	RunE:  runEngineInit,
 }
 
 var engineStartCmd = &cobra.Command{
@@ -79,22 +61,20 @@ var engineStartCmd = &cobra.Command{
 This command:
   1. Starts etcd if not already running
   2. Initializes VPC networking (IPAM, DNS, Security)
-  3. Starts the Engine components (Registry, State, Orchestrator)
-  4. Waits for agents to register`,
+  3. Watches for new deployments and dispatches tasks to agents
+  4. Monitors task completion and updates deployment status`,
 	RunE: runEngineStart,
 }
 
 var engineStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the Banyan Engine",
-	Long:  `Stop the running Banyan Engine and optionally etcd.`,
 	RunE:  runEngineStop,
 }
 
 var engineStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show Engine status",
-	Long:  `Show the status of the Banyan Engine and etcd.`,
 	RunE:  runEngineStatus,
 }
 
@@ -105,10 +85,8 @@ func init() {
 	engineCmd.AddCommand(engineStopCmd)
 	engineCmd.AddCommand(engineStatusCmd)
 
-	// Common flags
 	engineCmd.PersistentFlags().StringVar(&engineDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
-	// Start command flags
 	engineStartCmd.Flags().StringVar(&engineEtcdEndpoints, "etcd", "http://localhost:2379", "Etcd endpoints")
 	engineStartCmd.Flags().StringVar(&engineVPCCIDR, "vpc-cidr", "10.0.0.0/16", "VPC CIDR range")
 	engineStartCmd.Flags().StringVar(&engineEtcdDataDir, "etcd-data-dir", "/var/lib/banyan/etcd", "Etcd data directory")
@@ -116,7 +94,6 @@ func init() {
 	engineStartCmd.Flags().StringVar(&engineEtcdLogFile, "etcd-log-file", "/var/log/banyan-etcd.log", "Etcd log file")
 	engineStartCmd.Flags().StringVar(&engineEtcdClientURLs, "etcd-client-urls", "http://0.0.0.0:2379", "Etcd client URLs")
 
-	// Status command flags
 	engineStatusCmd.Flags().StringVar(&engineEtcdEndpoints, "etcd", "http://localhost:2379", "Etcd endpoints")
 	engineStatusCmd.Flags().StringVar(&engineEtcdPidFile, "etcd-pid-file", "/var/run/banyan-etcd.pid", "Etcd PID file")
 }
@@ -158,7 +135,6 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	fmt.Println("\n========================================")
 	fmt.Println("Initialization complete!")
 	fmt.Println("\nNext step: banyan-cli engine start")
-
 	return nil
 }
 
@@ -202,41 +178,10 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	if err := vpc.InitializeNetwork(ctx, []string{engineEtcdEndpoints}, engineVPCCIDR); err != nil {
 		fmt.Printf("Warning: VPC initialization: %v\n", err)
 	}
+	fmt.Println("VPC initialized")
 
-	// Initialize VPC components
-	ipamManager, err := ipam.NewManager(store, engineVPCCIDR)
-	if err != nil {
-		return fmt.Errorf("failed to initialize IPAM: %w", err)
-	}
-	_ = dns.NewManagerWithStore(store)
-	resolver := security.NewRuntimeServiceResolver(store)
-	_ = security.NewManager(resolver, false)
-
-	fmt.Println("VPC components initialized: IPAM, DNS, Security")
-
-	// Initialize Engine components
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	agentRepo := regadapters.NewMemoryAgentRepository()
-	eventPublisher := regadapters.NewMemoryEventPublisher()
-	_ = reguc.NewRegistryUseCase(agentRepo, eventPublisher, logger)
-
-	stateRepo := stateadapters.NewMemoryStateRepository()
-	_ = stateuc.NewStateUseCase(stateRepo)
-
-	orchRepo := adapters.NewMemoryDeploymentRepository()
-	orchDispatcher := adapters.NewMemoryAgentDispatcher()
-	orchScheduler := adapters.NewMemoryScheduler()
-	orchPlugins := adapters.NewMemoryPluginExecutor()
-	orchParser := adapters.NewMemoryBanyanParser()
-	_ = orchuc.NewDeployUseCase(orchRepo, orchDispatcher, orchScheduler, orchPlugins, orchParser)
-
-	fmt.Println("Engine components initialized: Registry, State, Orchestrator")
 	fmt.Println("========================================")
-
-	// Keep references to prevent unused variable warnings
-	_ = ipamManager
-
-	fmt.Println("Engine is running. Waiting for agents to register...")
+	fmt.Println("Engine is running. Watching for deployments...")
 	fmt.Println("")
 	fmt.Println("Usage:")
 	fmt.Println("  Deploy:      banyan-cli deploy --file banyan.yaml")
@@ -244,10 +189,176 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	fmt.Println("")
 	fmt.Println("Press Ctrl+C to stop")
 
+	// Start the orchestration loop
+	go engineLoop(ctx, store)
+
 	<-ctx.Done()
 	fmt.Println("Engine stopped")
 	return nil
 }
+
+// engineLoop is the main orchestration loop.
+// It polls etcd for pending deployments, assigns tasks to agents,
+// and tracks task completion.
+func engineLoop(ctx context.Context, store *storage.EtcdStore) {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			processDeployments(ctx, store)
+		}
+	}
+}
+
+// processDeployments checks for pending and deploying deployments.
+func processDeployments(ctx context.Context, store *storage.EtcdStore) {
+	keys, err := store.List(ctx, keyDeployments)
+	if err != nil {
+		return
+	}
+
+	for _, key := range keys {
+		var record DeploymentRecord
+		if err := store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+
+		switch record.Status {
+		case statusPending:
+			schedulePendingDeployment(ctx, store, &record)
+		case statusDeploying:
+			checkDeployingDeployment(ctx, store, &record)
+		}
+	}
+}
+
+// schedulePendingDeployment assigns tasks to available agents.
+func schedulePendingDeployment(ctx context.Context, store *storage.EtcdStore, deployment *DeploymentRecord) {
+	// List available agents
+	agents, err := listAvailableAgents(ctx, store)
+	if err != nil || len(agents) == 0 {
+		return // no agents yet, retry next tick
+	}
+
+	fmt.Printf("[Engine] Scheduling deployment '%s' (%d services, %d agents)\n",
+		deployment.Name, len(deployment.Services), len(agents))
+
+	// Create tasks for each service replica, round-robin across agents
+	tasks := buildTasksForDeployment(deployment, agents)
+
+	taskCount := 0
+	for _, task := range tasks {
+		taskKey := keyTasks + task.AgentID + "/" + task.ID
+		if err := store.Save(ctx, taskKey, task); err != nil {
+			fmt.Printf("[Engine] Failed to create task %s: %v\n", task.ID, err)
+			continue
+		}
+
+		fmt.Printf("[Engine]   Task %s → agent %s (container: %s)\n", task.ID, task.AgentID, task.ContainerName)
+		taskCount++
+	}
+
+	// Update deployment status
+	deployment.Status = statusDeploying
+	deployment.UpdatedAt = time.Now()
+	if err := store.Save(ctx, keyDeployments+deployment.ID, deployment); err != nil {
+		fmt.Printf("[Engine] Failed to update deployment status: %v\n", err)
+	}
+
+	fmt.Printf("[Engine] Dispatched %d tasks for deployment '%s'\n", taskCount, deployment.Name)
+}
+
+// checkDeployingDeployment checks if all tasks for a deployment have completed.
+func checkDeployingDeployment(ctx context.Context, store *storage.EtcdStore, deployment *DeploymentRecord) {
+	// Collect all tasks for this deployment across all agents
+	nodeKeys, err := store.List(ctx, keyNodes)
+	if err != nil {
+		return
+	}
+
+	totalTasks := 0
+	completedTasks := 0
+	failedTasks := 0
+	var firstError string
+
+	for _, nodeKey := range nodeKeys {
+		var node NodeRecord
+		if err := store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+
+		// List tasks for this agent
+		taskPrefix := keyTasks + node.Name + "/"
+		taskKeys, err := store.List(ctx, taskPrefix)
+		if err != nil {
+			continue
+		}
+
+		for _, taskKey := range taskKeys {
+			var task TaskRecord
+			if err := store.Get(ctx, taskKey, &task); err != nil {
+				continue
+			}
+
+			if task.DeploymentID != deployment.ID {
+				continue
+			}
+
+			totalTasks++
+			switch task.Status {
+			case statusCompleted:
+				completedTasks++
+			case statusFailed:
+				failedTasks++
+				if firstError == "" {
+					firstError = task.Error
+				}
+			}
+		}
+	}
+
+	newStatus, errMsg := determineDeploymentStatus(totalTasks, completedTasks, failedTasks, firstError)
+	if newStatus == "" {
+		return // tasks not ready or still in progress
+	}
+
+	deployment.Status = newStatus
+	deployment.Error = errMsg
+	deployment.UpdatedAt = time.Now()
+	if err := store.Save(ctx, keyDeployments+deployment.ID, deployment); err == nil {
+		if newStatus == statusFailed {
+			fmt.Printf("[Engine] Deployment '%s' FAILED: %s\n", deployment.Name, errMsg)
+		} else {
+			fmt.Printf("[Engine] Deployment '%s' is RUNNING (%d containers)\n", deployment.Name, completedTasks)
+		}
+	}
+}
+
+// listAvailableAgents returns all registered agents.
+func listAvailableAgents(ctx context.Context, store *storage.EtcdStore) ([]NodeRecord, error) {
+	keys, err := store.List(ctx, keyNodes)
+	if err != nil {
+		return nil, err
+	}
+
+	var agents []NodeRecord
+	for _, key := range keys {
+		var node NodeRecord
+		if err := store.Get(ctx, key, &node); err != nil {
+			continue
+		}
+		if node.Status == "ready" {
+			agents = append(agents, node)
+		}
+	}
+	return agents, nil
+}
+
+// --- Engine status, stop, etcd management (unchanged) ---
 
 func runEngineStop(cmd *cobra.Command, args []string) error {
 	fmt.Println("Stopping Banyan Engine...")
@@ -269,31 +380,57 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Engine - Status")
 	fmt.Println("========================================")
 
+	// Check etcd
 	fmt.Print("etcd: ")
 	if isEngineEtcdRunning() {
 		fmt.Println("RUNNING")
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		client, err := clientv3.New(clientv3.Config{
-			Endpoints:   []string{engineEtcdEndpoints},
-			DialTimeout: 5 * time.Second,
-		})
-		if err == nil {
-			defer client.Close()
-			_, err = client.Status(ctx, engineEtcdEndpoints)
-			if err == nil {
-				fmt.Println("  Connection: OK")
-			} else {
-				fmt.Printf("  Connection: FAILED (%v)\n", err)
-			}
-		}
 	} else {
 		fmt.Println("NOT RUNNING")
 	}
 
-	fmt.Println("========================================")
+	// Try connecting to show cluster info
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	store, err := storage.NewEtcdStore([]string{engineEtcdEndpoints}, "/banyan")
+	if err != nil {
+		fmt.Printf("Connection: FAILED (%v)\n", err)
+		fmt.Println("========================================")
+		return nil
+	}
+
+	fmt.Println("Connection: OK")
+
+	// List agents
+	agents, _ := listAvailableAgents(ctx, store)
+	fmt.Printf("\nAgents: %d\n", len(agents))
+	for _, agent := range agents {
+		age := time.Since(agent.LastSeen).Truncate(time.Second)
+		fmt.Printf("  - %s (status: %s, last seen: %s ago)\n", agent.Name, agent.Status, age)
+	}
+
+	// List deployments
+	deployKeys, _ := store.List(ctx, keyDeployments)
+	fmt.Printf("\nDeployments: %d\n", len(deployKeys))
+	for _, key := range deployKeys {
+		var record DeploymentRecord
+		if err := store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		svcCount := len(record.Services)
+		totalReplicas := 0
+		for _, svc := range record.Services {
+			totalReplicas += svc.Replicas
+		}
+		fmt.Printf("  - %s (status: %s, services: %d, replicas: %d)\n",
+			record.Name, record.Status, svcCount, totalReplicas)
+	}
+
+	fmt.Println("\n========================================")
 	return nil
 }
+
+// --- etcd management helpers ---
 
 func ensureEngineEtcdRunning() error {
 	if isEngineEtcdRunning() {
@@ -404,10 +541,10 @@ func waitForEngineEtcd(ctx context.Context, endpoint string, timeout time.Durati
 			DialTimeout: 2 * time.Second,
 		})
 		if err == nil {
-			defer client.Close()
 			ctx2, cancel := context.WithTimeout(ctx, 2*time.Second)
 			_, err = client.Status(ctx2, endpoint)
 			cancel()
+			client.Close()
 			if err == nil {
 				return nil
 			}

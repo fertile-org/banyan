@@ -138,6 +138,30 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("   [OK] etcd found at %s\n", etcdPath)
 	}
 
+	fmt.Println("\n3. Configuring authentication...")
+	existingCfg, _ := loadConfig()
+	if existingCfg.Security.Password != "" {
+		fmt.Printf("   [OK] Config already exists at %s (password set)\n", configPath)
+	} else {
+		fmt.Print("   Enter cluster password (leave empty to skip): ")
+		password := readLine()
+		if password != "" {
+			cfg := BanyanConfig{
+				Security: SecurityConfig{
+					AuthType: "password",
+					Password: password,
+				},
+			}
+			if err := saveConfig(cfg); err != nil {
+				fmt.Printf("   [WARN] Failed to save config: %v\n", err)
+			} else {
+				fmt.Printf("   [OK] Config saved to %s\n", configPath)
+			}
+		} else {
+			fmt.Println("   [SKIP] No password set")
+		}
+	}
+
 	fmt.Println("\n========================================")
 	fmt.Println("Initialization complete!")
 	fmt.Println("\nNext step: banyan-cli engine start")
@@ -178,6 +202,18 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 	fmt.Println("Connected to etcd")
+
+	// Store auth hash if password is configured
+	cfg, err := loadConfig()
+	if err != nil {
+		fmt.Printf("Warning: Failed to load config: %v\n", err)
+	} else if cfg.Security.Password != "" {
+		hash := hashPassword(cfg.Security.Password)
+		if err := store.Save(ctx, keyAuthHash, hash); err != nil {
+			return fmt.Errorf("failed to store auth hash: %w", err)
+		}
+		fmt.Println("Password authentication enabled")
+	}
 
 	// Initialize VPC network
 	fmt.Printf("Initializing VPC network with CIDR %s...\n", engineVPCCIDR)
@@ -481,6 +517,11 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("etcd: RUNNING")
 	fmt.Println("Connection: OK")
+
+	// Verify authentication
+	if err := verifyAuth(ctx, store); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
 
 	// List agents
 	agents, _ := listAvailableAgents(ctx, store)

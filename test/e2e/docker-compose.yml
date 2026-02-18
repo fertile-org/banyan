@@ -15,6 +15,8 @@ services:
     hostname: engine
     privileged: true
     command: ["/entrypoint-engine.sh"]
+    environment:
+      - E2E_PASSWORD=banyan-e2e-secret
     ports:
       - "2379:2379"
     networks:
@@ -41,6 +43,7 @@ services:
     environment:
       - NODE_NAME=worker-1
       - ENGINE_ENDPOINT=http://engine:2379
+      - E2E_PASSWORD=banyan-e2e-secret
     networks:
       banyan-net:
         ipv4_address: 172.28.0.11
@@ -62,6 +65,7 @@ services:
     environment:
       - NODE_NAME=worker-2
       - ENGINE_ENDPOINT=http://engine:2379
+      - E2E_PASSWORD=banyan-e2e-secret
     networks:
       banyan-net:
         ipv4_address: 172.28.0.12

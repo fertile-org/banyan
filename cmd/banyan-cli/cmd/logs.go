@@ -84,6 +84,11 @@ func runLogs(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to connect to etcd: %w", err)
 	}
 
+	// Verify authentication
+	if err := verifyAuth(connCtx, store); err != nil {
+		return fmt.Errorf("authentication failed: %w", err)
+	}
+
 	task, node, err := findContainerAgent(connCtx, store, containerName)
 	if err != nil {
 		return err
@@ -139,6 +144,11 @@ func streamRemoteLogs(ctx context.Context, apiAddress, containerName string, opt
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Add Basic Auth if password is configured
+	if password := getConfigPassword(); password != "" {
+		req.SetBasicAuth("banyan", password)
 	}
 
 	resp, err := http.DefaultClient.Do(req)

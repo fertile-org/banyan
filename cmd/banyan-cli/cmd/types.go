@@ -12,6 +12,7 @@ const (
 	keyNodes       = "nodes/"
 	keyTasks       = "tasks/"
 	keyRegistry    = "config/registry"
+	keyAuthHash    = "config/auth_hash"
 )
 
 // Deployment statuses

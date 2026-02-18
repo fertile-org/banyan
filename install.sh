@@ -41,14 +41,16 @@ detect_os() {
 
     . /etc/os-release
     OS="$ID"
+    OS_LIKE="${ID_LIKE:-}"
     OS_VERSION="${VERSION_ID:-unknown}"
 
+    # Resolve derivatives (e.g. Pop!_OS, Linux Mint, Zorin -> debian/ubuntu)
     case "$OS" in
-        ubuntu|debian)
+        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
             PKG_UPDATE="apt-get update -qq"
             PKG_INSTALL="apt-get install -y -qq"
             ;;
-        centos|rhel|fedora|rocky|almalinux)
+        centos|rhel|fedora|rocky|almalinux|ol)
             if command -v dnf &>/dev/null; then
                 PKG_UPDATE="true"
                 PKG_INSTALL="dnf install -y -q"
@@ -58,7 +60,21 @@ detect_os() {
             fi
             ;;
         *)
-            fatal "Unsupported OS: $OS. Supported: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky, AlmaLinux."
+            # Fall back to ID_LIKE for unknown derivatives
+            if echo "$OS_LIKE" | grep -qw "debian\|ubuntu"; then
+                PKG_UPDATE="apt-get update -qq"
+                PKG_INSTALL="apt-get install -y -qq"
+            elif echo "$OS_LIKE" | grep -qw "rhel\|fedora\|centos"; then
+                if command -v dnf &>/dev/null; then
+                    PKG_UPDATE="true"
+                    PKG_INSTALL="dnf install -y -q"
+                else
+                    PKG_UPDATE="true"
+                    PKG_INSTALL="yum install -y -q"
+                fi
+            else
+                fatal "Unsupported OS: $OS. Supported: Debian/Ubuntu-based and RHEL/Fedora-based distributions."
+            fi
             ;;
     esac
 
@@ -84,17 +100,17 @@ get_latest_version() {
 }
 
 install_banyan() {
-    if [ -z "$VERSION" ]; then
+    if [ -z "$BANYAN_VERSION" ]; then
         info "Fetching latest version..."
-        VERSION=$(get_latest_version)
-        if [ -z "$VERSION" ]; then
+        BANYAN_VERSION=$(get_latest_version)
+        if [ -z "$BANYAN_VERSION" ]; then
             fatal "Could not determine latest version. Specify one with --version."
         fi
     fi
 
-    info "Installing banyan-cli ${VERSION}..."
+    info "Installing banyan-cli ${BANYAN_VERSION}..."
 
-    local url="https://github.com/${REPO}/releases/download/${VERSION}/banyan-cli-linux-${ARCH}"
+    local url="https://github.com/${REPO}/releases/download/${BANYAN_VERSION}/banyan-cli-linux-${ARCH}"
     local tmp
     tmp=$(mktemp)
 
@@ -106,7 +122,7 @@ install_banyan() {
     chmod +x "$tmp"
     mv "$tmp" "${INSTALL_DIR}/banyan-cli"
 
-    info "banyan-cli ${VERSION} installed to ${INSTALL_DIR}/banyan-cli"
+    info "banyan-cli ${BANYAN_VERSION} installed to ${INSTALL_DIR}/banyan-cli"
 }
 
 install_etcd() {
@@ -118,7 +134,7 @@ install_etcd() {
     info "Installing etcd..."
 
     case "$OS" in
-        ubuntu|debian)
+        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
             $PKG_UPDATE
             $PKG_INSTALL etcd-server
             ;;
@@ -147,7 +163,7 @@ install_containerd() {
         info "Installing containerd..."
 
         case "$OS" in
-            ubuntu|debian)
+            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
                 $PKG_UPDATE
                 $PKG_INSTALL containerd
                 ;;
@@ -273,7 +289,7 @@ verify() {
 
 main() {
     ROLE="all"
-    VERSION=""
+    BANYAN_VERSION=""
 
     while [ $# -gt 0 ]; do
         case "$1" in
@@ -282,7 +298,7 @@ main() {
                 shift 2
                 ;;
             --version)
-                VERSION="${2:-}"
+                BANYAN_VERSION="${2:-}"
                 shift 2
                 ;;
             --help|-h)

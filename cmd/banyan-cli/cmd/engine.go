@@ -380,25 +380,19 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Engine - Status")
 	fmt.Println("========================================")
 
-	// Check etcd
-	fmt.Print("etcd: ")
-	if isEngineEtcdRunning() {
-		fmt.Println("RUNNING")
-	} else {
-		fmt.Println("NOT RUNNING")
-	}
-
-	// Try connecting to show cluster info
+	// Try connecting to etcd — if we can connect, it's running
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	store, err := storage.NewEtcdStore([]string{engineEtcdEndpoints}, "/banyan")
 	if err != nil {
+		fmt.Println("etcd: NOT RUNNING")
 		fmt.Printf("Connection: FAILED (%v)\n", err)
 		fmt.Println("========================================")
 		return nil
 	}
 
+	fmt.Println("etcd: RUNNING")
 	fmt.Println("Connection: OK")
 
 	// List agents

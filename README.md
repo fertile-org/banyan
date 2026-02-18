@@ -16,9 +16,9 @@
 <p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
 
 <p align="center">
-  <a href="https://fertile-org.github.io/banyan/">Documentation</a> &middot;
-  <a href="https://fertile-org.github.io/banyan/getting-started/quickstart/">Quickstart</a> &middot;
-  <a href="https://fertile-org.github.io/banyan/roadmap/">Roadmap</a> &middot;
+  <a href="https://feritle-banyan.vercel.app/">Documentation</a> &middot;
+  <a href="https://feritle-banyan.vercel.app/getting-started/quickstart/">Quickstart</a> &middot;
+  <a href="https://feritle-banyan.vercel.app/roadmap/">Roadmap</a> &middot;
   <a href="./DEVELOPMENT.md">Development</a>
 </p>
 
@@ -88,7 +88,7 @@ curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh |
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role agent
 ```
 
-Or [build from source](https://fertile-org.github.io/banyan/getting-started/installation/).
+Or [build from source](https://feritle-banyan.vercel.app/getting-started/installation/).
 
 ## Three commands to a running cluster
 
@@ -122,18 +122,18 @@ Banyan is built for teams who:
 
 ## Documentation
 
-Full documentation is available at **[fertile-org.github.io/banyan](https://fertile-org.github.io/banyan/)**.
+Full documentation is available at **[feritle-banyan.vercel.app](https://feritle-banyan.vercel.app/)**.
 
-- [Installation](https://fertile-org.github.io/banyan/getting-started/installation/)
-- [Quickstart](https://fertile-org.github.io/banyan/getting-started/quickstart/)
-- [Manifest Reference](https://fertile-org.github.io/banyan/guides/manifest-reference/)
-- [Multi-Node Setup](https://fertile-org.github.io/banyan/guides/multi-node/)
-- [CLI Reference](https://fertile-org.github.io/banyan/reference/cli/)
-- [Troubleshooting](https://fertile-org.github.io/banyan/reference/troubleshooting/)
+- [Installation](https://feritle-banyan.vercel.app/getting-started/installation/)
+- [Quickstart](https://feritle-banyan.vercel.app/getting-started/quickstart/)
+- [Manifest Reference](https://feritle-banyan.vercel.app/guides/manifest-reference/)
+- [Multi-Node Setup](https://feritle-banyan.vercel.app/guides/multi-node/)
+- [CLI Reference](https://feritle-banyan.vercel.app/reference/cli/)
+- [Troubleshooting](https://feritle-banyan.vercel.app/reference/troubleshooting/)
 
 ## Roadmap
 
-See the [Roadmap](https://fertile-org.github.io/banyan/roadmap/) for what's next — metrics, auto-scaling, monitoring, and more.
+See the [Roadmap](https://feritle-banyan.vercel.app/roadmap/) for what's next — metrics, auto-scaling, monitoring, and more.
 
 ## Contributing
 

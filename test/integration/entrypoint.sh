@@ -91,14 +91,14 @@ start_flannel() {
     echo "Flannel subnet: $(cat /run/flannel/subnet.env)"
 }
 
-# Build vpc-cli if not already built
+# Build banyan-cli if not already built
 build_vpc_cli() {
-    if [ ! -f /tmp/vpc-cli ]; then
-        echo "Building vpc-cli..."
+    if [ ! -f /tmp/banyan-cli ]; then
+        echo "Building banyan-cli..."
         cd /app
-        go build -o /tmp/vpc-cli ./cmd/vpc-cli/
+        go build -o /tmp/banyan-cli ./cmd/banyan-cli/
     fi
-    echo "vpc-cli ready at /tmp/vpc-cli"
+    echo "banyan-cli ready at /tmp/banyan-cli"
 }
 
 # Start all services

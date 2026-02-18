@@ -25,8 +25,8 @@ var cniSetupPluginCmd = &cobra.Command{
 	Long: `Setup and configure a CNI plugin (flannel or calico).
 
 Example:
-  vpc-cli cni setup-plugin flannel
-  vpc-cli cni setup-plugin flannel --etcd-endpoints=http://localhost:2379`,
+  banyan-cli cni setup-plugin flannel
+  banyan-cli cni setup-plugin flannel --etcd-endpoints=http://localhost:2379`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plugin := args[0]
@@ -107,7 +107,7 @@ var cniAddContainerCmd = &cobra.Command{
 	Long: `Attach a container to a network with the specified IP address.
 
 Example:
-  vpc-cli cni add-container container-001 network-001 10.0.1.5`,
+  banyan-cli cni add-container container-001 network-001 10.0.1.5`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		containerID := args[0]
@@ -138,7 +138,7 @@ var cniRemoveContainerCmd = &cobra.Command{
 	Long: `Detach a container from a network.
 
 Example:
-  vpc-cli cni remove-container container-001 network-001`,
+  banyan-cli cni remove-container container-001 network-001`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		containerID := args[0]
@@ -163,7 +163,7 @@ var cniGetStatusCmd = &cobra.Command{
 	Long: `Get the current status of a CNI plugin.
 
 Example:
-  vpc-cli cni get-status flannel`,
+  banyan-cli cni get-status flannel`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		plugin := args[0]

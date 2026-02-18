@@ -19,7 +19,7 @@ const (
 	networkID      = "network-001"
 	testIP1        = "10.0.1.10"
 	testIP2        = "10.0.1.11"
-	vpcCLIPath     = "/tmp/vpc-cli"
+	vpcCLIPath     = "/tmp/banyan-cli"
 )
 
 func main() {
@@ -83,7 +83,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 
 	if err := helpers.VerifyFlanneldRunning(ctx); err != nil {
 		p.Error("Flannel daemon not running")
-		p.Info("Please run: sudo vpc-cli cni setup-plugin flannel")
+		p.Info("Please run: sudo banyan-cli cni setup-plugin flannel")
 		return 1
 	}
 	p.Success("Flannel daemon is running")
@@ -111,20 +111,20 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 
 	p.Success("Cleaned up stale state")
 
-	// Step 2: Build vpc-cli
-	p.Step("Building vpc-cli")
+	// Step 2: Build banyan-cli
+	p.Step("Building banyan-cli")
 
 	projectRoot := getProjectRoot()
 	// Use -a flag to force rebuild (ignore cache)
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-a", "-o", vpcCLIPath, "./cmd/vpc-cli/")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-a", "-o", vpcCLIPath, "./cmd/banyan-cli/")
 	buildCmd.Dir = projectRoot
 
 	if output, err := buildCmd.CombinedOutput(); err != nil {
-		p.Error(fmt.Sprintf("Failed to build vpc-cli: %v", err))
+		p.Error(fmt.Sprintf("Failed to build banyan-cli: %v", err))
 		p.Code(string(output))
 		return 1
 	}
-	p.Success("Built vpc-cli successfully")
+	p.Success("Built banyan-cli successfully")
 
 	// Step 3: Create first Docker container
 	p.Step("Creating first container without networking")
@@ -190,7 +190,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Success(fmt.Sprintf("Created symlink for container 2: /var/run/netns/%s", container2.Name))
 
 	// Step 7: Attach first container to network
-	p.Step("Attaching first container to network using vpc-cli")
+	p.Step("Attaching first container to network using banyan-cli")
 	p.Info(fmt.Sprintf("Running: sudo %s cni add-container %s %s %s", vpcCLIPath, container1Name, networkID, testIP1))
 
 	addCmd1 := exec.CommandContext(ctx, "sudo", vpcCLIPath, "cni", "add-container", container1Name, networkID, testIP1)
@@ -202,7 +202,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Success("Container 1 attached successfully")
 
 	// Step 8: Attach second container to network
-	p.Step("Attaching second container to network using vpc-cli")
+	p.Step("Attaching second container to network using banyan-cli")
 	p.Info(fmt.Sprintf("Running: sudo %s cni add-container %s %s %s", vpcCLIPath, container2Name, networkID, testIP2))
 
 	addCmd2 := exec.CommandContext(ctx, "sudo", vpcCLIPath, "cni", "add-container", container2Name, networkID, testIP2)

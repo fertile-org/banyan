@@ -184,7 +184,7 @@ func runEtcdStart(cmd *cobra.Command, args []string) error {
 	})
 	if err != nil {
 		fmt.Printf("Warning: Failed to connect to etcd for verification: %v\n", err)
-		fmt.Printf("etcd is running but may not be ready yet. Check status with: vpc-cli etcd status\n")
+		fmt.Printf("etcd is running but may not be ready yet. Check status with: banyan-cli etcd status\n")
 		return nil
 	}
 	defer client.Close()
@@ -193,7 +193,7 @@ func runEtcdStart(cmd *cobra.Command, args []string) error {
 	_, err = client.Status(ctx, strings.Split(etcdAdvertiseClientURLs, ",")[0])
 	if err != nil {
 		fmt.Printf("Warning: etcd health check failed: %v\n", err)
-		fmt.Printf("etcd is running but may not be ready yet. Check status with: vpc-cli etcd status\n")
+		fmt.Printf("etcd is running but may not be ready yet. Check status with: banyan-cli etcd status\n")
 		return nil
 	}
 

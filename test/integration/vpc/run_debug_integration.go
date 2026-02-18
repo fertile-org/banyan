@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	vpcCLIPath = "/tmp/vpc-cli"
+	vpcCLIPath = "/tmp/banyan-cli"
 )
 
 func main() {
@@ -40,19 +40,19 @@ func main() {
 func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Title("Testing Network Debugging Utilities Integration")
 
-	// Step 1: Build vpc-cli
-	p.Step("Building vpc-cli")
+	// Step 1: Build banyan-cli
+	p.Step("Building banyan-cli")
 
 	projectRoot := getProjectRoot()
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", vpcCLIPath, "./cmd/vpc-cli/")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", vpcCLIPath, "./cmd/banyan-cli/")
 	buildCmd.Dir = projectRoot
 
 	if output, err := buildCmd.CombinedOutput(); err != nil {
-		p.Error(fmt.Sprintf("Failed to build vpc-cli: %v", err))
+		p.Error(fmt.Sprintf("Failed to build banyan-cli: %v", err))
 		p.Code(string(output))
 		return 1
 	}
-	p.Success("Built vpc-cli successfully")
+	p.Success("Built banyan-cli successfully")
 
 	// Step 2: Verify debug command exists
 	p.Step("Verifying debug CLI commands")
@@ -314,7 +314,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Step("Testing debug CLI commands")
 
 	// Test 6a: trace command
-	p.Info("Testing 'vpc-cli debug trace' command")
+	p.Info("Testing 'banyan-cli debug trace' command")
 	traceCmd := exec.CommandContext(ctx, vpcCLIPath, "debug", "trace", "10.0.1.5", "10.0.1.10", "5432")
 	traceCmdOutput, traceCmdErr := traceCmd.CombinedOutput()
 	if traceCmdErr != nil {
@@ -331,7 +331,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Success("Trace CLI command works correctly")
 
 	// Test 6b: trace command with JSON output
-	p.Info("Testing 'vpc-cli debug trace --json' command")
+	p.Info("Testing 'banyan-cli debug trace --json' command")
 	traceJSONCmd := exec.CommandContext(ctx, vpcCLIPath, "debug", "trace", "--json", "10.0.1.5", "8.8.8.8", "443")
 	traceJSONOutput, traceJSONErr := traceJSONCmd.CombinedOutput()
 	if traceJSONErr != nil {
@@ -354,7 +354,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Success("Trace JSON output parses correctly")
 
 	// Test 6c: connectivity command
-	p.Info("Testing 'vpc-cli debug connectivity' command")
+	p.Info("Testing 'banyan-cli debug connectivity' command")
 	connCmd := exec.CommandContext(ctx, vpcCLIPath, "debug", "connectivity", "container-001")
 	connCmdOutput, connCmdErr := connCmd.CombinedOutput()
 	if connCmdErr != nil {
@@ -376,7 +376,7 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Success("Connectivity CLI command works correctly")
 
 	// Test 6d: iptables command
-	p.Info("Testing 'vpc-cli debug iptables' command")
+	p.Info("Testing 'banyan-cli debug iptables' command")
 	iptablesCmd := exec.CommandContext(ctx, vpcCLIPath, "debug", "iptables", "10.0.1.5")
 	iptablesCmdOutput, iptablesCmdErr := iptablesCmd.CombinedOutput()
 	if iptablesCmdErr != nil {

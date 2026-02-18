@@ -1,46 +1,58 @@
-# VPC CLI
+# Banyan CLI
 
-Command-line interface for managing VPC networking in Banyan.
+Command-line interface for deploying and managing applications on Banyan, plus VPC networking tools.
 
-## Installation
+## Build
 
 ```bash
-go build -o vpc-cli ./cmd/vpc-cli/
+go build -o banyan-cli ./cmd/banyan-cli/
 ```
 
-## Storage
+## Deploy Commands
 
-State is persisted to `~/.vpc/state.json`
+```bash
+# Deploy from manifest
+banyan-cli deploy -f banyan.yaml --engine http://engine:8443
 
-## Network Commands
+# Stop services
+banyan-cli down --name my-app --engine http://engine:8443
+
+# Check cluster status
+banyan-cli status --engine http://engine:8443
+
+# Stream container logs
+banyan-cli logs my-app-web-0 --engine http://engine:8443
+```
+
+## VPC Network Commands
 
 ```bash
 # Create network with defaults (CIDR: 10.0.0.0/16)
-vpc-cli network create
+banyan-cli network create
 
 # Create network with custom name and CIDR
-vpc-cli network create my-vpc 10.5.0.0/16
+banyan-cli network create my-vpc 10.5.0.0/16
 
 # List all networks
-vpc-cli network list
+banyan-cli network list
 
 # Get network details
-vpc-cli network get <network-id>
+banyan-cli network get <network-id>
 
 # Delete network
-vpc-cli network delete <network-id>
+banyan-cli network delete <network-id>
 ```
 
 ## Example
 
 ```bash
-$ vpc-cli network create test-net 10.1.0.0/16
-✓ Created network:
+$ banyan-cli network create test-net 10.1.0.0/16
+Created network:
   ID:         abc123...
   Name:       test-net
   CIDR:       10.1.0.0/16
 
-$ vpc-cli network list
-✓ Found 1 networks:
+$ banyan-cli network list
+Found 1 networks:
 1. test-net (10.1.0.0/16) - abc123...
 ```

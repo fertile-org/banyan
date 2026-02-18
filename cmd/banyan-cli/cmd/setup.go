@@ -66,8 +66,8 @@ Installation directory: /opt/cni/bin (requires sudo)`,
 		if cniInstalled && flanneldInstalled {
 			fmt.Println("\n✅ All components already installed!")
 			fmt.Println("\nYou can now use:")
-			fmt.Println("  vpc-cli cni setup-plugin flannel")
-			fmt.Println("  vpc-cli cni add-container <container-id> <network-id> <ip>")
+			fmt.Println("  banyan-cli cni setup-plugin flannel")
+			fmt.Println("  banyan-cli cni add-container <container-id> <network-id> <ip>")
 			return nil
 		}
 
@@ -111,8 +111,8 @@ Installation directory: /opt/cni/bin (requires sudo)`,
 
 		fmt.Println("\n✅ CNI plugins and Flannel daemon installed successfully!")
 		fmt.Println("\nYou can now use:")
-		fmt.Println("  vpc-cli cni setup-plugin flannel")
-		fmt.Println("  vpc-cli cni add-container <container-id> <network-id> <ip>")
+		fmt.Println("  banyan-cli cni setup-plugin flannel")
+		fmt.Println("  banyan-cli cni add-container <container-id> <network-id> <ip>")
 
 		return nil
 	},

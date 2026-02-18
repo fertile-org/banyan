@@ -3,8 +3,8 @@ module github.com/fertile-org/banyan/cmd/banyan-cli
 go 1.24.3
 
 require (
+	github.com/fertile-org/banyan/pkg/types v0.0.0
 	github.com/fertile-org/banyan/pkg/vpc v0.0.0
-	github.com/google/go-containerregistry v0.20.7
 	github.com/spf13/cobra v1.10.1
 	go.etcd.io/etcd/client/v3 v3.5.21
 	gopkg.in/yaml.v3 v3.0.1
@@ -17,12 +17,13 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
-	github.com/kr/pretty v0.3.1 // indirect
 	github.com/miekg/dns v1.1.69 // indirect
-	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
+	go.opentelemetry.io/otel/metric v1.36.0 // indirect
+	go.opentelemetry.io/otel/sdk v1.36.0 // indirect
+	go.opentelemetry.io/otel/trace v1.36.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/mod v0.30.0 // indirect
@@ -35,9 +36,9 @@ require (
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250218202821-56aae31c358a // indirect
 	google.golang.org/grpc v1.72.1 // indirect
 	google.golang.org/protobuf v1.36.5 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
-replace github.com/fertile-org/banyan/pkg/vpc => ../../pkg/vpc
-
-replace github.com/fertile-org/banyan/internal/common => ../../internal/common
+replace (
+	github.com/fertile-org/banyan/pkg/types => ../../pkg/types
+	github.com/fertile-org/banyan/pkg/vpc => ../../pkg/vpc
+)

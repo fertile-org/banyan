@@ -76,8 +76,8 @@ WORKDIR /app
 # Copy the entire project (multi-module workspace)
 COPY . .
 
-# Download dependencies and build vpc-cli
-RUN cd /app && go work sync && go build -o /tmp/vpc-cli ./cmd/vpc-cli/
+# Download dependencies and build banyan-cli
+RUN cd /app && go work sync && go build -o /tmp/banyan-cli ./cmd/banyan-cli/
 
 # Copy entrypoint script
 COPY test/integration/entrypoint.sh /entrypoint.sh

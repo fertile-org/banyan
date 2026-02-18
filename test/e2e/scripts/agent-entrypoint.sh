@@ -29,7 +29,7 @@ agent:
 EOF
 chmod 600 /etc/banyan/banyan.yaml
 
-# Wait for engine to be ready
+# Wait for engine etcd to be ready
 echo "Waiting for engine at $ENGINE_ENDPOINT..."
 until curl -sf "$ENGINE_ENDPOINT/health" > /dev/null 2>&1 || etcdctl --endpoints="$ENGINE_ENDPOINT" endpoint health > /dev/null 2>&1; do
     echo "Engine not ready, waiting..."
@@ -39,7 +39,7 @@ echo "Engine is ready!"
 
 # Initialize agent
 echo "Initializing agent..."
-echo "" | banyan-cli agent init
+echo "" | banyan-agent init
 
 # Start containerd in background
 echo "Starting containerd..."
@@ -48,4 +48,4 @@ sleep 2
 
 # Start agent
 echo "Starting agent..."
-exec banyan-cli agent start --node-name "$NODE_NAME"
+exec banyan-agent start --node-name "$NODE_NAME"

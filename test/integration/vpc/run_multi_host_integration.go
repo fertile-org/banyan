@@ -68,7 +68,7 @@ func runMultiHostTest(ctx context.Context, p *helpers.Printer) int {
 	}
 
 	if err := buildVPCCLI(ctx, p); err != nil {
-		p.Error(fmt.Sprintf("Failed to build vpc-cli: %v", err))
+		p.Error(fmt.Sprintf("Failed to build banyan-cli: %v", err))
 		return 1
 	}
 
@@ -168,26 +168,26 @@ func checkPrerequisites(ctx context.Context, p *helpers.Printer) error {
 }
 
 func buildVPCCLI(ctx context.Context, p *helpers.Printer) error {
-	p.Step("Building vpc-cli binary")
+	p.Step("Building banyan-cli binary")
 
-	// Check if vpc-cli is already built (e.g., by entrypoint.sh)
-	if _, err := os.Stat("/tmp/vpc-cli"); err == nil {
-		p.Info("✓ vpc-cli already exists at /tmp/vpc-cli")
+	// Check if banyan-cli is already built (e.g., by entrypoint.sh)
+	if _, err := os.Stat("/tmp/banyan-cli"); err == nil {
+		p.Info("✓ banyan-cli already exists at /tmp/banyan-cli")
 		return nil
 	}
 
 	// Get project root - try common locations
 	projectRoot := getProjectRoot()
-	vpcCliDir := filepath.Join(projectRoot, "cmd", "vpc-cli")
+	vpcCliDir := filepath.Join(projectRoot, "cmd", "banyan-cli")
 
-	cmd := exec.CommandContext(ctx, "go", "build", "-o", "/tmp/vpc-cli")
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", "/tmp/banyan-cli")
 	cmd.Dir = vpcCliDir
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("build failed: %w\nOutput: %s", err, output)
 	}
 
-	p.Info("✓ vpc-cli built successfully")
+	p.Info("✓ banyan-cli built successfully")
 	return nil
 }
 
@@ -200,7 +200,7 @@ func getProjectRoot() string {
 	}
 
 	for _, loc := range locations {
-		if _, err := os.Stat(filepath.Join(loc, "cmd", "vpc-cli")); err == nil {
+		if _, err := os.Stat(filepath.Join(loc, "cmd", "banyan-cli")); err == nil {
 			return loc
 		}
 	}
@@ -214,13 +214,13 @@ func startEtcd(ctx context.Context, p *helpers.Printer) error {
 	p.Step("Starting etcd server")
 
 	// Stop any existing etcd
-	exec.CommandContext(ctx, "/tmp/vpc-cli", "etcd", "stop").Run()
+	exec.CommandContext(ctx, "/tmp/banyan-cli", "etcd", "stop").Run()
 
 	// Clean up old data
 	exec.CommandContext(ctx, "rm", "-rf", "/tmp/test-etcd").Run()
 
 	// Start etcd
-	cmd := exec.CommandContext(ctx, "/tmp/vpc-cli", "etcd", "start",
+	cmd := exec.CommandContext(ctx, "/tmp/banyan-cli", "etcd", "start",
 		"--data-dir=/tmp/test-etcd",
 		"--listen-client-urls=http://0.0.0.0:2379",
 		"--advertise-client-urls=http://127.0.0.1:2379")
@@ -233,7 +233,7 @@ func startEtcd(ctx context.Context, p *helpers.Printer) error {
 	time.Sleep(3 * time.Second)
 
 	// Verify etcd is running
-	cmd = exec.CommandContext(ctx, "/tmp/vpc-cli", "etcd", "status",
+	cmd = exec.CommandContext(ctx, "/tmp/banyan-cli", "etcd", "status",
 		"--endpoints="+etcdEndpointHost)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("etcd not ready: %w", err)
@@ -294,20 +294,20 @@ func createTestNetwork(ctx context.Context, p *helpers.Printer) error {
 func createSimulatedHosts(ctx context.Context, p *helpers.Printer) error {
 	p.Step("Creating simulated hosts (containerd-in-containerd)")
 
-	// Create a shared directory for vpc-cli
+	// Create a shared directory for banyan-cli
 	shareDir := "/tmp/vpc-share"
 	if err := os.MkdirAll(shareDir, 0755); err != nil {
 		return fmt.Errorf("failed to create share directory: %w", err)
 	}
 
-	// Copy vpc-cli to the shared directory
-	vpcCliSrc := "/tmp/vpc-cli"
-	vpcCliDst := filepath.Join(shareDir, "vpc-cli")
+	// Copy banyan-cli to the shared directory
+	vpcCliSrc := "/tmp/banyan-cli"
+	vpcCliDst := filepath.Join(shareDir, "banyan-cli")
 	if output, err := exec.CommandContext(ctx, "cp", vpcCliSrc, vpcCliDst).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to copy vpc-cli to share dir: %w\nOutput: %s", err, output)
+		return fmt.Errorf("failed to copy banyan-cli to share dir: %w\nOutput: %s", err, output)
 	}
 	if output, err := exec.CommandContext(ctx, "chmod", "+x", vpcCliDst).CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to chmod vpc-cli in share dir: %w\nOutput: %s", err, output)
+		return fmt.Errorf("failed to chmod banyan-cli in share dir: %w\nOutput: %s", err, output)
 	}
 
 	hosts := []string{host1Name, host2Name}
@@ -329,7 +329,7 @@ func createSimulatedHosts(ctx context.Context, p *helpers.Printer) error {
 			"--hostname", hostName,
 			"--network", testNetworkName,
 			"-e", "DOCKER_DRIVER=vfs",
-			"-v", shareDir+":/vpc-share:ro", // Mount directory with vpc-cli
+			"-v", shareDir+":/vpc-share:ro", // Mount directory with banyan-cli
 			"docker:dind",
 			"dockerd-entrypoint.sh", "--storage-driver=vfs", "--iptables=false")
 
@@ -347,12 +347,12 @@ func createSimulatedHosts(ctx context.Context, p *helpers.Printer) error {
 			return fmt.Errorf("failed waiting for %s to be ready: %w", hostName, err)
 		}
 
-		// Copy vpc-cli from mounted volume to /usr/local/bin
-		if _, err := nerdctlExec(ctx, hostName, "cp", "/vpc-share/vpc-cli", "/usr/local/bin/vpc-cli"); err != nil {
-			return fmt.Errorf("failed to copy vpc-cli to %s: %w", hostName, err)
+		// Copy banyan-cli from mounted volume to /usr/local/bin
+		if _, err := nerdctlExec(ctx, hostName, "cp", "/vpc-share/banyan-cli", "/usr/local/bin/banyan-cli"); err != nil {
+			return fmt.Errorf("failed to copy banyan-cli to %s: %w", hostName, err)
 		}
-		if _, err := nerdctlExec(ctx, hostName, "chmod", "+x", "/usr/local/bin/vpc-cli"); err != nil {
-			return fmt.Errorf("failed to chmod vpc-cli on %s: %w", hostName, err)
+		if _, err := nerdctlExec(ctx, hostName, "chmod", "+x", "/usr/local/bin/banyan-cli"); err != nil {
+			return fmt.Errorf("failed to chmod banyan-cli on %s: %w", hostName, err)
 		}
 
 		// docker:dind already has ip and iptables, verify they exist
@@ -633,7 +633,7 @@ func cleanup(ctx context.Context, p *helpers.Printer) {
 	exec.CommandContext(ctx, "sudo", "nerdctl", "--snapshotter=native", "--cgroup-manager=cgroupfs", "network", "rm", testNetworkName).Run()
 
 	// Stop etcd
-	exec.CommandContext(ctx, "/tmp/vpc-cli", "etcd", "stop").Run()
+	exec.CommandContext(ctx, "/tmp/banyan-cli", "etcd", "stop").Run()
 
 	// Clean up data
 	exec.CommandContext(ctx, "rm", "-rf", "/tmp/test-etcd").Run()

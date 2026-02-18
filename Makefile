@@ -15,31 +15,29 @@ install-dependencies:
 	go work sync
 
 # Run applications
-run-cli:
-	go run cmd/cli/main.go
-
 run-engine:
-	go run cmd/engine/main.go
+	go run ./cmd/banyan-engine
 
 run-agent:
-	go run cmd/agent/main.go
+	go run ./cmd/banyan-agent
+
+run-cli:
+	go run ./cmd/banyan-cli
 
 # Lint and format code
 lint:
-	cd cmd/cli && $(shell go env GOPATH)/bin/golangci-lint run
-	cd cmd/engine && $(shell go env GOPATH)/bin/golangci-lint run
-	cd cmd/agent && $(shell go env GOPATH)/bin/golangci-lint run
-	cd pkg/interfaces && $(shell go env GOPATH)/bin/golangci-lint run
-	cd pkg/plugin-sdk && $(shell go env GOPATH)/bin/golangci-lint run
+	cd cmd/banyan-engine && $(shell go env GOPATH)/bin/golangci-lint run
+	cd cmd/banyan-agent && $(shell go env GOPATH)/bin/golangci-lint run
+	cd cmd/banyan-cli && $(shell go env GOPATH)/bin/golangci-lint run
+	cd pkg/types && $(shell go env GOPATH)/bin/golangci-lint run
 	cd internal/common && $(shell go env GOPATH)/bin/golangci-lint run
 
 # Auto-fix linting issues
 lint-fix:
-	cd cmd/cli && $(shell go env GOPATH)/bin/golangci-lint run --fix
-	cd cmd/engine && $(shell go env GOPATH)/bin/golangci-lint run --fix
-	cd cmd/agent && $(shell go env GOPATH)/bin/golangci-lint run --fix
-	cd pkg/interfaces && $(shell go env GOPATH)/bin/golangci-lint run --fix
-	cd pkg/plugin-sdk && $(shell go env GOPATH)/bin/golangci-lint run --fix
+	cd cmd/banyan-engine && $(shell go env GOPATH)/bin/golangci-lint run --fix
+	cd cmd/banyan-agent && $(shell go env GOPATH)/bin/golangci-lint run --fix
+	cd cmd/banyan-cli && $(shell go env GOPATH)/bin/golangci-lint run --fix
+	cd pkg/types && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd internal/common && $(shell go env GOPATH)/bin/golangci-lint run --fix
 
 # Run tests
@@ -74,9 +72,9 @@ endif
 
 # Build all binaries
 build:
-	go build -o bin/banyan-cli cmd/cli/main.go
-	go build -o bin/banyan-engine cmd/engine/main.go
-	go build -o bin/banyan-agent cmd/agent/main.go
+	go build -o bin/banyan-engine ./cmd/banyan-engine
+	go build -o bin/banyan-agent ./cmd/banyan-agent
+	go build -o bin/banyan-cli ./cmd/banyan-cli
 
 # Clean build artifacts
 clean:

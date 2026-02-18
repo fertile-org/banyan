@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	vpcCLIPath    = "/tmp/vpc-cli"
+	vpcCLIPath    = "/tmp/banyan-cli"
 	dnsServerPort = 15359 // High port for testing without root
 	dnsBindAddr   = "127.0.0.1:15359"
 	internalZone  = "internal"
@@ -45,19 +45,19 @@ func main() {
 func runTest(ctx context.Context, p *helpers.Printer) int {
 	p.Title("Testing DNS Service Discovery Integration")
 
-	// Step 1: Build vpc-cli
-	p.Step("Building vpc-cli")
+	// Step 1: Build banyan-cli
+	p.Step("Building banyan-cli")
 
 	projectRoot := getProjectRoot()
-	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", vpcCLIPath, "./cmd/vpc-cli/")
+	buildCmd := exec.CommandContext(ctx, "go", "build", "-o", vpcCLIPath, "./cmd/banyan-cli/")
 	buildCmd.Dir = projectRoot
 
 	if output, err := buildCmd.CombinedOutput(); err != nil {
-		p.Error(fmt.Sprintf("Failed to build vpc-cli: %v", err))
+		p.Error(fmt.Sprintf("Failed to build banyan-cli: %v", err))
 		p.Code(string(output))
 		return 1
 	}
-	p.Success("Built vpc-cli successfully")
+	p.Success("Built banyan-cli successfully")
 
 	// Step 2: Verify DNS server command exists
 	p.Step("Verifying DNS CLI commands")

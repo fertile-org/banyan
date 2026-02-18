@@ -39,7 +39,7 @@ fi
 echo "🔍 Running linter..."
 failed=0
 
-for module in cmd/cli cmd/engine cmd/agent pkg/interfaces pkg/plugin-sdk internal/common; do
+for module in cmd/banyan-engine cmd/banyan-agent cmd/banyan-cli pkg/types; do
     echo "Linting $module..."
     if ! (cd "$module" && "$GOPATH/bin/golangci-lint" run); then
         failed=1
@@ -53,9 +53,12 @@ fi
 
 # Run tests
 echo "🧪 Running tests..."
-if ! "$GO_BINARY" test ./test/unit/...; then
-    echo "❌ Tests failed. Please fix failing tests."
-    exit 1
-fi
+for module in cmd/banyan-engine cmd/banyan-cli pkg/types; do
+    echo "Testing $module..."
+    if ! (cd "$module" && "$GO_BINARY" test ./...); then
+        echo "❌ Tests failed in $module. Please fix failing tests."
+        exit 1
+    fi
+done
 
 echo "✅ All pre-commit checks passed!"

@@ -9,6 +9,13 @@ on:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - cmd/banyan-engine
+          - cmd/banyan-agent
+          - cmd/banyan-cli
+          - pkg/types
     steps:
       - uses: actions/checkout@v4
 
@@ -20,11 +27,17 @@ jobs:
         env:
           GOWORK: "off"
         run: |
-          cd cmd/banyan-cli
+          cd ${{ matrix.module }}
           go vet ./...
 
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - cmd/banyan-engine
+          - cmd/banyan-cli
+          - pkg/types
     steps:
       - uses: actions/checkout@v4
 
@@ -36,18 +49,24 @@ jobs:
         env:
           GOWORK: "off"
         run: |
-          cd cmd/banyan-cli
+          cd ${{ matrix.module }}
           go test -coverprofile=coverage.out -covermode=atomic ./...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: cmd/banyan-cli/coverage.out
+          files: ${{ matrix.module }}/coverage.out
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
 
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module:
+          - cmd/banyan-engine
+          - cmd/banyan-agent
+          - cmd/banyan-cli
     steps:
       - uses: actions/checkout@v4
 
@@ -60,5 +79,5 @@ jobs:
           CGO_ENABLED: "0"
           GOWORK: "off"
         run: |
-          cd cmd/banyan-cli
+          cd ${{ matrix.module }}
           go build -o /dev/null .

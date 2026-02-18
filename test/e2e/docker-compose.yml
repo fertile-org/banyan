@@ -3,8 +3,7 @@ version: '3.8'
 # Banyan E2E Test Environment
 # 1 Engine + 2 Agents
 #
-# Pre-requisite: Build banyan-cli binary first:
-#   cd cmd/banyan-cli && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../../test/e2e/bin/banyan-cli .
+# Pre-requisite: Build binaries first (see run-e2e.sh)
 
 services:
   engine:
@@ -19,6 +18,7 @@ services:
       - E2E_PASSWORD=banyan-e2e-secret
     ports:
       - "2379:2379"
+      - "8443:8443"
     networks:
       banyan-net:
         ipv4_address: 172.28.0.10

@@ -47,11 +47,13 @@ echo "========================================="
 echo "Banyan E2E Test"
 echo "========================================="
 
-# Step 1: Build banyan-cli binary locally (avoids Docker DNS issues with Go proxy)
-log_info "Building banyan-cli binary..."
+# Step 1: Build all binaries locally (avoids Docker DNS issues with Go proxy)
+log_info "Building binaries..."
 mkdir -p "$SCRIPT_DIR/bin"
+(cd "$REPO_ROOT/cmd/banyan-engine" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-engine" .)
+(cd "$REPO_ROOT/cmd/banyan-agent" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-agent" .)
 (cd "$REPO_ROOT/cmd/banyan-cli" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-cli" .)
-log_info "Binary built at test/e2e/bin/banyan-cli"
+log_info "Binaries built at test/e2e/bin/"
 
 # Step 2: Build Docker images
 log_info "Building Docker images..."
@@ -72,17 +74,15 @@ sleep 10
 
 # Step 6: Check engine status (shows agents and deployments)
 log_info "Checking engine status..."
-docker exec banyan-engine banyan-cli engine status || log_warn "Engine status check failed"
+docker exec banyan-engine banyan-engine status || log_warn "Engine status check failed"
 
 # Step 7: Deploy test application
 log_info "Deploying test application..."
-docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml --etcd http://localhost:2379
-
+docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml
 # Step 8: Verify deployment
 log_info "Verifying deployment status..."
 sleep 5
-docker exec banyan-engine banyan-cli engine status
-
+docker exec banyan-engine banyan-cli status
 # Step 9: Verify containers on workers
 log_info "Checking containers on workers..."
 echo "  worker-1:"
@@ -96,8 +96,9 @@ log_info "E2E Test Complete!"
 echo "========================================="
 echo ""
 echo "Cluster is running. You can interact with it:"
-echo "  docker exec banyan-engine banyan-cli engine status"
-echo "  docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml --etcd http://localhost:2379"
+echo "  docker exec banyan-engine banyan-engine status"
+echo "  docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml --engine http://localhost:8443"
+echo "  docker exec banyan-engine banyan-cli status --engine http://localhost:8443"
 echo "  docker exec banyan-worker-1 nerdctl ps"
 echo ""
 echo "To stop the cluster:"

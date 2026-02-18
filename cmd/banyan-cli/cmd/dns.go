@@ -98,7 +98,7 @@ The server listens on the specified address and resolves hostnames registered
 with the DNS manager. External queries are forwarded to the upstream DNS server.
 
 Example:
-  vpc-cli dns server --bind 0.0.0.0:53 --zone internal --upstream 8.8.8.8:53`,
+  banyan-cli dns server --bind 0.0.0.0:53 --zone internal --upstream 8.8.8.8:53`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		bindAddr, _ := cmd.Flags().GetString("bind")
 		zone, _ := cmd.Flags().GetString("zone")

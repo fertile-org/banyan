@@ -15,14 +15,18 @@ cat > /etc/banyan/banyan.yaml <<EOF
 security:
     auth_type: password
     password: ${E2E_PASSWORD}
-engine: {}
+engine:
+    api_port: "8443"
+cli:
+    engine_host: localhost
+    engine_port: "8443"
 EOF
 chmod 600 /etc/banyan/banyan.yaml
 
 # Initialize engine
 echo "Initializing engine..."
-echo "" | banyan-cli engine init
+echo "" | banyan-engine init
 
-# Start engine (this will also start etcd)
+# Start engine (this will also start etcd and the HTTP API)
 echo "Starting engine..."
-exec banyan-cli engine start --etcd-client-urls http://0.0.0.0:2379
+exec banyan-engine start --etcd-client-urls http://0.0.0.0:2379

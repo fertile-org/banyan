@@ -1,6 +1,6 @@
 # Banyan E2E Test Image
-# Expects banyan-cli to be pre-built at test/e2e/bin/banyan-cli
-# Run: cd cmd/banyan-cli && GOWORK=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ../../test/e2e/bin/banyan-cli .
+# Expects three binaries to be pre-built at test/e2e/bin/
+# Run: see run-e2e.sh for build commands
 
 FROM debian:bookworm-slim
 
@@ -26,9 +26,11 @@ RUN curl -L https://github.com/containernetworking/plugins/releases/download/v1.
 RUN curl -L https://github.com/containerd/nerdctl/releases/download/v2.0.3/nerdctl-2.0.3-linux-amd64.tar.gz \
     | tar -xz -C /usr/local/bin nerdctl
 
-# Copy pre-built banyan-cli
+# Copy pre-built binaries
+COPY bin/banyan-engine /usr/local/bin/banyan-engine
+COPY bin/banyan-agent /usr/local/bin/banyan-agent
 COPY bin/banyan-cli /usr/local/bin/banyan-cli
-RUN chmod +x /usr/local/bin/banyan-cli
+RUN chmod +x /usr/local/bin/banyan-engine /usr/local/bin/banyan-agent /usr/local/bin/banyan-cli
 
 # Copy entrypoint scripts
 COPY scripts/engine-entrypoint.sh /entrypoint-engine.sh

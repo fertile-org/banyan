@@ -90,30 +90,45 @@ detect_arch() {
 
 # --- Install functions ---
 
-install_banyan() {
-    if ! command -v go &>/dev/null; then
-        fatal "Go is not installed. Install Go 1.24+ first: https://go.dev/dl/"
-    fi
+build_binary() {
+    local name=$1
+    local src_dir="${SCRIPT_DIR}/cmd/${name}"
 
-    info "Building banyan-cli from source..."
-
-    local src_dir="${SCRIPT_DIR}/cmd/banyan-cli"
     if [ ! -d "$src_dir" ]; then
         fatal "Source directory not found: ${src_dir}. Run this script from the banyan repo root."
     fi
+
+    info "Building ${name} from source..."
 
     local tmp
     tmp=$(mktemp)
 
     if ! (cd "$src_dir" && GOWORK=off CGO_ENABLED=0 go build -o "$tmp" .); then
         rm -f "$tmp"
-        fatal "Failed to build banyan-cli"
+        fatal "Failed to build ${name}"
     fi
 
     chmod +x "$tmp"
-    mv "$tmp" "${INSTALL_DIR}/banyan-cli"
+    mv "$tmp" "${INSTALL_DIR}/${name}"
 
-    info "banyan-cli installed to ${INSTALL_DIR}/banyan-cli (built from source)"
+    info "${name} installed to ${INSTALL_DIR}/${name} (built from source)"
+}
+
+install_banyan() {
+    if ! command -v go &>/dev/null; then
+        fatal "Go is not installed. Install Go 1.24+ first: https://go.dev/dl/"
+    fi
+
+    # Always build banyan-cli
+    build_binary "banyan-cli"
+
+    if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
+        build_binary "banyan-engine"
+    fi
+
+    if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
+        build_binary "banyan-agent"
+    fi
 }
 
 install_etcd() {
@@ -267,6 +282,13 @@ verify() {
     fi
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
+        if command -v banyan-engine &>/dev/null; then
+            info "  banyan-engine: OK"
+        else
+            error "  banyan-engine: NOT FOUND"
+            ok=false
+        fi
+
         if command -v etcd &>/dev/null; then
             info "  etcd: OK"
         else
@@ -276,6 +298,13 @@ verify() {
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
+        if command -v banyan-agent &>/dev/null; then
+            info "  banyan-agent: OK"
+        else
+            error "  banyan-agent: NOT FOUND"
+            ok=false
+        fi
+
         if command -v containerd &>/dev/null; then
             info "  containerd: OK"
         else
@@ -310,15 +339,15 @@ verify() {
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
         echo "  Start the Engine:"
-        echo "    sudo banyan-cli engine init"
-        echo "    sudo banyan-cli engine start"
+        echo "    sudo banyan-engine init"
+        echo "    sudo banyan-engine start"
         echo ""
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         echo "  Start an Agent:"
-        echo "    sudo banyan-cli agent init"
-        echo "    sudo banyan-cli agent start --node-name <node-name>"
+        echo "    sudo banyan-agent init"
+        echo "    sudo banyan-agent start --node-name <node-name>"
         echo ""
     fi
 }

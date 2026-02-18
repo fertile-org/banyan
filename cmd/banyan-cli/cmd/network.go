@@ -19,8 +19,8 @@ var networkCreateCmd = &cobra.Command{
 	Use:   "create [name] [cidr]",
 	Short: "Create a new VPC network",
 	Long:  "Create a new VPC network with optional name and CIDR",
-	Example: `  vpc-cli network create                    # Create with defaults
-  vpc-cli network create my-vpc 10.5.0.0/16 # Create with custom CIDR`,
+	Example: `  banyan-cli network create                    # Create with defaults
+  banyan-cli network create my-vpc 10.5.0.0/16 # Create with custom CIDR`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		config := vpc.NetworkConfig{
 			Name: "test-network",

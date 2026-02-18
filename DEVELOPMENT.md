@@ -5,22 +5,24 @@
 ```
 banyan/
 ├── cmd/
-│   ├── cli/           # CLI binary (user's machine/CI)
-│   ├── engine/        # Engine binary (orchestrator server)
-│   └── agent/         # Agent binary (target servers)
+│   ├── banyan-engine/ # Engine binary (control plane: etcd, registry, HTTP API)
+│   ├── banyan-agent/  # Agent binary (worker: task polling, container ops)
+│   ├── banyan-cli/    # CLI binary (thin HTTP client for deploy/down/status/logs)
+│                      # (VPC debug commands are in banyan-cli)
 ├── pkg/
-│   ├── interfaces/    # Public interfaces (Engine, Agent)
-│   └── plugin-sdk/    # Plugin SDK for community developers
+│   ├── types/         # Shared types, config, auth, helpers
+│   └── vpc/           # VPC networking library
 ├── internal/
-│   └── common/        # Private shared utilities/types
+│   └── common/        # Private shared utilities
 └── test/
     ├── unit/          # Unit tests
-    └── integration/   # Integration tests (future)
+    ├── e2e/           # End-to-end tests (Docker Compose cluster)
+    └── integration/   # Integration tests (DinD)
 ```
 
 ## Requirements
 
-- Go 1.21+
+- Go 1.24+
 
 ## Quick Start
 
@@ -43,9 +45,9 @@ make run-cli     # Test your changes
 make setup
 
 # Run applications
-make run-cli
-make run-engine  
+make run-engine
 make run-agent
+make run-cli
 
 # Run linter
 make lint        # Check code quality
@@ -70,11 +72,11 @@ For VPC networking features (Phase 3+), you need CNI plugins installed on your s
 ### Automated Installation (Recommended)
 
 ```bash
-# Build vpc-cli
+# Build all binaries
 make build
 
 # Install CNI plugins automatically (requires sudo)
-sudo bin/vpc-cli setup cni
+sudo bin/banyan-cli setup cni
 ```
 
 This installs:

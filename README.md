@@ -110,21 +110,21 @@ Or [build from source](https://feritle-banyan.vercel.app/getting-started/install
 
 ```bash
 # On your control plane server
-sudo banyan-cli engine start
+sudo banyan-engine start
 
 # On each worker server
-sudo banyan-cli agent start --node-name agent-1
+sudo banyan-agent start --node-name agent-1
 
 # From anywhere
 banyan-cli deploy -f banyan.yaml
 ```
 
-No package managers. No plugins. One binary does everything.
+Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` for workers, `banyan-cli` for deployments.
 
 ## Features
 
 - **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
-- **Single binary** — `banyan-cli` is the Engine, the Agent, and the deploy tool. Build once, copy to your servers, done.
+- **Minimal binaries** — `banyan-engine`, `banyan-agent`, and `banyan-cli`. Each does one job well.
 - **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
 - **Automatic distribution** — Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
 - **Proven foundations** — etcd for state coordination. containerd for running containers. No experimental runtimes.

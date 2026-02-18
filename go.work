@@ -1,11 +1,9 @@
 go 1.24.3
 
 use (
-	./cmd/agent
+	./cmd/banyan-agent
 	./cmd/banyan-cli
-	./cmd/cli
-	./cmd/engine
-	./cmd/vpc-cli
+	./cmd/banyan-engine
 	./internal/common
 	./pkg/agent/container
 	./pkg/agent/health
@@ -14,10 +12,9 @@ use (
 	./pkg/agent/server
 	./pkg/agent/task
 	./pkg/engine
-	./pkg/interfaces
-	./pkg/plugin-sdk
 	./pkg/shared/domain
 	./pkg/shared/infrastructure
+	./pkg/types
 	./pkg/vpc
 	./test
 )

@@ -241,7 +241,7 @@ Tests CNI runtime integration with real Docker containers.
 
 **What it tests:**
 1. Prerequisites (Docker, Flannel daemon)
-2. Building vpc-cli
+2. Building banyan-cli
 3. Creating Docker container without networking
 4. Verifying no initial networking
 5. Creating network namespace symlink
@@ -594,7 +594,7 @@ This allows testing at the Go API level instead of just CLI level.
 Start Docker: `sudo systemctl start docker`
 
 ### "Flannel daemon not running"
-Start Flannel: `sudo vpc-cli cni setup-plugin flannel`
+Start Flannel: `sudo banyan-cli cni setup-plugin flannel`
 
 ### "Permission denied"
 Use `sudo` for network operations: `sudo go run ./test/integration/vpc/run_cni_docker_integration.go`

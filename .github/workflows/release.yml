@@ -14,6 +14,13 @@ jobs:
     strategy:
       matrix:
         goarch: [amd64, arm64]
+        binary:
+          - name: banyan-engine
+            dir: cmd/banyan-engine
+          - name: banyan-agent
+            dir: cmd/banyan-agent
+          - name: banyan-cli
+            dir: cmd/banyan-cli
     steps:
       - uses: actions/checkout@v4
 
@@ -28,13 +35,13 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           GOWORK: "off"
         run: |
-          cd cmd/banyan-cli
-          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../banyan-cli-linux-${{ matrix.goarch }} .
+          cd ${{ matrix.binary.dir }}
+          go build -ldflags="-s -w -X main.version=${{ github.ref_name }}" -o ../../${{ matrix.binary.name }}-linux-${{ matrix.goarch }} .
 
       - uses: actions/upload-artifact@v4
         with:
-          name: banyan-cli-linux-${{ matrix.goarch }}
-          path: banyan-cli-linux-${{ matrix.goarch }}
+          name: ${{ matrix.binary.name }}-linux-${{ matrix.goarch }}
+          path: ${{ matrix.binary.name }}-linux-${{ matrix.goarch }}
 
   release:
     needs: build
@@ -50,13 +57,13 @@ jobs:
       - name: Generate checksums
         run: |
           cd dist
-          sha256sum banyan-cli-* > checksums.txt
+          sha256sum banyan-* > checksums.txt
 
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            dist/banyan-cli-*
+            dist/banyan-*
             dist/checksums.txt
             install.sh

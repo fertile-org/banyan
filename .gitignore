@@ -26,7 +26,8 @@ build/
 run_*_integration
 
 # CLI binaries built in repo root
-/vpc-cli
+/banyan-engine
+/banyan-agent
 /banyan-cli
 
 # IDE files

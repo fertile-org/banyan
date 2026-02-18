@@ -26,9 +26,9 @@ This command simulates or performs actual network path tracing to help diagnose
 connectivity issues between containers or between a container and external services.
 
 Examples:
-  vpc-cli debug trace 10.0.1.5 10.0.1.10 5432
-  vpc-cli debug trace 10.0.1.5 8.8.8.8 443
-  vpc-cli debug trace 10.0.1.5 10.0.2.10 22`,
+  banyan-cli debug trace 10.0.1.5 10.0.1.10 5432
+  banyan-cli debug trace 10.0.1.5 8.8.8.8 443
+  banyan-cli debug trace 10.0.1.5 10.0.2.10 22`,
 	Args: cobra.ExactArgs(3),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		fromIP := net.ParseIP(args[0])
@@ -113,8 +113,8 @@ This command diagnoses network health including IP assignment, gateway reachabil
 DNS configuration, and internet access.
 
 Examples:
-  vpc-cli debug connectivity container-001
-  vpc-cli debug connectivity my-web-app`,
+  banyan-cli debug connectivity container-001
+  banyan-cli debug connectivity my-web-app`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		containerID := args[0]
@@ -188,8 +188,8 @@ This command shows both filter and NAT table rules relevant to the IP address,
 helping diagnose firewall issues.
 
 Examples:
-  vpc-cli debug iptables 10.0.1.5
-  vpc-cli debug iptables 10.0.2.10`,
+  banyan-cli debug iptables 10.0.1.5
+  banyan-cli debug iptables 10.0.2.10`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ip := net.ParseIP(args[0])
@@ -237,8 +237,8 @@ var debugPingCmd = &cobra.Command{
 This command requires network access and will actually attempt to ping the target.
 
 Examples:
-  vpc-cli debug ping 10.0.1.5
-  vpc-cli debug ping 8.8.8.8`,
+  banyan-cli debug ping 10.0.1.5
+  banyan-cli debug ping 8.8.8.8`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ip := net.ParseIP(args[0])
@@ -270,8 +270,8 @@ var debugPortCmd = &cobra.Command{
 This command attempts to establish a TCP connection to verify port accessibility.
 
 Examples:
-  vpc-cli debug port 10.0.1.5 5432
-  vpc-cli debug port 10.0.2.10 80`,
+  banyan-cli debug port 10.0.1.5 5432
+  banyan-cli debug port 10.0.2.10 80`,
 	Args: cobra.ExactArgs(2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ip := net.ParseIP(args[0])

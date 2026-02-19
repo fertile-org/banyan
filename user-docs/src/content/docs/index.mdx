@@ -61,7 +61,7 @@ Banyan separates control and data planes for scalability and simplicity:
 │  │  Worker Node 1   │  │  Worker Node 2   │  │  Worker Node N   │           │
 │  └──────────────────┘  └──────────────────┘  └──────────────────┘           │
 │                                                                             │
-│  Optional VPC Networking (etcd only):                                       │
+│  Built-in VPC Networking (required for multi-node):                               │
 │  ┌─────────────────────────────────────────────────────────────────┐        │
 │  │  Flannel VXLAN Overlay + DNS Service Discovery                  │        │
 │  └─────────────────────────────────────────────────────────────────┘        │
@@ -74,7 +74,7 @@ Banyan separates control and data planes for scalability and simplicity:
 2. **Engine** stores deployment state and schedules tasks across available agents
 3. **Agents** poll for tasks, pull images from built-in registry, and run containers
 4. **Agents** report container health and status back to Engine
-5. **VPC Networking** (optional) creates secure cross-node communication
+5. **VPC Networking** enables secure cross-node communication with automatic service discovery
 
 ## From one server to many
 

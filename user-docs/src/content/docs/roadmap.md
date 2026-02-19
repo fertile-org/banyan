@@ -105,7 +105,31 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 8 — Dynamic Workload Rebalancing
+## Milestone 8 — Monitoring Dashboard and CLI
+
+Give operators visibility into the cluster through a web UI and CLI commands.
+
+- **CLI**: Live cluster status with per-node resource usage
+- **CLI**: Per-service metrics (replicas, throughput, error rate)
+- **CLI**: Container log streaming
+- **Dashboard**: Web UI for cluster overview
+- **Dashboard**: Deployment history and status
+- **Dashboard**: Real-time metrics and graphs
+
+---
+
+## Milestone 9 — Advanced Security
+
+Stronger authentication model for production environments.
+
+- Private key authentication for agent-to-engine connections
+- Private key authentication for CLI-to-engine and CLI-to-agent
+- Key generation and distribution tooling
+- Certificate rotation support
+
+---
+
+## Milestone 10 — Dynamic Workload Rebalancing
 
 Automatically redistribute services across nodes based on actual resource usage and node capacity.
 
@@ -119,30 +143,6 @@ Automatically redistribute services across nodes based on actual resource usage 
 - **Rollback support**: Revert failed migrations back to original node
 
 This milestone enables the cluster to self-optimize: services needing more resources are automatically moved to nodes where they can thrive.
-
----
-
-## Milestone 9 — Monitoring Dashboard and CLI
-
-Give operators visibility into the cluster through a web UI and CLI commands.
-
-- **CLI**: Live cluster status with per-node resource usage
-- **CLI**: Per-service metrics (replicas, throughput, error rate)
-- **CLI**: Container log streaming
-- **Dashboard**: Web UI for cluster overview
-- **Dashboard**: Deployment history and status
-- **Dashboard**: Real-time metrics and graphs
-
----
-
-## Milestone 10 — Advanced Security
-
-Stronger authentication model for production environments.
-
-- Private key authentication for agent-to-engine connections
-- Private key authentication for CLI-to-engine and CLI-to-agent
-- Key generation and distribution tooling
-- Certificate rotation support
 
 ---
 

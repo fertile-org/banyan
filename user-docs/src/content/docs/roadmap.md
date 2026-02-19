@@ -71,6 +71,7 @@ Smarter task distribution based on node resources instead of simple round-robin.
 - Agent reports node resource usage (CPU, memory, disk) to Engine via etcd
 - Engine selects the node with the most available resources when scheduling new tasks
 - Resource requests in banyan.yaml: services can declare CPU and memory requirements (e.g. `cpus: 2`, `memory: 4g`)
+- **Default resource requests**: Services without explicit resource requirements get sensible defaults (512MB RAM, 1 CPU) — configurable via engine flags
 - Engine validates that target node has sufficient resources before assigning a task
 - Engine rejects deployments that exceed total cluster capacity
 
@@ -104,7 +105,24 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 8 — Monitoring Dashboard and CLI
+## Milestone 8 — Dynamic Workload Rebalancing
+
+Automatically redistribute services across nodes based on actual resource usage and node capacity.
+
+- **Resource monitoring**: Engine tracks actual CPU/memory usage per container (from metrics collected in Milestone 4)
+- **Capacity detection**: Identify over-utilized nodes (>80% resources) and under-utilized nodes
+- **Service migration**: Gracefully move containers from crowded nodes to nodes with available capacity
+- **Migration strategy**: Drain-and-restart for stateless services (stop on source, start on destination)
+- **Stateful handling**: Exclude databases and stateful services from auto-migration (manual rebalancing only)
+- **Threshold configuration**: Configurable triggers (e.g., migrate when node >90% full or container is resource-starved)
+- **Safety checks**: Verify destination node has sufficient capacity before migration
+- **Rollback support**: Revert failed migrations back to original node
+
+This milestone enables the cluster to self-optimize: services needing more resources are automatically moved to nodes where they can thrive.
+
+---
+
+## Milestone 9 — Monitoring Dashboard and CLI
 
 Give operators visibility into the cluster through a web UI and CLI commands.
 
@@ -117,7 +135,7 @@ Give operators visibility into the cluster through a web UI and CLI commands.
 
 ---
 
-## Milestone 9 — Advanced Security
+## Milestone 10 — Advanced Security
 
 Stronger authentication model for production environments.
 
@@ -128,7 +146,7 @@ Stronger authentication model for production environments.
 
 ---
 
-## Milestone 10 — Advanced Metrics and Dashboard Enhancements
+## Milestone 11 — Advanced Metrics and Dashboard Enhancements
 
 Deeper observability and richer operational tooling.
 

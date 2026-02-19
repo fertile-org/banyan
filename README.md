@@ -51,7 +51,6 @@ services:
       - "8080:8080"
     environment:
       - DB_HOST=db
-      - DB_PORT=5432
 
   db:
     image: postgres:15-alpine
@@ -67,8 +66,6 @@ services:
     build: ./web
     ports:
       - "80:80"
-    depends_on:
-      - api
 
   api:
     build: ./api
@@ -77,22 +74,13 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=my-app-db-0
-      - DB_PORT=5432
-    depends_on:
-      - db
+      - DB_HOST=db
 
   db:
     image: postgres:15-alpine
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=banyan
-      - POSTGRES_PASSWORD=secret
-      - POSTGRES_DB=app
 ```
 
-Same `services`. Same `image`. Same `ports`. Same `environment`. Banyan spreads them across your servers automatically — and `deploy.replicas` lets you run multiple copies when you need them.
+Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and `deploy.replicas`, and Banyan spreads them across your servers automatically.
 
 ## Install
 

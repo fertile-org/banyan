@@ -54,12 +54,15 @@ Secure gRPC communication between CLI, Engine, and Agents.
 
 ## Milestone 4 — Metrics Collection
 
-Collect and store resource metrics from every node and container.
+Collect and expose resource metrics from every node and container in Prometheus-compatible format.
 
-- Agent-side metric collection: CPU, memory, disk usage
-- Container-level metrics: per-container CPU, memory, restart count
-- Request throughput metrics per service
-- Metric storage in etcd (or lightweight time-series store)
+- **Prometheus-compatible metrics**: Expose `/metrics` endpoint with Prometheus format (no custom metric format)
+- Agent-side metric collection: CPU, memory, disk usage per container
+- Container-level metrics: per-container CPU%, memory usage, restart count
+- Node-level metrics: total CPU, memory, disk usage per agent
+- Service-level metrics: request throughput, error rate per service
+- **CLI monitoring interface**: Terminal UI dashboard (similar to `htop`/`pm2`) showing live metrics directly in CLI
+- Metric storage in etcd for short-term retention
 - Metric retrieval API for other components to consume
 
 ---
@@ -105,16 +108,18 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 8 — Monitoring Dashboard and CLI
+## Milestone 8 — Monitoring Dashboard
 
-Give operators visibility into the cluster through a web UI and CLI commands.
+Web-based dashboard for cluster visualization and monitoring.
 
-- **CLI**: Live cluster status with per-node resource usage
-- **CLI**: Per-service metrics (replicas, throughput, error rate)
-- **CLI**: Container log streaming
-- **Dashboard**: Web UI for cluster overview
-- **Dashboard**: Deployment history and status
-- **Dashboard**: Real-time metrics and graphs
+- **Dashboard**: Cluster overview with all nodes and services
+- **Dashboard**: Per-node resource usage graphs (CPU, memory, disk)
+- **Dashboard**: Per-service metrics (replicas, throughput, error rate)
+- **Dashboard**: Deployment history and status timeline
+- **Dashboard**: Real-time metrics and live updates
+- **Dashboard**: Container log viewer with filtering
+
+Note: CLI monitoring interface (terminal UI) is delivered in Milestone 4.
 
 ---
 

@@ -124,10 +124,11 @@ Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` fo
 ## Features
 
 - **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
-- **Minimal binaries** — `banyan-engine`, `banyan-agent`, and `banyan-cli`. Each does one job well.
+- **Single-binary components** — Three small, focused binaries. Download, run, done. No complex setup or configuration management required.
 - **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
-- **Automatic distribution** — Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
-- **Proven foundations** — Embedded data store (BadgerDB) with zero external dependencies. Optional pluggable data store (Redis or etcd). containerd for running containers.
+- **Automatic distribution** — Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
+- **Built-in VPC** — Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
+- **Proven foundations** — Built on battle-tested technologies: BadgerDB, etcd, containerd, gRPC, and Prometheus metrics (coming soon).
 
 ## Is Banyan right for you?
 

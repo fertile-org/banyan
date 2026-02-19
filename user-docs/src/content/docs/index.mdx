@@ -3,7 +3,7 @@ title: Docker Compose syntax that scales
 description: Docker Compose syntax that scales. Deploy containers across multiple servers with a YAML file you already know how to write.
 template: splash
 hero:
-  tagline: Docker Compose syntax that scales.
+  tagline: Bridges the gap between “docker compose up” and production orchestration — same syntax, distributed execution.
   image:
     file: ../../assets/logo.png
   actions:
@@ -18,56 +18,9 @@ hero:
 
 import { Card, CardGrid, Aside } from "@astrojs/starlight/components";
 
-<Aside type="caution" title="Under heavy development">
+<Aside type="caution" title="Under experiment">
   Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 </Aside>
-
-## Architecture
-
-Banyan separates control and data planes for scalability and simplicity:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Banyan Architecture                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────────┐                                                        │
-│  │  banyan-cli      │  ← Developer/DevOps                                   │
-│  │  (Client Tool)   │                                                        │
-│  └────────┬─────────┘                                                        │
-│           │ gRPC                                                             │
-│           │ deploy/status/logs                                               │
-│           ▼                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    banyan-engine (Control Plane)                     │  │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐      │  │
-│  │  │  gRPC      │  │ Scheduler  │  │   Store    │  │  Registry  │      │  │
-│  │  │  Server    │  │            │  │  (etcd)    │  │  (Built-in │      │  │
-│  │  │            │  │            │  │            │  │    OCI)    │      │  │
-│  │  │            │  │            │  │            │  │            │      │  │
-│  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘      │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│           │                                                                   │
-│           │ gRPC                                                              │
-│           │ task assignment                                                   │
-│           │ health monitoring                                                 │
-│           ▼                                                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐           │
-│  │  banyan-agent    │  │  banyan-agent    │  │  banyan-agent    │           │
-│  │  ┌────────────┐  │  │  ┌────────────┐  │  │  ┌────────────┐  │           │
-│  │  │containerd  │  │  │  │containerd  │  │  │  │containerd  │  │           │
-│  │  │+ nerdctl   │  │  │  │+ nerdctl   │  │  │  │+ nerdctl   │  │           │
-│  │  └────────────┘  │  │  └────────────┘  │  │  └────────────┘  │           │
-│  │  Worker Node 1   │  │  Worker Node 2   │  │  Worker Node N   │           │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘           │
-│                                                                             │
-│  Built-in VPC Networking (required for multi-node):                               │
-│  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  Flannel VXLAN Overlay + DNS Service Discovery                  │        │
-│  └─────────────────────────────────────────────────────────────────┘        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
 
 ## From one server to many
 
@@ -139,6 +92,51 @@ banyan-cli deploy -f banyan.yaml
 ```
 
 No package managers. No plugins. Three focused binaries — engine, agent, and CLI.
+
+## Architecture
+
+```mermaid
+graph TD
+    CLI[fa:fa-terminal banyan-cli] -->|gRPC| Engine
+
+    subgraph Engine[fa:fa-server banyan-engine]
+        Store[(fa:fa-database etcd)]
+        Registry[fa:fa-box-open Image Registry]
+    end
+
+    Engine -->|gRPC| Agent1
+    Engine -->|gRPC| Agent2
+    Engine -->|gRPC| AgentN
+
+    subgraph VPC[fa:fa-network-wired Banyan VPC]
+        subgraph A1[Worker 1]
+            Agent1[fa:fa-cube banyan-agent]
+            C1{{fa:fa-box container: web-0}}
+            C2{{fa:fa-box container: api-0}}
+            Agent1 ~~~ C1
+            Agent1 ~~~ C2
+        end
+
+        subgraph A2[Worker 2]
+            Agent2[fa:fa-cube banyan-agent]
+            C3{{fa:fa-box container: api-1}}
+            C4{{fa:fa-box container: db-0}}
+            Agent2 ~~~ C3
+            Agent2 ~~~ C4
+        end
+
+        subgraph AN[Worker N]
+            AgentN[fa:fa-cube banyan-agent]
+            C5{{fa:fa-box container: api-2}}
+            AgentN ~~~ C5
+        end
+    end
+
+    CLI ~~~ Prom(fa:fa-chart-line Prometheus-compatible)
+    Engine -.-|/metrics| Prom
+```
+
+**CLI** sends commands to the **Engine** (control plane), which stores state in **etcd** and schedules work across **Agents** (workers). All communication over gRPC with password auth. Metrics are exposed in Prometheus format for monitoring.
 
 <CardGrid>
   <Card title="Familiar syntax" icon="document">

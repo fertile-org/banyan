@@ -9,21 +9,20 @@ This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you j
 
 ## Architecture
 
-```
-                    +-----------+
-                    |  Engine   |  (control plane)
-                    |  + store  |
-                    |  + gRPC   |
-                    +-----+-----+
-                          |
-              +-----------+-----------+
-              |     gRPC (:50051)     |
-              |                       |
-        +-----+-----+          +-----+-----+
-        |  Worker 1  |          |  Worker 2  |
-        |  Agent     |          |  Agent     |
-        |  containerd|          |  containerd|
-        +------------+          +------------+
+```mermaid
+graph TD
+    Engine[fa:fa-server banyan-engine] -->|gRPC :50051| W1
+    Engine -->|gRPC :50051| W2
+
+    subgraph W1[Worker 1]
+        Agent1[fa:fa-cube banyan-agent]
+        C1{{fa:fa-box containers}}
+    end
+
+    subgraph W2[Worker 2]
+        Agent2[fa:fa-cube banyan-agent]
+        C2{{fa:fa-box containers}}
+    end
 ```
 
 The Engine orchestrates. Workers run containers. All communication happens over gRPC with password authentication.

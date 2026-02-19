@@ -24,54 +24,7 @@
 
 ---
 
-## Architecture
-
-Banyan separates control and data planes for scalability and simplicity:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                          Banyan Architecture                                 │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────────┐                                                        │
-│  │  banyan-cli      │  ← Developer/DevOps                                   │
-│  │  (Client Tool)   │                                                        │
-│  └────────┬─────────┘                                                        │
-│           │ gRPC                                                             │
-│           │ deploy/status/logs                                               │
-│           ▼                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    banyan-engine (Control Plane)                     │  │
-│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐      │  │
-│  │  │  gRPC      │  │ Scheduler  │  │   Store    │  │  Registry  │      │  │
-│  │  │  Server    │  │            │  │  (Badger/  │  │  (Built-in │      │  │
-│  │  │            │  │            │  │   Redis/   │  │    OCI)    │      │  │
-│  │  │            │  │            │  │   etcd)    │  │            │      │  │
-│  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘      │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│           │                                                                   │
-│           │ gRPC                                                              │
-│           │ task assignment                                                   │
-│           │ health monitoring                                                 │
-│           ▼                                                                  │
-│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐           │
-│  │  banyan-agent    │  │  banyan-agent    │  │  banyan-agent    │           │
-│  │  ┌────────────┐  │  │  ┌────────────┐  │  │  ┌────────────┐  │           │
-│  │  │containerd  │  │  │  │containerd  │  │  │  │containerd  │  │           │
-│  │  │+ nerdctl   │  │  │  │+ nerdctl   │  │  │  │+ nerdctl   │  │           │
-│  │  └────────────┘  │  │  └────────────┘  │  │  └────────────┘  │           │
-│  │  Worker Node 1   │  │  Worker Node 2   │  │  Worker Node N   │           │
-│  └──────────────────┘  └──────────────────┘  └──────────────────┘           │
-│                                                                             │
-│  Built-in VPC Networking (required for multi-node):                               │
-│  ┌─────────────────────────────────────────────────────────────────┐        │
-│  │  Flannel VXLAN Overlay + DNS Service Discovery                  │        │
-│  └─────────────────────────────────────────────────────────────────┘        │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-> **Under heavy development.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
+> **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
 ## From one server to many
 
@@ -156,6 +109,51 @@ banyan-cli deploy -f banyan.yaml
 
 Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` for workers, `banyan-cli` for deployments.
 
+## Architecture
+
+```mermaid
+graph TD
+    CLI[fa:fa-terminal banyan-cli] -->|gRPC| Engine
+
+    subgraph Engine[fa:fa-server banyan-engine]
+        Store[(fa:fa-database etcd)]
+        Registry[fa:fa-box-open Image Registry]
+    end
+
+    Engine -->|gRPC| Agent1
+    Engine -->|gRPC| Agent2
+    Engine -->|gRPC| AgentN
+
+    subgraph VPC[fa:fa-network-wired Banyan VPC]
+        subgraph A1[Worker 1]
+            Agent1[fa:fa-cube banyan-agent]
+            C1{{fa:fa-box container: web-0}}
+            C2{{fa:fa-box container: api-0}}
+            Agent1 ~~~ C1
+            Agent1 ~~~ C2
+        end
+
+        subgraph A2[Worker 2]
+            Agent2[fa:fa-cube banyan-agent]
+            C3{{fa:fa-box container: api-1}}
+            C4{{fa:fa-box container: db-0}}
+            Agent2 ~~~ C3
+            Agent2 ~~~ C4
+        end
+
+        subgraph AN[Worker N]
+            AgentN[fa:fa-cube banyan-agent]
+            C5{{fa:fa-box container: api-2}}
+            AgentN ~~~ C5
+        end
+    end
+
+    CLI ~~~ Prom(fa:fa-chart-line Prometheus-compatible)
+    Engine -.-|/metrics| Prom
+```
+
+**CLI** sends commands to the **Engine** (control plane), which stores state in **etcd** and schedules work across **Agents** (workers). All communication over gRPC with password auth. Metrics are exposed in Prometheus format for monitoring.
+
 ## Features
 
 - **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
@@ -163,7 +161,7 @@ Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` fo
 - **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
 - **Automatic distribution** — Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
 - **Built-in VPC** — Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
-- **Proven foundations** — Built on battle-tested technologies: BadgerDB, etcd, containerd, gRPC, and Prometheus metrics (coming soon).
+- **Proven foundations** — Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
 
 ## Is Banyan right for you?
 

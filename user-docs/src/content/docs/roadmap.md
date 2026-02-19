@@ -61,7 +61,7 @@ Collect and expose resource metrics from every node and container in Prometheus-
 - Container-level metrics: per-container CPU%, memory usage, restart count
 - Node-level metrics: total CPU, memory, disk usage per agent
 - Service-level metrics: request throughput, error rate per service
-- **CLI monitoring interface**: Terminal UI dashboard (similar to `htop`/`pm2`) showing live metrics directly in CLI
+- **CLI monitoring interface**: Terminal UI dashboard (use https://github.com/charmbracelet/bubbletea) (similar to `htop`/`pm2`) showing live metrics directly in CLI
 - Metric storage in etcd for short-term retention
 - Metric retrieval API for other components to consume
 

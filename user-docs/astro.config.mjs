@@ -1,9 +1,13 @@
 import { defineConfig } from "astro/config";
+import mermaid from "astro-mermaid";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
   site: "https://getbanyan.dev",
   integrations: [
+    mermaid({
+      theme: "forest",
+    }),
     starlight({
       title: "Banyan",
       description: "Docker Compose syntax that scales.",

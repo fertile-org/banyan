@@ -76,7 +76,22 @@ Smarter task distribution based on node resources instead of simple round-robin.
 
 ---
 
-## Milestone 6 — Auto-Scaling and Redeployment
+## Milestone 6 — Multi-Engine High Availability
+
+Multiple active engine nodes share workload for high availability and horizontal scaling.
+
+- **Active-active engines**: Any engine can handle CLI requests and schedule tasks
+- **etcd coordination**: Task claiming via Compare-And-Swap to prevent duplication
+- **Distributed registry**: Index-based lookup so agents pull images from the correct engine
+- **Optimistic locking**: Concurrent deployment updates are serialized
+- **Session state in etcd**: Agents can reconnect to any engine
+- **Client load balancing**: CLI connects to any available engine
+
+See [Multi-Engine HA Design](https://github.com/fertile-org/banyan/tree/main/docs/designs/multi-engine-ha.md) for detailed architecture.
+
+---
+
+## Milestone 7 — Auto-Scaling and Redeployment
 
 Scale services based on metrics and support zero-downtime updates.
 
@@ -89,7 +104,7 @@ Scale services based on metrics and support zero-downtime updates.
 
 ---
 
-## Milestone 7 — Monitoring Dashboard and CLI
+## Milestone 8 — Monitoring Dashboard and CLI
 
 Give operators visibility into the cluster through a web UI and CLI commands.
 
@@ -102,7 +117,7 @@ Give operators visibility into the cluster through a web UI and CLI commands.
 
 ---
 
-## Milestone 8 — Advanced Security
+## Milestone 9 — Advanced Security
 
 Stronger authentication model for production environments.
 
@@ -113,7 +128,7 @@ Stronger authentication model for production environments.
 
 ---
 
-## Milestone 9 — Advanced Metrics and Dashboard Enhancements
+## Milestone 10 — Advanced Metrics and Dashboard Enhancements
 
 Deeper observability and richer operational tooling.
 

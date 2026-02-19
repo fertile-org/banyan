@@ -6,7 +6,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/storage"
 )
 
 // ServiceInstance represents a container instance of a service

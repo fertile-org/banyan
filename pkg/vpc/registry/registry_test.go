@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/storage"
 )
 
 func TestServiceRegistry_PutService(t *testing.T) {

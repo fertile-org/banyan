@@ -12,7 +12,7 @@ This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you j
 ```
                     +-----------+
                     |  Engine   |  (control plane)
-                    |  + etcd   |
+                    |  + store  |
                     |  + gRPC   |
                     +-----+-----+
                           |
@@ -32,7 +32,7 @@ The Engine orchestrates. Workers run containers. All communication happens over 
 
 Install the appropriate binaries on each server. See [Installation](/getting-started/installation/).
 
-- **Engine node**: `banyan-engine`, `banyan-cli`, etcd
+- **Engine node**: `banyan-engine`, `banyan-cli` (embedded BadgerDB store — no external dependency by default)
 - **Worker nodes**: `banyan-agent`, containerd, nerdctl
 - **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 

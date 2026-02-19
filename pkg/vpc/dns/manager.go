@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/fertile-org/banyan/pkg/vpc"
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/storage"
 )
 
 // hostnameRegex validates DNS hostnames (RFC 1123)

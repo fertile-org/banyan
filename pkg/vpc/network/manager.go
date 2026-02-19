@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/vpc"
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
+	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/google/uuid"
 )
 

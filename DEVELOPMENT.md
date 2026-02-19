@@ -5,7 +5,7 @@
 ```
 banyan/
 ├── cmd/
-│   ├── banyan-engine/ # Engine binary (control plane: etcd, gRPC server, scheduling)
+│   ├── banyan-engine/ # Engine binary (control plane: data store, gRPC server, scheduling)
 │   ├── banyan-agent/  # Agent binary (worker: gRPC client, task polling, container ops)
 │   ├── banyan-cli/    # CLI binary (gRPC client for deploy/down/status/logs)
 │                      # (VPC debug commands are in banyan-cli)

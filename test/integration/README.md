@@ -572,7 +572,7 @@ You can directly import and use VPC packages in tests:
 ```go
 import (
     "github.com/fertile-org/banyan/pkg/vpc/cni"
-    "github.com/fertile-org/banyan/pkg/vpc/storage"
+    "github.com/fertile-org/banyan/pkg/storage"
 )
 
 func runTest(ctx context.Context, p *helpers.Printer) int {

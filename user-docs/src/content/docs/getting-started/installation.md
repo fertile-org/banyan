@@ -31,7 +31,7 @@ The script installs:
 
 | Role | What gets installed |
 |------|-------------------|
-| Engine | `banyan-engine`, `banyan-cli`, etcd |
+| Engine | `banyan-engine`, `banyan-cli` (BadgerDB is embedded — no external store needed by default) |
 | Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl, CNI plugins, BuildKit |
 
 Supported distros: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux. Architectures: x86_64, ARM64.
@@ -73,10 +73,22 @@ scp banyan-engine banyan-cli user@engine-server:/usr/local/bin/
 scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 ```
 
-When building from source, you still need to install dependencies on each node manually:
+When building from source, you still need to install runtime dependencies on each node manually:
 
-- **Engine node**: etcd (`sudo apt-get install etcd-server` on Debian/Ubuntu)
+- **Engine node**: No external store needed — BadgerDB is embedded by default. If you choose Redis or etcd as the backend, install them separately (see [Store Backend](#store-backend)).
 - **Worker nodes**: containerd, nerdctl, BuildKit (see the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands)
+
+### Store backend
+
+The Engine needs a key-value store. **BadgerDB is the default** — it's embedded in the binary, requires no external process, and persists data to disk.
+
+| Backend | Install | When to use |
+|---------|---------|-------------|
+| BadgerDB (default) | Nothing to install — embedded in the binary | Recommended for most setups. Zero dependencies. |
+| Redis | `sudo apt-get install redis-server` | If you already run Redis, or prefer a network-accessible store. |
+| etcd | `sudo apt-get install etcd-server` | If you already run etcd, or need VPC networking (Flannel requires etcd). |
+
+You choose the backend during `banyan-engine init`. For BadgerDB, no additional configuration is needed. For Redis or etcd, you must install and run the server yourself, then provide its address during init (e.g., `localhost:6379` for Redis, `http://localhost:2379` for etcd).
 
 ## Verify
 

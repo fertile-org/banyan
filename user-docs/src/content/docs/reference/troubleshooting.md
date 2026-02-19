@@ -7,13 +7,25 @@ sidebar:
 
 ## Engine
 
-### "etcd not found"
+### Store backend issues
 
-The Engine requires etcd to be installed.
+The Engine uses **BadgerDB** by default — an embedded store that requires no external process. If you've configured Redis or etcd as your backend instead:
+
+**"failed to connect to redis"** — Ensure your Redis server is running and reachable at the configured address:
+
+```bash
+sudo apt-get install redis-server   # Debian/Ubuntu
+sudo systemctl start redis-server
+```
+
+**"failed to connect to etcd"** — Ensure your etcd server is running and reachable:
 
 ```bash
 sudo apt-get install etcd-server    # Debian/Ubuntu
+sudo systemctl start etcd
 ```
+
+When using Redis or etcd, you are responsible for running and managing these services. You choose the backend during `banyan-engine init`. See [Store Backend](/getting-started/installation/#store-backend) for details. To switch back to BadgerDB (no external dependencies), re-run `banyan-engine init` and choose `badger`.
 
 ### Engine starts but agents cannot connect
 
@@ -112,7 +124,7 @@ Banyan deploys containers but does not manage application-level networking betwe
 
 ### Permission errors
 
-Engine and Agent commands need root access because they manage system services (etcd, containerd):
+Engine and Agent commands need root access because they manage system services (data store, containerd):
 
 ```bash
 sudo banyan-engine start
@@ -125,7 +137,9 @@ The `banyan-cli deploy` and `banyan-cli status` commands do not require root (bu
 
 Engine and Agent run in the foreground and print logs to stdout. Check the terminal where they are running.
 
-Etcd logs are written to the file specified by `--etcd-log-file` (default: `/var/log/banyan-etcd.log`).
+Store backend logs:
+- BadgerDB: Logs are suppressed by default (embedded, no separate log file).
+- Redis/etcd: Check the logs of your externally managed Redis or etcd service.
 
 ### Stopping containers manually
 

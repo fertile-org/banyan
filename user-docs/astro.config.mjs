@@ -2,7 +2,7 @@ import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
-  site: "https://feritle-banyan.vercel.app",
+  site: "https://getbanyan.dev",
   integrations: [
     starlight({
       title: "Banyan",
@@ -32,7 +32,7 @@ export default defineConfig({
           tag: "meta",
           attrs: {
             property: "og:image",
-            content: "https://feritle-banyan.vercel.app/og-image.png",
+            content: "https://getbanyan.dev/og-image.png",
           },
         },
         {

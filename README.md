@@ -16,9 +16,9 @@
 <p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
 
 <p align="center">
-  <a href="https://feritle-banyan.vercel.app/">Documentation</a> &middot;
-  <a href="https://feritle-banyan.vercel.app/getting-started/quickstart/">Quickstart</a> &middot;
-  <a href="https://feritle-banyan.vercel.app/roadmap/">Roadmap</a> &middot;
+  <a href="https://getbanyan.dev/">Documentation</a> &middot;
+  <a href="https://getbanyan.dev/getting-started/quickstart/">Quickstart</a> &middot;
+  <a href="https://getbanyan.dev/roadmap/">Roadmap</a> &middot;
   <a href="./DEVELOPMENT.md">Development</a>
 </p>
 
@@ -92,7 +92,7 @@ curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh |
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role agent
 ```
 
-Or [build from source](https://feritle-banyan.vercel.app/getting-started/installation/).
+Or [build from source](https://getbanyan.dev/getting-started/installation/).
 
 ## Three commands to a running cluster
 
@@ -128,18 +128,18 @@ Banyan is built for teams who:
 
 ## Documentation
 
-Full documentation is available at **[feritle-banyan.vercel.app](https://feritle-banyan.vercel.app/)**.
+Full documentation is available at **[getbanyan.dev](https://getbanyan.dev/)**.
 
-- [Installation](https://feritle-banyan.vercel.app/getting-started/installation/)
-- [Quickstart](https://feritle-banyan.vercel.app/getting-started/quickstart/)
-- [Manifest Reference](https://feritle-banyan.vercel.app/guides/manifest-reference/)
-- [Multi-Node Setup](https://feritle-banyan.vercel.app/guides/multi-node/)
-- [CLI Reference](https://feritle-banyan.vercel.app/reference/cli/)
-- [Troubleshooting](https://feritle-banyan.vercel.app/reference/troubleshooting/)
+- [Installation](https://getbanyan.dev/getting-started/installation/)
+- [Quickstart](https://getbanyan.dev/getting-started/quickstart/)
+- [Manifest Reference](https://getbanyan.dev/guides/manifest-reference/)
+- [Multi-Node Setup](https://getbanyan.dev/guides/multi-node/)
+- [CLI Reference](https://getbanyan.dev/reference/cli/)
+- [Troubleshooting](https://getbanyan.dev/reference/troubleshooting/)
 
 ## Roadmap
 
-See the [Roadmap](https://feritle-banyan.vercel.app/roadmap/) for what's next — metrics, auto-scaling, monitoring, and more.
+See the [Roadmap](https://getbanyan.dev/roadmap/) for what's next — metrics, auto-scaling, monitoring, and more.
 
 ## Contributing
 

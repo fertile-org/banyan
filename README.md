@@ -24,6 +24,62 @@
 
 ---
 
+## Architecture
+
+Banyan separates control and data planes for scalability and simplicity:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                          Banyan Architecture                                 │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────────┐                                                        │
+│  │  banyan-cli      │  ← Developer/DevOps                                   │
+│  │  (Client Tool)   │                                                        │
+│  └────────┬─────────┘                                                        │
+│           │ gRPC                                                             │
+│           │ deploy/status/logs                                               │
+│           ▼                                                                  │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    banyan-engine (Control Plane)                     │  │
+│  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐      │  │
+│  │  │  gRPC      │  │ Scheduler  │  │   Store    │  │  Registry  │      │  │
+│  │  │  Server    │  │            │  │  (Badger/  │  │  (Built-in │      │  │
+│  │  │            │  │            │  │   Redis/   │  │    OCI)    │      │  │
+│  │  │            │  │            │  │   etcd)    │  │            │      │  │
+│  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘      │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│           │                                                                   │
+│           │ gRPC                                                              │
+│           │ task assignment                                                   │
+│           │ health monitoring                                                 │
+│           ▼                                                                  │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌──────────────────┐           │
+│  │  banyan-agent    │  │  banyan-agent    │  │  banyan-agent    │           │
+│  │  ┌────────────┐  │  │  ┌────────────┐  │  │  ┌────────────┐  │           │
+│  │  │containerd  │  │  │  │containerd  │  │  │  │containerd  │  │           │
+│  │  │+ nerdctl   │  │  │  │+ nerdctl   │  │  │  │+ nerdctl   │  │           │
+│  │  └────────────┘  │  │  └────────────┘  │  │  └────────────┘  │           │
+│  │  Worker Node 1   │  │  Worker Node 2   │  │  Worker Node N   │           │
+│  └──────────────────┘  └──────────────────┘  └──────────────────┘           │
+│                                                                             │
+│  Optional VPC Networking (etcd only):                                       │
+│  ┌─────────────────────────────────────────────────────────────────┐        │
+│  │  Flannel VXLAN Overlay + DNS Service Discovery                  │        │
+│  └─────────────────────────────────────────────────────────────────┘        │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+**How it works:**
+1. **CLI** submits `banyan.yaml` manifest to Engine via gRPC
+2. **Engine** stores deployment state and schedules tasks across available agents
+3. **Agents** poll for tasks, pull images from built-in registry, and run containers
+4. **Agents** report container health and status back to Engine
+5. **VPC Networking** (optional) creates secure cross-node communication
+
+---
+
 > **Under heavy development.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
 ## From one server to many

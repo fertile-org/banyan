@@ -19,13 +19,18 @@ import (
 
 // Options configures the Engine.
 type Options struct {
-	StoreBackend string // "badger", "redis", "etcd"
+	StoreBackend string // "etcd" only
 	StoreAddress string // resolved address for the store backend
 	VPCCIDR      string
 	RegistryPort string
 	GRPCPort     string
 	Password     string
 	DataDir      string
+	EtcdUsername string // etcd RBAC username
+	EtcdPassword string // etcd RBAC password
+	EtcdCertFile string // client certificate for mTLS
+	EtcdKeyFile  string // client key for mTLS
+	EtcdCAFile   string // CA certificate for server verification
 }
 
 // Engine is the Banyan control plane.
@@ -38,7 +43,15 @@ type Engine struct {
 
 // New creates a new Engine. It opens the store and sets up authentication.
 func New(opts *Options) (*Engine, error) {
-	store, err := storage.NewStore(opts.StoreBackend, opts.StoreAddress, "/banyan")
+	store, err := storage.NewStoreWithOptions(&storage.EtcdOptions{
+		Endpoints: []string{opts.StoreAddress},
+		Prefix:    "/banyan",
+		Username:  opts.EtcdUsername,
+		Password:  opts.EtcdPassword,
+		CertFile:  opts.EtcdCertFile,
+		KeyFile:   opts.EtcdKeyFile,
+		CAFile:    opts.EtcdCAFile,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s: %w", opts.StoreBackend, err)
 	}

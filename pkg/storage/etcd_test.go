@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -403,16 +405,103 @@ func TestEtcdStore_Watch(t *testing.T) {
 
 // TestEtcdStoreNoEndpoints tests error when no endpoints provided
 func TestEtcdStoreNoEndpoints(t *testing.T) {
-	_, err := NewEtcdStore([]string{}, "/test/")
+	_, err := NewEtcdStore(&EtcdOptions{Endpoints: []string{}, Prefix: "/test/"})
 	if err == nil {
 		t.Error("Expected error when creating store with no endpoints")
 	}
 }
 
+func TestBuildTLSConfig(t *testing.T) {
+	t.Run("all empty returns nil", func(t *testing.T) {
+		cfg, err := buildTLSConfig("", "", "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg != nil {
+			t.Error("expected nil TLS config when no files provided")
+		}
+	})
+
+	t.Run("cert without key returns error", func(t *testing.T) {
+		_, err := buildTLSConfig("/some/cert.pem", "", "")
+		if err == nil {
+			t.Error("expected error when cert provided without key")
+		}
+	})
+
+	t.Run("key without cert returns error", func(t *testing.T) {
+		_, err := buildTLSConfig("", "/some/key.pem", "")
+		if err == nil {
+			t.Error("expected error when key provided without cert")
+		}
+	})
+
+	t.Run("invalid cert/key pair returns error", func(t *testing.T) {
+		certFile := filepath.Join(t.TempDir(), "cert.pem")
+		keyFile := filepath.Join(t.TempDir(), "key.pem")
+		os.WriteFile(certFile, []byte("not a cert"), 0o600)
+		os.WriteFile(keyFile, []byte("not a key"), 0o600)
+
+		_, err := buildTLSConfig(certFile, keyFile, "")
+		if err == nil {
+			t.Error("expected error for invalid cert/key pair")
+		}
+	})
+
+	t.Run("missing CA file returns error", func(t *testing.T) {
+		_, err := buildTLSConfig("", "", "/nonexistent/ca.pem")
+		if err == nil {
+			t.Error("expected error for missing CA file")
+		}
+	})
+
+	t.Run("invalid CA PEM returns error", func(t *testing.T) {
+		caFile := filepath.Join(t.TempDir(), "ca.pem")
+		os.WriteFile(caFile, []byte("not a cert"), 0o600)
+
+		_, err := buildTLSConfig("", "", caFile)
+		if err == nil {
+			t.Error("expected error for invalid CA PEM")
+		}
+	})
+
+	t.Run("valid CA file returns config with RootCAs", func(t *testing.T) {
+		// Use a self-signed CA cert for testing
+		caFile := filepath.Join(t.TempDir(), "ca.pem")
+		os.WriteFile(caFile, testCACert, 0o600)
+
+		cfg, err := buildTLSConfig("", "", caFile)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg == nil {
+			t.Fatal("expected non-nil TLS config")
+		}
+		if cfg.RootCAs == nil {
+			t.Error("expected RootCAs to be set")
+		}
+	})
+}
+
+// testCACert is a self-signed CA cert for testing purposes only.
+var testCACert = []byte(`-----BEGIN CERTIFICATE-----
+MIIBdzCCAR2gAwIBAgIUJzNoNFfYaCKRm2XyPxWhyWkHE9QwCgYIKoZIzj0EAwIw
+ETEPMA0GA1UEAwwGdGVzdGNhMB4XDTI2MDIxOTE2MDk0OVoXDTM2MDIxNzE2MDk0
+OVowETEPMA0GA1UEAwwGdGVzdGNhMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE
+MUraMNnhBu00OS72uXkUgGBbYK2Abr3Yl5wsGi/MlLWY+3uZRdIF4GjJpDnzZ1vP
+g9xnM9C+W4vQfZiqHlHtqaNTMFEwHQYDVR0OBBYEFPa8YE9Ta7Hox8XNszjgG7I9
+CbWHMB8GA1UdIwQYMBaAFPa8YE9Ta7Hox8XNszjgG7I9CbWHMA8GA1UdEwEB/wQF
+MAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIhAI2xWCIDlgWC8HaAFj2k1KPlyGwRX5VU
+B4OMliqoxTy8AiBS5r17kMXE/NQZYwYi3tcFHJrqGfICI1j4/iyARc++2A==
+-----END CERTIFICATE-----`)
+
 // --- Real etcd tests (skipped in CI) ---
 
 func TestEtcdStore_RealServer(t *testing.T) {
-	store, err := NewEtcdStore([]string{"http://localhost:2379"}, "/banyan/test/")
+	store, err := NewEtcdStore(&EtcdOptions{
+		Endpoints: []string{"http://localhost:2379"},
+		Prefix:    "/banyan/test/",
+	})
 	if err != nil {
 		t.Skipf("Skipping: no etcd server available: %v", err)
 	}

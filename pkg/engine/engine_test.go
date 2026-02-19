@@ -97,14 +97,13 @@ func (c *countingSaveErrorStore) Save(ctx context.Context, key string, value int
 }
 
 func TestNewAndClose(t *testing.T) {
-	t.Run("creates engine with badger", func(t *testing.T) {
-		tmpDir := t.TempDir()
+	t.Run("creates engine with etcd", func(t *testing.T) {
 		eng, err := New(&Options{
-			StoreBackend: "badger",
-			StoreAddress: tmpDir,
+			StoreBackend: "etcd",
+			StoreAddress: "http://localhost:2379",
 		})
 		if err != nil {
-			t.Fatalf("New failed: %v", err)
+			t.Skipf("Skipping: no etcd server available: %v", err)
 		}
 		if eng == nil {
 			t.Fatal("expected non-nil engine")

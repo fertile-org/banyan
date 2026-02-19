@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/agent"
@@ -30,6 +33,15 @@ var (
 
 // configPath is the default path to the Banyan config file.
 var configPath = types.DefaultConfigPath
+
+// TUI styles for the init wizard.
+var (
+	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	styleOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	styleDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+)
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -81,13 +93,14 @@ func init() {
 }
 
 func runAgentInit(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Agent - Initialization")
-	fmt.Println("========================================")
+	fmt.Println(styleTitle.Render("Banyan Agent - Initialization"))
+	fmt.Println(styleDim.Render("========================================"))
 
 	if os.Geteuid() != 0 {
-		fmt.Println("Warning: Not running as root. Some operations may require sudo.")
+		fmt.Println(styleWarn.Render("Warning: Not running as root. Some operations may require sudo."))
 	}
 
+	// --- Directory creation ---
 	dirs := []string{
 		agentDataDir,
 		filepath.Join(agentDataDir, "containers"),
@@ -96,69 +109,76 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		"/var/run",
 	}
 
-	fmt.Println("\n1. Creating directories...")
+	fmt.Println(styleInfo.Render("\nCreating directories..."))
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Printf("   [WARN] Failed to create %s: %v\n", dir, err)
+			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
 		} else {
-			fmt.Printf("   [OK] %s\n", dir)
+			fmt.Printf("  %s %s\n", styleOK.Render("[OK]"), dir)
 		}
 	}
 
-	fmt.Println("\n2. Checking containerd...")
-	containerdPath, err := exec.LookPath("containerd")
-	if err != nil {
-		fmt.Println("   [WARN] containerd not found in PATH")
-		fmt.Println("   Install with: apt install containerd")
+	// --- Dependency checks ---
+	fmt.Println(styleInfo.Render("\nChecking dependencies..."))
+	if containerdPath, err := exec.LookPath("containerd"); err != nil {
+		fmt.Printf("  %s containerd not found in PATH\n", styleWarn.Render("[WARN]"))
+		fmt.Printf("         Install with: apt install containerd\n")
 	} else {
-		fmt.Printf("   [OK] containerd found at %s\n", containerdPath)
+		fmt.Printf("  %s containerd found at %s\n", styleOK.Render("[OK]"), containerdPath)
 	}
 
-	fmt.Println("\n3. Checking nerdctl...")
-	nerdctlPath, err := exec.LookPath("nerdctl")
-	if err != nil {
-		fmt.Println("   [WARN] nerdctl not found in PATH")
-		fmt.Println("   Install from: https://github.com/containerd/nerdctl")
+	if nerdctlPath, err := exec.LookPath("nerdctl"); err != nil {
+		fmt.Printf("  %s nerdctl not found in PATH\n", styleWarn.Render("[WARN]"))
+		fmt.Printf("         Install from: https://github.com/containerd/nerdctl\n")
 	} else {
-		fmt.Printf("   [OK] nerdctl found at %s\n", nerdctlPath)
+		fmt.Printf("  %s nerdctl found at %s\n", styleOK.Render("[OK]"), nerdctlPath)
 	}
 
-	fmt.Println("\n4. Checking CNI plugins...")
 	cniPlugins := []string{"bridge", "loopback", "host-local", "portmap"}
 	for _, plugin := range cniPlugins {
 		pluginPath := "/opt/cni/bin/" + plugin
 		if _, err := os.Stat(pluginPath); os.IsNotExist(err) {
-			fmt.Printf("   [WARN] %s not found\n", plugin)
+			fmt.Printf("  %s CNI plugin %s not found\n", styleWarn.Render("[WARN]"), plugin)
 		} else {
-			fmt.Printf("   [OK] %s\n", plugin)
+			fmt.Printf("  %s CNI plugin %s\n", styleOK.Render("[OK]"), plugin)
 		}
 	}
 
-	fmt.Println("\n5. Configuring engine connection and authentication...")
+	// --- Engine connection + authentication ---
 	existingCfg, _ := types.LoadConfig(configPath)
+	fmt.Println()
 	if existingCfg.Security.Password != "" && existingCfg.Agent.EngineHost != "" {
-		fmt.Printf("   [OK] Config already exists at %s\n", configPath)
-		fmt.Printf("   Engine: %s:%s (password set)\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
+		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
+		fmt.Printf("         Engine: %s:%s (password set)\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
 	} else {
-		fmt.Print("   Engine host (default: localhost): ")
-		engineHost := types.ReadLine()
-		if engineHost == "" {
-			engineHost = "localhost"
+		engineHost := "localhost"
+		enginePort := "50051"
+		var password string
+
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Engine host").
+					Description("Hostname or IP of the Banyan engine").
+					Value(&engineHost),
+				huh.NewInput().
+					Title("Engine gRPC port").
+					Value(&enginePort),
+				huh.NewInput().
+					Title("Banyan cluster password").
+					Description("Must match the engine password to connect (leave empty to skip)").
+					EchoMode(huh.EchoModePassword).
+					Value(&password),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("agent config input: %w", err)
 		}
-		fmt.Printf("   [OK] Engine host: %s\n", engineHost)
 
-		fmt.Print("   Engine gRPC port (default: 50051): ")
-		enginePort := types.ReadLine()
-		if enginePort == "" {
-			enginePort = "50051"
-		}
-		fmt.Printf("   [OK] Engine port: %s\n", enginePort)
-
-		fmt.Println("\n6. Configuring authentication...")
-		fmt.Print("   Enter cluster password (leave empty to skip): ")
-		password := types.ReadLine()
-
-		// Load existing config to preserve other sections (cli, engine)
 		cfg := existingCfg
 		cfg.Agent = types.AgentConfig{
 			EngineHost: engineHost,
@@ -172,15 +192,17 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 
 		if err := types.SaveConfig(configPath, &cfg); err != nil {
-			fmt.Printf("   [WARN] Failed to save config: %v\n", err)
+			fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
 		} else {
-			fmt.Printf("   [OK] Config saved to %s\n", configPath)
+			fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
 		}
 	}
 
-	fmt.Println("\n========================================")
-	fmt.Println("Initialization complete!")
-	fmt.Println("\nNext step: banyan-agent start")
+	fmt.Println()
+	fmt.Println(styleDim.Render("========================================"))
+	fmt.Println(styleOK.Render("Initialization complete!"))
+	fmt.Println()
+	fmt.Println(styleInfo.Render("Next step: banyan-agent start"))
 	return nil
 }
 

@@ -21,7 +21,7 @@ Run on your control plane node.
 
 ### init
 
-Prepare the Engine node: creates data directories, checks for the store backend, and configures the cluster password and store backend.
+Prepare the Engine node: creates data directories and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-engine init
@@ -31,14 +31,17 @@ sudo banyan-engine init
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
 
-During init, you'll be prompted to:
-1. Set a cluster password (stored in `/etc/banyan/banyan.yaml`, must match on all agents and CLI clients).
-2. Choose a store backend (`badger`, `redis`, or `etcd`, default: `badger`).
-3. For Redis/etcd: provide the store address (e.g. `localhost:6379` for Redis, `http://localhost:2379` for etcd). You must manage these processes yourself.
+The wizard asks:
+
+1. **Cluster password** — protects engine-agent-CLI communication. Stored in `/etc/banyan/banyan.yaml`. Must match on all agents and CLI clients.
+2. **Etcd setup** — choose **Managed** (Banyan runs etcd for you) or **External** (connect to your own cluster).
+3. For **External etcd**: endpoints (e.g. `http://10.0.0.1:2379`) and connection security (None, Username & Password, TLS, or mTLS).
+
+If a value is already configured, the wizard skips that step and shows the current setting.
 
 ### start
 
-Start the Engine. Opens the store backend (embedded BadgerDB by default, or connects to a user-managed Redis/etcd instance), initializes networking (etcd backend only), starts the gRPC server, and watches for deployments.
+Start the Engine. Starts managed etcd (or connects to external etcd), initializes networking, starts the gRPC server, and watches for deployments.
 
 ```bash
 sudo banyan-engine start
@@ -49,8 +52,8 @@ Runs in the foreground. Stop with `Ctrl+C`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--store-backend` | (from config) | Store backend (`badger`, `redis`, or `etcd`) |
-| `--store-address` | (from config) | Store address (badger: data dir; redis/etcd: server address) |
+| `--store-backend` | (from config) | Store backend (`etcd`) |
+| `--store-address` | (from config) | Etcd endpoint address |
 | `--grpc-port` | `50051` | Engine gRPC server port |
 | `--vpc-cidr` | `10.0.0.0/16` | VPC network CIDR range |
 | `--registry-port` | `5000` | Embedded OCI registry port |
@@ -73,8 +76,8 @@ banyan-engine status
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--store-backend` | (from config) | Store backend (`badger`, `redis`, or `etcd`) |
-| `--store-address` | (from config) | Store address |
+| `--store-backend` | (from config) | Store backend (`etcd`) |
+| `--store-address` | (from config) | Etcd endpoint address |
 
 ---
 
@@ -84,7 +87,7 @@ Run on each worker node.
 
 ### init
 
-Prepare the worker node: creates data directories, verifies containerd and nerdctl are installed, and configures the engine connection and password.
+Prepare the worker node: creates data directories, verifies containerd and nerdctl are installed, and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-agent init
@@ -94,7 +97,13 @@ sudo banyan-agent init
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
 
-During init, you'll be prompted for the engine host, gRPC port (default: 50051), and the cluster password.
+The wizard asks:
+
+1. **Engine host** — hostname or IP of the Banyan engine (e.g. `192.168.1.10`).
+2. **Engine gRPC port** — default `50051`.
+3. **Banyan cluster password** — must match the engine password.
+
+If the connection is already configured, the wizard skips and shows the current setting.
 
 ### start
 
@@ -143,13 +152,19 @@ Run on any machine to manage deployments. Before using deploy/status/down/logs c
 
 ### init
 
-Configure the CLI: prompts for engine host, gRPC port, and cluster password.
+Configure the CLI with an interactive setup wizard.
 
 ```bash
 sudo banyan-cli init
 ```
 
-Configuration is stored in `/etc/banyan/banyan.yaml`. Run this once on any machine where you want to use `banyan-cli` commands.
+The wizard asks:
+
+1. **Engine host** — hostname or IP of the Banyan engine.
+2. **Engine gRPC port** — default `50051`.
+3. **Banyan cluster password** — must match the engine password.
+
+Configuration is stored in `/etc/banyan/banyan.yaml`. Run this once on any machine where you want to use `banyan-cli` commands. If a config already exists, you'll be asked whether to overwrite it.
 
 ### deploy
 

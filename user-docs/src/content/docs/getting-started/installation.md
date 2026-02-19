@@ -31,7 +31,7 @@ The script installs:
 
 | Role | What gets installed |
 |------|-------------------|
-| Engine | `banyan-engine`, `banyan-cli` (BadgerDB is embedded — no external store needed by default) |
+| Engine | `banyan-engine`, `banyan-cli`, etcd |
 | Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl, CNI plugins, BuildKit |
 
 Supported distros: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux. Architectures: x86_64, ARM64.
@@ -75,20 +75,37 @@ scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 
 When building from source, you still need to install runtime dependencies on each node manually:
 
-- **Engine node**: No external store needed — BadgerDB is embedded by default. If you choose Redis or etcd as the backend, install them separately (see [Store Backend](#store-backend)).
+- **Engine node**: etcd is required. By default, Banyan manages etcd for you automatically (see [Etcd](#etcd-state-store)).
 - **Worker nodes**: containerd, nerdctl, BuildKit (see the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands)
 
-### Store backend
+### Etcd (state store)
 
-The Engine needs a key-value store. **BadgerDB is the default** — it's embedded in the binary, requires no external process, and persists data to disk.
+Banyan uses etcd to store cluster state (deployments, tasks, agent registrations). You choose how to run etcd during `banyan-engine init`:
 
-| Backend | Install | When to use |
-|---------|---------|-------------|
-| BadgerDB (default) | Nothing to install — embedded in the binary | Recommended for most setups. Zero dependencies. |
-| Redis | `sudo apt-get install redis-server` | If you already run Redis, or prefer a network-accessible store. |
-| etcd | `sudo apt-get install etcd-server` | If you already run etcd, or need VPC networking (Flannel requires etcd). |
+| Mode | What happens | When to use |
+|------|-------------|-------------|
+| **Managed** (default) | Banyan starts and manages its own etcd process. Data stored in `<data-dir>/etcd/`. | Recommended for most setups. Zero setup. |
+| **External** | You run etcd yourself, Banyan connects to it. | If you already have an etcd cluster, or need custom HA/backup. |
 
-You choose the backend during `banyan-engine init`. For BadgerDB, no additional configuration is needed. For Redis or etcd, you must install and run the server yourself, then provide its address during init (e.g., `localhost:6379` for Redis, `http://localhost:2379` for etcd).
+#### Managed etcd
+
+Nothing to configure. Banyan starts etcd on `127.0.0.1:2379` when the engine starts and stops it when the engine stops. Data persists in `/var/lib/banyan/etcd/` by default.
+
+#### External etcd
+
+If you choose "External" during `banyan-engine init`, the wizard asks for:
+
+1. **Endpoints** — comma-separated etcd addresses (e.g. `http://10.0.0.1:2379,http://10.0.0.2:2379`)
+2. **Connection security** — how to authenticate:
+
+| Option | What you provide |
+|--------|-----------------|
+| None | Nothing — plain HTTP connection |
+| Username & Password | Etcd username and password |
+| TLS (CA certificate) | Path to the CA certificate file |
+| mTLS (client certificates) | Paths to CA cert, client cert, and client key files |
+
+You must install, run, and manage external etcd yourself. See the [etcd documentation](https://etcd.io/docs/) for setup instructions.
 
 ## Verify
 

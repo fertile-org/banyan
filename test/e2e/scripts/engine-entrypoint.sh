@@ -17,9 +17,10 @@ security:
     password: ${E2E_PASSWORD}
 engine:
     grpc_port: "50051"
-    store_backend: "badger"
+    store_backend: "etcd"
+    managed_etcd: true
 cli:
-    engine_host: localhost
+    engine_host: 127.0.0.1
     engine_port: "50051"
 EOF
 chmod 600 /etc/banyan/banyan.yaml

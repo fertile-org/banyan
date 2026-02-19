@@ -165,8 +165,8 @@ func TestLoadSaveConfig(t *testing.T) {
 
 		cfg := BanyanConfig{
 			Engine: EngineConfig{
-				StoreBackend: "redis",
-				StoreAddress: "localhost:6379",
+				StoreBackend: "etcd",
+				StoreAddress: "http://localhost:2379",
 			},
 		}
 
@@ -179,11 +179,53 @@ func TestLoadSaveConfig(t *testing.T) {
 			t.Fatalf("LoadConfig failed: %v", err)
 		}
 
-		if loaded.Engine.StoreBackend != "redis" {
-			t.Errorf("expected store_backend=redis, got %s", loaded.Engine.StoreBackend)
+		if loaded.Engine.StoreBackend != "etcd" {
+			t.Errorf("expected store_backend=etcd, got %s", loaded.Engine.StoreBackend)
 		}
-		if loaded.Engine.StoreAddress != "localhost:6379" {
-			t.Errorf("expected store_address=localhost:6379, got %s", loaded.Engine.StoreAddress)
+		if loaded.Engine.StoreAddress != "http://localhost:2379" {
+			t.Errorf("expected store_address=http://localhost:2379, got %s", loaded.Engine.StoreAddress)
+		}
+	})
+
+	t.Run("round-trip with etcd auth config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+		cfg := BanyanConfig{
+			Engine: EngineConfig{
+				StoreBackend: "etcd",
+				StoreAddress: "https://etcd1.example.com:2379",
+				EtcdUsername: "banyan",
+				EtcdPassword: "secret",
+				EtcdCertFile: "/etc/banyan/etcd-client.crt",
+				EtcdKeyFile:  "/etc/banyan/etcd-client.key",
+				EtcdCAFile:   "/etc/banyan/etcd-ca.crt",
+			},
+		}
+
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+
+		loaded, err := LoadConfig(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		if loaded.Engine.EtcdUsername != "banyan" {
+			t.Errorf("expected etcd_username=banyan, got %s", loaded.Engine.EtcdUsername)
+		}
+		if loaded.Engine.EtcdPassword != "secret" {
+			t.Errorf("expected etcd_password=secret, got %s", loaded.Engine.EtcdPassword)
+		}
+		if loaded.Engine.EtcdCertFile != "/etc/banyan/etcd-client.crt" {
+			t.Errorf("expected etcd_cert_file=/etc/banyan/etcd-client.crt, got %s", loaded.Engine.EtcdCertFile)
+		}
+		if loaded.Engine.EtcdKeyFile != "/etc/banyan/etcd-client.key" {
+			t.Errorf("expected etcd_key_file=/etc/banyan/etcd-client.key, got %s", loaded.Engine.EtcdKeyFile)
+		}
+		if loaded.Engine.EtcdCAFile != "/etc/banyan/etcd-ca.crt" {
+			t.Errorf("expected etcd_ca_file=/etc/banyan/etcd-ca.crt, got %s", loaded.Engine.EtcdCAFile)
 		}
 	})
 }
@@ -320,10 +362,10 @@ func TestGetCLIEngineEndpoint(t *testing.T) {
 }
 
 func TestGetStoreBackend(t *testing.T) {
-	t.Run("defaults to badger when empty", func(t *testing.T) {
+	t.Run("defaults to etcd when empty", func(t *testing.T) {
 		cfg := EngineConfig{}
-		if got := cfg.GetStoreBackend(); got != "badger" {
-			t.Errorf("expected 'badger', got %q", got)
+		if got := cfg.GetStoreBackend(); got != "etcd" {
+			t.Errorf("expected 'etcd', got %q", got)
 		}
 	})
 

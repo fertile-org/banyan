@@ -7,25 +7,20 @@ sidebar:
 
 ## Engine
 
-### Store backend issues
+### Etcd connection issues
 
-The Engine uses **BadgerDB** by default — an embedded store that requires no external process. If you've configured Redis or etcd as your backend instead:
+**Managed etcd**: If etcd fails to start, check that port 2379 is not already in use and that the data directory (`/var/lib/banyan/etcd/` by default) is writable.
 
-**"failed to connect to redis"** — Ensure your Redis server is running and reachable at the configured address:
-
-```bash
-sudo apt-get install redis-server   # Debian/Ubuntu
-sudo systemctl start redis-server
-```
-
-**"failed to connect to etcd"** — Ensure your etcd server is running and reachable:
+**"failed to connect to etcd"** — For external etcd, ensure your etcd server is running and reachable at the configured address:
 
 ```bash
 sudo apt-get install etcd-server    # Debian/Ubuntu
 sudo systemctl start etcd
 ```
 
-When using Redis or etcd, you are responsible for running and managing these services. You choose the backend during `banyan-engine init`. See [Store Backend](/getting-started/installation/#store-backend) for details. To switch back to BadgerDB (no external dependencies), re-run `banyan-engine init` and choose `badger`.
+If you configured TLS or mTLS, verify that the certificate paths in `/etc/banyan/banyan.yaml` are correct and the files are readable.
+
+To reconfigure the etcd connection, re-run `banyan-engine init`. See [Etcd](/getting-started/installation/#etcd-state-store) for setup details.
 
 ### Engine starts but agents cannot connect
 
@@ -137,9 +132,9 @@ The `banyan-cli deploy` and `banyan-cli status` commands do not require root (bu
 
 Engine and Agent run in the foreground and print logs to stdout. Check the terminal where they are running.
 
-Store backend logs:
-- BadgerDB: Logs are suppressed by default (embedded, no separate log file).
-- Redis/etcd: Check the logs of your externally managed Redis or etcd service.
+Etcd logs:
+- Managed etcd: Logs are printed to stdout alongside the engine output.
+- External etcd: Check the logs of your externally managed etcd service.
 
 ### Stopping containers manually
 

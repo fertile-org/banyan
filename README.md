@@ -71,15 +71,6 @@ Banyan separates control and data planes for scalability and simplicity:
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**How it works:**
-1. **CLI** submits `banyan.yaml` manifest to Engine via gRPC
-2. **Engine** stores deployment state and schedules tasks across available agents
-3. **Agents** poll for tasks, pull images from built-in registry, and run containers
-4. **Agents** report container health and status back to Engine
-5. **VPC Networking** enables secure cross-node communication with automatic service discovery
-
----
-
 > **Under heavy development.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
 ## From one server to many

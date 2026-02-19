@@ -42,9 +42,9 @@ Banyan separates control and data planes for scalability and simplicity:
 │  │                    banyan-engine (Control Plane)                     │  │
 │  │  ┌────────────┐  ┌────────────┐  ┌────────────┐  ┌────────────┐      │  │
 │  │  │  gRPC      │  │ Scheduler  │  │   Store    │  │  Registry  │      │  │
-│  │  │  Server    │  │            │  │  (Badger/  │  │  (Built-in │      │  │
-│  │  │            │  │            │  │   Redis/   │  │    OCI)    │      │  │
-│  │  │            │  │            │  │   etcd)    │  │            │      │  │
+│  │  │  Server    │  │            │  │  (etcd)    │  │  (Built-in │      │  │
+│  │  │            │  │            │  │            │  │    OCI)    │      │  │
+│  │  │            │  │            │  │            │  │            │      │  │
 │  │  └────────────┘  └────────────┘  └────────────┘  └────────────┘      │  │
 │  └──────────────────────────────────────────────────────────────────────┘  │
 │           │                                                                   │
@@ -68,13 +68,6 @@ Banyan separates control and data planes for scalability and simplicity:
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
-
-**How it works:**
-1. **CLI** submits `banyan.yaml` manifest to Engine via gRPC
-2. **Engine** stores deployment state and schedules tasks across available agents
-3. **Agents** poll for tasks, pull images from built-in registry, and run containers
-4. **Agents** report container health and status back to Engine
-5. **VPC Networking** enables secure cross-node communication with automatic service discovery
 
 ## From one server to many
 
@@ -164,7 +157,7 @@ No package managers. No plugins. Three focused binaries — engine, agent, and C
     Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
   </Card>
   <Card title="Proven foundations" icon="approve-check">
-    Built on battle-tested technologies: BadgerDB, etcd, containerd, gRPC, and Prometheus metrics (coming soon).
+    Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
   </Card>
 </CardGrid>
 

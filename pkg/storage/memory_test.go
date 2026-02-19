@@ -198,30 +198,17 @@ func TestMemoryStore_FilePersistence(t *testing.T) {
 }
 
 func TestNewStore_Factory(t *testing.T) {
-	t.Run("badger backend", func(t *testing.T) {
-		store, err := NewStore("badger", t.TempDir(), "/banyan")
-		if err != nil {
-			t.Fatalf("NewStore(badger) failed: %v", err)
-		}
-		defer store.Close()
-
-		ctx := context.Background()
-		if err := store.Save(ctx, "test-key", "test-value"); err != nil {
-			t.Fatalf("Save failed: %v", err)
-		}
-		var got string
-		if err := store.Get(ctx, "test-key", &got); err != nil {
-			t.Fatalf("Get failed: %v", err)
-		}
-		if got != "test-value" {
-			t.Errorf("expected 'test-value', got %q", got)
-		}
-	})
-
 	t.Run("unsupported backend", func(t *testing.T) {
 		_, err := NewStore("unsupported", "addr", "/banyan")
 		if err == nil {
 			t.Fatal("expected error for unsupported backend")
+		}
+	})
+
+	t.Run("badger backend rejected", func(t *testing.T) {
+		_, err := NewStore("badger", t.TempDir(), "/banyan")
+		if err == nil {
+			t.Fatal("expected error for badger backend (no longer supported)")
 		}
 	})
 }

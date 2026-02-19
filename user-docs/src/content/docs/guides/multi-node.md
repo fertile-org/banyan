@@ -32,7 +32,7 @@ The Engine orchestrates. Workers run containers. All communication happens over 
 
 Install the appropriate binaries on each server. See [Installation](/getting-started/installation/).
 
-- **Engine node**: `banyan-engine`, `banyan-cli` (embedded BadgerDB store — no external dependency by default)
+- **Engine node**: `banyan-engine`, `banyan-cli`, etcd (managed automatically by default)
 - **Worker nodes**: `banyan-agent`, containerd, nerdctl
 - **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 
@@ -45,13 +45,16 @@ sudo banyan-engine init
 sudo banyan-engine start
 ```
 
-During `init`, you'll set a cluster password. All agents and CLI clients must use the same password.
+The init wizard asks for:
+- **Cluster password** — all agents and CLI clients must use the same password.
+- **Etcd setup** — choose **Managed** (recommended) or **External** if you have your own etcd cluster.
 
 The Engine starts a gRPC server on port 50051 by default. Verify from another machine:
 
 ```bash
 # On the deploy machine, configure the CLI to point at the engine
 sudo banyan-cli init
+# The wizard asks for: engine host, gRPC port, and cluster password
 # Enter: 192.168.1.10 for host, 50051 for port, and the cluster password
 
 banyan-cli status
@@ -63,10 +66,13 @@ On Worker 1 (`192.168.1.11`):
 
 ```bash
 sudo banyan-agent init
-# Enter: 192.168.1.10 for engine host, 50051 for port, and the cluster password
-
 sudo banyan-agent start --node-name worker-1
 ```
+
+The init wizard asks for:
+- **Engine host** — IP or hostname of the engine server (e.g. `192.168.1.10`).
+- **Engine gRPC port** — default `50051`.
+- **Banyan cluster password** — must match the engine password.
 
 On Worker 2 (`192.168.1.12`):
 

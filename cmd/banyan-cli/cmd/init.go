@@ -1,11 +1,23 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/types"
+)
+
+// TUI styles for the init wizard.
+var (
+	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	styleOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	styleDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 )
 
 var initCmd = &cobra.Command{
@@ -29,45 +41,69 @@ func init() {
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan CLI - Initialization")
-	fmt.Println("========================================")
+	fmt.Println(styleTitle.Render("Banyan CLI - Initialization"))
+	fmt.Println(styleDim.Render("========================================"))
 
 	// Check for existing config
 	existingCfg, _ := types.LoadConfig(configPath)
 	if existingCfg.CLI.EngineHost != "" && existingCfg.Security.Password != "" {
-		fmt.Printf("Config already exists at %s\n", configPath)
-		fmt.Printf("  Engine: %s:%s (password set)\n", existingCfg.CLI.EngineHost, existingCfg.CLI.EnginePort)
-		fmt.Print("\nOverwrite? (y/N): ")
-		answer := types.ReadLine()
-		if answer != "y" && answer != "Y" {
+		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
+		fmt.Printf("         Engine: %s:%s (password set)\n", existingCfg.CLI.EngineHost, existingCfg.CLI.EnginePort)
+
+		var overwrite bool
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Overwrite existing configuration?").
+					Value(&overwrite),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("confirm prompt: %w", err)
+		}
+		if !overwrite {
 			fmt.Println("Aborted.")
 			return nil
 		}
 	}
 
-	fmt.Println("\n1. Configuring engine connection...")
+	engineHost := "localhost"
+	enginePort := "50051"
+	var password string
 
-	fmt.Print("   Engine host (e.g. localhost): ")
-	engineHost := types.ReadLine()
-	if engineHost == "" {
-		return fmt.Errorf("engine host is required")
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Engine host").
+				Description("Hostname or IP of the Banyan engine").
+				Value(&engineHost),
+			huh.NewInput().
+				Title("Engine gRPC port").
+				Value(&enginePort),
+			huh.NewInput().
+				Title("Banyan cluster password").
+				Description("Must match the engine password to connect").
+				EchoMode(huh.EchoModePassword).
+				Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("password is required")
+					}
+					return nil
+				}).
+				Value(&password),
+		),
+	)
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println("\nInitialization cancelled.")
+			return nil
+		}
+		return fmt.Errorf("cli config input: %w", err)
 	}
-	fmt.Printf("   [OK] Engine host: %s\n", engineHost)
-
-	fmt.Print("   Engine gRPC port (default: 50051): ")
-	enginePort := types.ReadLine()
-	if enginePort == "" {
-		enginePort = "50051"
-	}
-	fmt.Printf("   [OK] Engine port: %s\n", enginePort)
-
-	fmt.Println("\n2. Configuring authentication...")
-	fmt.Print("   Enter cluster password: ")
-	password := types.ReadLine()
-	if password == "" {
-		return fmt.Errorf("password is required for authentication")
-	}
-	fmt.Println("   [OK] Password set")
 
 	// Load existing config to preserve other sections (agent, engine)
 	cfg, _ := types.LoadConfig(configPath)
@@ -81,12 +117,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	if err := types.SaveConfig(configPath, &cfg); err != nil {
-		return fmt.Errorf("failed to save config: %w", err)
+		fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
+	} else {
+		fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
 	}
 
-	fmt.Printf("\n   [OK] Config saved to %s\n", configPath)
-	fmt.Println("\n========================================")
-	fmt.Println("Initialization complete!")
-	fmt.Printf("\nYou can now use: banyan-cli deploy, status, down, logs\n")
+	fmt.Println()
+	fmt.Println(styleDim.Render("========================================"))
+	fmt.Println(styleOK.Render("Initialization complete!"))
+	fmt.Println()
+	fmt.Println(styleInfo.Render("You can now use: banyan-cli deploy, status, down, logs"))
 	return nil
 }

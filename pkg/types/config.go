@@ -20,9 +20,9 @@ const DefaultConfigPath = "/etc/banyan/banyan.yaml"
 // BanyanConfig is the top-level configuration structure.
 type BanyanConfig struct {
 	Security SecurityConfig `yaml:"security,omitempty"`
-	Engine   EngineConfig   `yaml:"engine,omitempty"`
 	Agent    AgentConfig    `yaml:"agent,omitempty"`
 	CLI      CLIConfig      `yaml:"cli,omitempty"`
+	Engine   EngineConfig   `yaml:"engine,omitempty"`
 }
 
 // SecurityConfig holds authentication settings.
@@ -35,14 +35,20 @@ type SecurityConfig struct {
 type EngineConfig struct {
 	APIPort      string `yaml:"api_port,omitempty"`
 	GRPCPort     string `yaml:"grpc_port,omitempty"`
-	StoreBackend string `yaml:"store_backend,omitempty"` // "badger", "redis", or "etcd"
-	StoreAddress string `yaml:"store_address,omitempty"` // badger: data directory; redis/etcd: server address
+	StoreBackend string `yaml:"store_backend,omitempty"`
+	StoreAddress string `yaml:"store_address,omitempty"`
+	EtcdUsername string `yaml:"etcd_username,omitempty"`
+	EtcdPassword string `yaml:"etcd_password,omitempty"`
+	EtcdCertFile string `yaml:"etcd_cert_file,omitempty"`
+	EtcdKeyFile  string `yaml:"etcd_key_file,omitempty"`
+	EtcdCAFile   string `yaml:"etcd_ca_file,omitempty"`
+	ManagedEtcd  bool   `yaml:"managed_etcd,omitempty"`
 }
 
-// GetStoreBackend returns the configured store backend, defaulting to "badger".
+// GetStoreBackend returns the configured store backend, defaulting to "etcd".
 func (c *EngineConfig) GetStoreBackend() string {
 	if c.StoreBackend == "" {
-		return "badger"
+		return "etcd"
 	}
 	return c.StoreBackend
 }

@@ -2,8 +2,11 @@ package storage
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -22,18 +25,30 @@ type etcdKV interface {
 	Close() error
 }
 
+// EtcdOptions configures the etcd client connection.
+type EtcdOptions struct {
+	Endpoints []string
+	Prefix    string
+	Username  string // etcd RBAC username
+	Password  string // etcd RBAC password
+	CertFile  string // client certificate for mTLS
+	KeyFile   string // client key for mTLS
+	CAFile    string // CA certificate for server verification
+}
+
 // EtcdStore implements StateStore using etcd as the backend
 type EtcdStore struct {
 	client etcdKV
 	prefix string // Key prefix for all VPC data (e.g., "/banyan/vpc/")
 }
 
-// NewEtcdStore creates a new EtcdStore
-func NewEtcdStore(endpoints []string, prefix string) (*EtcdStore, error) {
-	if len(endpoints) == 0 {
+// NewEtcdStore creates a new EtcdStore with the given options.
+func NewEtcdStore(opts *EtcdOptions) (*EtcdStore, error) {
+	if len(opts.Endpoints) == 0 {
 		return nil, fmt.Errorf("at least one etcd endpoint is required")
 	}
 
+	prefix := opts.Prefix
 	if prefix == "" {
 		prefix = "/banyan/vpc/"
 	}
@@ -43,10 +58,25 @@ func NewEtcdStore(endpoints []string, prefix string) (*EtcdStore, error) {
 		prefix += "/"
 	}
 
-	client, err := clientv3.New(clientv3.Config{
-		Endpoints:   endpoints,
+	cfg := clientv3.Config{
+		Endpoints:   opts.Endpoints,
 		DialTimeout: 5 * time.Second,
-	})
+	}
+
+	if opts.Username != "" {
+		cfg.Username = opts.Username
+		cfg.Password = opts.Password
+	}
+
+	tlsCfg, err := buildTLSConfig(opts.CertFile, opts.KeyFile, opts.CAFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build TLS config: %w", err)
+	}
+	if tlsCfg != nil {
+		cfg.TLS = tlsCfg
+	}
+
+	client, err := clientv3.New(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create etcd client: %w", err)
 	}
@@ -54,7 +84,7 @@ func NewEtcdStore(endpoints []string, prefix string) (*EtcdStore, error) {
 	// Verify connectivity with a short timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	_, err = client.Status(ctx, endpoints[0])
+	_, err = client.Status(ctx, opts.Endpoints[0])
 	if err != nil {
 		client.Close()
 		return nil, fmt.Errorf("failed to connect to etcd: %w", err)
@@ -64,6 +94,42 @@ func NewEtcdStore(endpoints []string, prefix string) (*EtcdStore, error) {
 		client: client,
 		prefix: prefix,
 	}, nil
+}
+
+// buildTLSConfig builds a *tls.Config from optional cert/key/CA file paths.
+// Returns nil if no TLS files are provided.
+func buildTLSConfig(certFile, keyFile, caFile string) (*tls.Config, error) {
+	if certFile == "" && keyFile == "" && caFile == "" {
+		return nil, nil
+	}
+
+	tlsCfg := &tls.Config{MinVersion: tls.VersionTLS12}
+
+	// Load client certificate for mTLS
+	if certFile != "" && keyFile != "" {
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load client cert/key: %w", err)
+		}
+		tlsCfg.Certificates = []tls.Certificate{cert}
+	} else if certFile != "" || keyFile != "" {
+		return nil, fmt.Errorf("both etcd_cert_file and etcd_key_file must be provided together")
+	}
+
+	// Load CA certificate for server verification
+	if caFile != "" {
+		caCert, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read CA file: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caCert) {
+			return nil, fmt.Errorf("failed to parse CA certificate from %s", caFile)
+		}
+		tlsCfg.RootCAs = pool
+	}
+
+	return tlsCfg, nil
 }
 
 // NewEtcdStoreWithClient creates an EtcdStore with an existing client (useful for testing)

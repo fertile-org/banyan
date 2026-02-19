@@ -2,13 +2,18 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/engine"
@@ -29,6 +34,15 @@ var (
 // configPath is the default path to the Banyan config file.
 var configPath = types.DefaultConfigPath
 
+// TUI styles for the init wizard.
+var (
+	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
+	styleOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
+	styleDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+)
+
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize Engine dependencies",
@@ -41,8 +55,8 @@ var startCmd = &cobra.Command{
 	Long: `Start the Banyan Engine control plane.
 
 This command:
-  1. Opens the store backend (badger embedded, or connects to external redis/etcd)
-  2. Initializes VPC networking (IPAM, DNS, Security) — etcd backend only
+  1. Starts managed etcd process (if configured) or connects to external etcd
+  2. Initializes VPC networking (IPAM, DNS, Security)
   3. Starts the gRPC server (agents and CLI connect here)
   4. Watches for new deployments and dispatches tasks to agents
   5. Monitors task completion and updates deployment status`,
@@ -69,9 +83,9 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&engineDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
-	// Store backend flags
-	startCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (badger, redis, or etcd)")
-	startCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Store address (badger: data dir; redis/etcd: server address)")
+	// Store backend flags (for external etcd override)
+	startCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
+	startCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
 
 	// General flags
 	startCmd.Flags().StringVar(&engineVPCCIDR, "vpc-cidr", "10.0.0.0/16", "VPC CIDR range")
@@ -79,100 +93,218 @@ func init() {
 	startCmd.Flags().StringVar(&engineGRPCPort, "grpc-port", "50051", "Engine gRPC port")
 
 	// Status flags
-	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (badger, redis, or etcd)")
-	statusCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Store address")
+	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
+	statusCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
 }
 
 func runEngineInit(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Engine - Initialization")
-	fmt.Println("========================================")
+	fmt.Println(styleTitle.Render("Banyan Engine - Initialization"))
+	fmt.Println(styleDim.Render("========================================"))
 
 	if os.Geteuid() != 0 {
-		fmt.Println("Warning: Not running as root. Some operations may require sudo.")
+		fmt.Println(styleWarn.Render("Warning: Not running as root. Some operations may require sudo."))
 	}
 
+	// --- Directory creation ---
 	dirs := []string{
 		engineDataDir,
-		filepath.Join(engineDataDir, "store"),
+		filepath.Join(engineDataDir, "etcd"),
 		filepath.Join(engineDataDir, "vpc"),
 		"/var/log",
 		"/var/run",
 	}
 
-	fmt.Println("\n1. Creating directories...")
+	fmt.Println(styleInfo.Render("\nCreating directories..."))
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
-			fmt.Printf("   [WARN] Failed to create %s: %v\n", dir, err)
+			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
 		} else {
-			fmt.Printf("   [OK] %s\n", dir)
+			fmt.Printf("  %s %s\n", styleOK.Render("[OK]"), dir)
 		}
 	}
 
-	fmt.Println("\n2. Store backend info...")
 	existingCfg, _ := types.LoadConfig(configPath)
 
-	fmt.Println("   [OK] badger (embedded, no external dependency)")
-	fmt.Println("   [INFO] redis and etcd are also supported (user-managed)")
-
-	fmt.Println("\n3. Configuring authentication...")
+	// --- Cluster password ---
+	fmt.Println()
 	if existingCfg.Security.Password != "" {
-		fmt.Printf("   [OK] Config already exists at %s (password set)\n", configPath)
+		fmt.Printf("  %s Cluster password already configured\n", styleOK.Render("[OK]"))
 	} else {
-		fmt.Print("   Enter cluster password (leave empty to skip): ")
-		password := types.ReadLine()
+		var password string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Cluster password").
+					Description("Protects engine-agent communication (leave empty to skip)").
+					EchoMode(huh.EchoModePassword).
+					Value(&password),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("password input: %w", err)
+		}
 		if password != "" {
 			existingCfg.Security = types.SecurityConfig{
 				AuthType: "password",
 				Password: password,
 			}
-		} else {
-			fmt.Println("   [SKIP] No password set")
 		}
 	}
 
-	fmt.Println("\n4. Configuring store backend...")
+	// --- Etcd setup ---
 	if existingCfg.Engine.StoreBackend != "" {
-		storeBackend := existingCfg.Engine.GetStoreBackend()
-		fmt.Printf("   [OK] Store backend already configured: %s\n", storeBackend)
+		if existingCfg.Engine.ManagedEtcd {
+			fmt.Printf("  %s Managed etcd already configured\n", styleOK.Render("[OK]"))
+		} else {
+			fmt.Printf("  %s External etcd already configured: %s\n", styleOK.Render("[OK]"), existingCfg.Engine.StoreAddress)
+		}
 	} else {
-		fmt.Print("   Store backend (badger/redis/etcd) [badger]: ")
-		backendInput := types.ReadLine()
-		if backendInput == "" {
-			backendInput = "badger"
-		}
-		if backendInput != "badger" && backendInput != "redis" && backendInput != "etcd" {
-			fmt.Printf("   [WARN] Unknown backend %q, using badger\n", backendInput)
-			backendInput = "badger"
-		}
-		existingCfg.Engine.StoreBackend = backendInput
-
-		// Prompt for address for external backends
-		if backendInput == "redis" || backendInput == "etcd" {
-			defaultAddr := "localhost:6379"
-			if backendInput == "etcd" {
-				defaultAddr = "http://localhost:2379"
+		var etcdChoice string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Etcd setup").
+					Description("Banyan requires etcd for distributed state storage").
+					Options(
+						huh.NewOption("Managed - Banyan runs etcd for you (recommended)", "managed"),
+						huh.NewOption("External - Connect to your own etcd cluster", "external"),
+					).
+					Value(&etcdChoice),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
 			}
-			fmt.Printf("   Store address [%s]: ", defaultAddr)
-			addrInput := types.ReadLine()
-			if addrInput == "" {
-				addrInput = defaultAddr
-			}
-			existingCfg.Engine.StoreAddress = addrInput
+			return fmt.Errorf("etcd setup: %w", err)
 		}
 
-		fmt.Printf("   [OK] Store backend: %s\n", backendInput)
+		existingCfg.Engine.StoreBackend = "etcd"
+
+		if etcdChoice == "managed" {
+			existingCfg.Engine.ManagedEtcd = true
+		} else {
+			existingCfg.Engine.ManagedEtcd = false
+
+			// Collect endpoints and auth method
+			var endpoints string
+			var authMethod string
+			endpoints = "http://localhost:2379"
+
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewInput().
+						Title("Etcd endpoints").
+						Description("Comma-separated list of etcd endpoints").
+						Value(&endpoints),
+					huh.NewSelect[string]().
+						Title("Connection security").
+						Options(
+							huh.NewOption("None", "none"),
+							huh.NewOption("Username & Password", "password"),
+							huh.NewOption("TLS (CA certificate)", "tls"),
+							huh.NewOption("mTLS (client certificates)", "mtls"),
+						).
+						Value(&authMethod),
+				),
+			)
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println("\nInitialization cancelled.")
+					return nil
+				}
+				return fmt.Errorf("etcd endpoints: %w", err)
+			}
+			existingCfg.Engine.StoreAddress = endpoints
+
+			// Collect auth-specific inputs
+			switch authMethod {
+			case "password":
+				var username, password string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("Etcd username").
+							Value(&username),
+						huh.NewInput().
+							Title("Etcd password").
+							EchoMode(huh.EchoModePassword).
+							Value(&password),
+					),
+				)
+				if err := form.Run(); err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						fmt.Println("\nInitialization cancelled.")
+						return nil
+					}
+					return fmt.Errorf("etcd credentials: %w", err)
+				}
+				existingCfg.Engine.EtcdUsername = username
+				existingCfg.Engine.EtcdPassword = password
+			case "tls":
+				var caFile string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("CA certificate path").
+							Value(&caFile),
+					),
+				)
+				if err := form.Run(); err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						fmt.Println("\nInitialization cancelled.")
+						return nil
+					}
+					return fmt.Errorf("etcd TLS: %w", err)
+				}
+				existingCfg.Engine.EtcdCAFile = caFile
+			case "mtls":
+				var caFile, certFile, keyFile string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("CA certificate path").
+							Value(&caFile),
+						huh.NewInput().
+							Title("Client certificate path").
+							Value(&certFile),
+						huh.NewInput().
+							Title("Client key path").
+							Value(&keyFile),
+					),
+				)
+				if err := form.Run(); err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						fmt.Println("\nInitialization cancelled.")
+						return nil
+					}
+					return fmt.Errorf("etcd TLS: %w", err)
+				}
+				existingCfg.Engine.EtcdCAFile = caFile
+				existingCfg.Engine.EtcdCertFile = certFile
+				existingCfg.Engine.EtcdKeyFile = keyFile
+			}
+		}
 	}
 
-	// Save config with all collected settings
+	// --- Save config ---
+	fmt.Println()
 	if err := types.SaveConfig(configPath, &existingCfg); err != nil {
-		fmt.Printf("   [WARN] Failed to save config: %v\n", err)
+		fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
 	} else {
-		fmt.Printf("   [OK] Config saved to %s\n", configPath)
+		fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
 	}
 
-	fmt.Println("\n========================================")
-	fmt.Println("Initialization complete!")
-	fmt.Println("\nNext step: banyan-engine start")
+	fmt.Println()
+	fmt.Println(styleDim.Render("========================================"))
+	fmt.Println(styleOK.Render("Initialization complete!"))
+	fmt.Println()
+	fmt.Println(styleInfo.Render("Next step: banyan-engine start"))
 	return nil
 }
 
@@ -222,17 +354,25 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	storeBackend, storeAddress := resolveStoreConfig(cmd)
 	fmt.Printf("Store backend: %s\n", storeBackend)
 
-	// Resolve default addresses per backend
-	storeAddress = resolveDefaultStoreAddress(storeBackend, storeAddress, engineDataDir)
-	switch storeBackend {
-	case "badger":
-		if mkdirErr := os.MkdirAll(storeAddress, 0o755); mkdirErr != nil {
-			return fmt.Errorf("failed to create badger data directory: %w", mkdirErr)
+	// Handle managed etcd
+	if cfg.Engine.ManagedEtcd {
+		etcdDataDir := filepath.Join(engineDataDir, "etcd")
+		fmt.Printf("Starting managed etcd (data: %s)...\n", etcdDataDir)
+		etcdCmd, etcdErr := startManagedEtcd(etcdDataDir)
+		if etcdErr != nil {
+			return fmt.Errorf("failed to start managed etcd: %w", etcdErr)
 		}
-	case "redis", "etcd":
-		// no-op: external backends don't need local directories
-	default:
-		return fmt.Errorf("unsupported store backend: %s", storeBackend)
+		defer stopManagedEtcd(etcdCmd)
+		storeAddress = managedEtcdClientURL
+		fmt.Printf("Managed etcd started: %s\n", storeAddress)
+	} else {
+		// Resolve default address for external etcd
+		storeAddress = resolveDefaultStoreAddress(storeBackend, storeAddress)
+	}
+
+	// Only etcd is supported
+	if storeBackend != "etcd" {
+		return fmt.Errorf("unsupported store backend: %s (only etcd is supported)", storeBackend)
 	}
 
 	fmt.Printf("Connecting to %s at %s...\n", storeBackend, storeAddress)
@@ -245,6 +385,11 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		GRPCPort:     engineGRPCPort,
 		Password:     cfg.Security.Password,
 		DataDir:      engineDataDir,
+		EtcdUsername: cfg.Engine.EtcdUsername,
+		EtcdPassword: cfg.Engine.EtcdPassword,
+		EtcdCertFile: cfg.Engine.EtcdCertFile,
+		EtcdKeyFile:  cfg.Engine.EtcdKeyFile,
+		EtcdCAFile:   cfg.Engine.EtcdCAFile,
 	})
 	if err != nil {
 		return err
@@ -271,20 +416,89 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 }
 
 // resolveDefaultStoreAddress returns the store address, applying defaults per backend.
-func resolveDefaultStoreAddress(backend, address, dataDir string) string {
+func resolveDefaultStoreAddress(backend, address string) string {
 	if address != "" {
 		return address
 	}
+	// Only etcd is supported now
 	switch backend {
-	case "badger":
-		return filepath.Join(dataDir, "store")
-	case "redis":
-		return "localhost:6379"
 	case "etcd":
-		return "http://localhost:2379"
+		return "http://127.0.0.1:2379"
 	default:
 		return address
 	}
+}
+
+// managedEtcdClientURL is the default client URL for managed etcd.
+const managedEtcdClientURL = "http://127.0.0.1:2379"
+
+// startManagedEtcd starts an etcd process using the system-installed etcd binary.
+// It waits for etcd to become healthy before returning.
+func startManagedEtcd(dataDir string) (*exec.Cmd, error) {
+	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create etcd data dir: %w", err)
+	}
+
+	etcdCmd := exec.Command("etcd",
+		"--data-dir", dataDir,
+		"--listen-client-urls", managedEtcdClientURL,
+		"--advertise-client-urls", managedEtcdClientURL,
+		"--listen-peer-urls", "http://127.0.0.1:2380",
+	)
+	etcdCmd.Stdout = os.Stdout
+	etcdCmd.Stderr = os.Stderr
+
+	if err := etcdCmd.Start(); err != nil {
+		return nil, fmt.Errorf("start etcd: %w", err)
+	}
+
+	// Wait for etcd to become healthy
+	if err := waitForEtcd(managedEtcdClientURL, 10*time.Second); err != nil {
+		// etcd failed to start — kill the process
+		_ = etcdCmd.Process.Kill()
+		return nil, fmt.Errorf("etcd did not become healthy: %w", err)
+	}
+
+	return etcdCmd, nil
+}
+
+// waitForEtcd polls the etcd health endpoint until it responds OK or the timeout expires.
+func waitForEtcd(clientURL string, timeout time.Duration) error {
+	healthURL := clientURL + "/health"
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(healthURL) //nolint:gosec // managed etcd on localhost
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for etcd at %s", clientURL)
+}
+
+// stopManagedEtcd gracefully stops the managed etcd process.
+func stopManagedEtcd(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	// Send SIGTERM for graceful shutdown
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+
+	// Wait up to 5 seconds for clean exit
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+		// Process exited
+	case <-time.After(5 * time.Second):
+		// Force kill if it didn't stop
+		_ = cmd.Process.Kill()
+		<-done
+	}
+	fmt.Println("Managed etcd stopped")
 }
 
 func runEngineStop(cmd *cobra.Command, args []string) error {
@@ -303,18 +517,20 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 	storeBackend, storeAddress := resolveStoreConfig(cmd)
 
 	// Use default address per backend if not configured
-	if storeAddress == "" {
-		switch storeBackend {
-		case "badger":
-			storeAddress = filepath.Join(engineDataDir, "store")
-		case "redis":
-			storeAddress = "localhost:6379"
-		case "etcd":
-			storeAddress = "http://localhost:2379"
-		}
+	if storeAddress == "" && storeBackend == "etcd" {
+		storeAddress = "http://127.0.0.1:2379"
 	}
 
-	store, err := storage.NewStore(storeBackend, storeAddress, "/banyan")
+	cfg, _ := types.LoadConfig(configPath)
+	store, err := storage.NewStoreWithOptions(&storage.EtcdOptions{
+		Endpoints: []string{storeAddress},
+		Prefix:    "/banyan",
+		Username:  cfg.Engine.EtcdUsername,
+		Password:  cfg.Engine.EtcdPassword,
+		CertFile:  cfg.Engine.EtcdCertFile,
+		KeyFile:   cfg.Engine.EtcdKeyFile,
+		CAFile:    cfg.Engine.EtcdCAFile,
+	})
 	if err != nil {
 		fmt.Printf("Store (%s): NOT RUNNING\n", storeBackend)
 		fmt.Printf("Connection: FAILED (%v)\n", err)

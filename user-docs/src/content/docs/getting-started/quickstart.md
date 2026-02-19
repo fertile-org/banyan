@@ -16,7 +16,13 @@ sudo banyan-engine init
 sudo banyan-engine start
 ```
 
-The Engine opens its embedded data store (BadgerDB), starts the gRPC server, and begins watching for deployments. No external database required. It runs in the foreground — open a new terminal for the next steps.
+The init wizard asks for:
+- **Cluster password** — protects all engine-agent-CLI communication. Every agent and CLI client must use the same password.
+- **Etcd setup** — choose **Managed** (Banyan runs etcd for you, recommended) or **External** (connect to your own etcd cluster).
+
+For a quickstart, pick **Managed** and you're done — no external database required.
+
+The Engine starts etcd, opens the gRPC server, and begins watching for deployments. It runs in the foreground — open a new terminal for the next steps.
 
 ## 2. Start an Agent
 
@@ -27,12 +33,21 @@ sudo banyan-agent init
 sudo banyan-agent start --node-name local-worker
 ```
 
+The init wizard asks for:
+- **Engine host** — where the engine is running (`localhost` for single-machine).
+- **Engine gRPC port** — default `50051`.
+- **Banyan cluster password** — must match the password you set on the engine.
+
+## 3. Configure the CLI
+
 In a third terminal, initialize the CLI and verify the connection:
 
 ```bash
 sudo banyan-cli init
 banyan-cli status
 ```
+
+The init wizard asks the same three things: engine host, port, and cluster password.
 
 ```
 Agents: 1

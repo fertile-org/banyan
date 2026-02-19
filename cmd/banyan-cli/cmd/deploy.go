@@ -20,6 +20,13 @@ var (
 	deployNoWait bool
 )
 
+// Function variables for external commands, enabling test mocking.
+var (
+	buildImageFunc = buildImage
+	tagImageFunc   = tagImage
+	pushImageFunc  = pushImage
+)
+
 var deployCmd = &cobra.Command{
 	Use:   "deploy",
 	Short: "Deploy applications from banyan.yaml",
@@ -53,6 +60,32 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployNoWait, "no-wait", false, "Don't wait for deployment to complete")
 }
 
+// validateManifest checks that a manifest has a name, services, and each service has an image or build config.
+func validateManifest(manifest types.BanyanManifest) error {
+	if manifest.Name == "" {
+		return fmt.Errorf("manifest must have a name")
+	}
+	if len(manifest.Services) == 0 {
+		return fmt.Errorf("manifest must define at least one service")
+	}
+	for name, svc := range manifest.Services { //nolint:gocritic // map iteration
+		if svc.Image == "" && svc.Build == nil {
+			return fmt.Errorf("service %q must have either 'image' or 'build'", name)
+		}
+	}
+	return nil
+}
+
+// buildImageArgs constructs nerdctl build arguments.
+func buildImageArgs(imageName, contextPath, dockerfile string) []string {
+	args := []string{"build", "-t", imageName}
+	if dockerfile != "" {
+		args = append(args, "-f", filepath.Join(contextPath, dockerfile))
+	}
+	args = append(args, contextPath)
+	return args
+}
+
 func runDeploy(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Deploy")
 	fmt.Println("========================================")
@@ -69,17 +102,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to parse manifest: %w", parseErr)
 	}
 
-	if manifest.Name == "" {
-		return fmt.Errorf("manifest must have a name")
-	}
-	if len(manifest.Services) == 0 {
-		return fmt.Errorf("manifest must define at least one service")
-	}
-
-	for name, svc := range manifest.Services { //nolint:gocritic // map iteration
-		if svc.Image == "" && svc.Build == nil {
-			return fmt.Errorf("service %q must have either 'image' or 'build'", name)
-		}
+	err = validateManifest(manifest)
+	if err != nil {
+		return err
 	}
 
 	// Build images for services with build config
@@ -228,7 +253,7 @@ func buildServiceImages(manifestDir, appName string, services map[string]types.M
 		}
 
 		fmt.Printf("  Building %s → %s\n", name, imageName)
-		if err := buildImage(imageName, contextPath, svc.Build.Dockerfile); err != nil {
+		if err := buildImageFunc(imageName, contextPath, svc.Build.Dockerfile); err != nil {
 			return fmt.Errorf("failed to build image for service %q: %w", name, err)
 		}
 	}
@@ -282,12 +307,12 @@ func pushServiceImages(registryURL string, services map[string]types.ManifestSer
 		registryImage := fmt.Sprintf("%s/%s", registryURL, localImage)
 
 		fmt.Printf("  Tagging %s → %s\n", localImage, registryImage)
-		if err := tagImage(localImage, registryImage); err != nil {
+		if err := tagImageFunc(localImage, registryImage); err != nil {
 			return fmt.Errorf("failed to tag image for service %q: %w", name, err)
 		}
 
 		fmt.Printf("  Pushing %s...\n", registryImage)
-		if err := pushImage(registryImage); err != nil {
+		if err := pushImageFunc(registryImage); err != nil {
 			return fmt.Errorf("failed to push image for service %q: %w", name, err)
 		}
 

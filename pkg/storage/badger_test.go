@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"os"
 	"testing"
 
 	"github.com/dgraph-io/badger/v4"
@@ -156,6 +157,132 @@ func TestBadgerStore_List(t *testing.T) {
 }
 
 func TestBadgerStore_Close(t *testing.T) {
+	t.Run("close open db", func(t *testing.T) {
+		opts := badger.DefaultOptions(t.TempDir())
+		opts.Logger = nil
+		db, err := badger.Open(opts)
+		if err != nil {
+			t.Fatalf("failed to open badger: %v", err)
+		}
+
+		store := NewBadgerStoreWithDB(db, "/banyan")
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
+
+	t.Run("close nil db", func(t *testing.T) {
+		store := &BadgerStore{db: nil, prefix: "/banyan/"}
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close with nil db should not error: %v", err)
+		}
+	})
+}
+
+func TestNewBadgerStore(t *testing.T) {
+	t.Run("creates with default prefix", func(t *testing.T) {
+		store, err := NewBadgerStore(t.TempDir(), "")
+		if err != nil {
+			t.Fatalf("NewBadgerStore failed: %v", err)
+		}
+		defer store.Close()
+		if store.prefix != "/banyan/" {
+			t.Errorf("expected default prefix '/banyan/', got %q", store.prefix)
+		}
+	})
+
+	t.Run("adds trailing slash to prefix", func(t *testing.T) {
+		store, err := NewBadgerStore(t.TempDir(), "/custom")
+		if err != nil {
+			t.Fatalf("NewBadgerStore failed: %v", err)
+		}
+		defer store.Close()
+		if store.prefix != "/custom/" {
+			t.Errorf("expected '/custom/', got %q", store.prefix)
+		}
+	})
+
+	t.Run("saves and retrieves data", func(t *testing.T) {
+		store, err := NewBadgerStore(t.TempDir(), "/banyan")
+		if err != nil {
+			t.Fatalf("NewBadgerStore failed: %v", err)
+		}
+		defer store.Close()
+
+		ctx := context.Background()
+		if err := store.Save(ctx, "k", "v"); err != nil {
+			t.Fatalf("Save failed: %v", err)
+		}
+		var got string
+		if err := store.Get(ctx, "k", &got); err != nil {
+			t.Fatalf("Get failed: %v", err)
+		}
+		if got != "v" {
+			t.Errorf("expected 'v', got %q", got)
+		}
+	})
+}
+
+func TestBadgerStore_Overwrite(t *testing.T) {
+	store := newTestBadgerStore(t)
+	ctx := context.Background()
+
+	store.Save(ctx, "key", "first")
+	store.Save(ctx, "key", "second")
+
+	var got string
+	if err := store.Get(ctx, "key", &got); err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got != "second" {
+		t.Errorf("expected 'second', got %q", got)
+	}
+}
+
+func TestBadgerStore_GetUnmarshalError(t *testing.T) {
+	store := newTestBadgerStore(t)
+	ctx := context.Background()
+
+	// Write raw invalid JSON bytes directly to badger
+	fullKey := store.prefix + "bad-json"
+	err := store.db.Update(func(txn *badger.Txn) error {
+		return txn.Set([]byte(fullKey), []byte("not valid json {{{"))
+	})
+	if err != nil {
+		t.Fatalf("failed to write raw data: %v", err)
+	}
+
+	var got string
+	err = store.Get(ctx, "bad-json", &got)
+	if err == nil {
+		t.Fatal("expected unmarshal error for corrupt data")
+	}
+}
+
+func TestBadgerStore_SaveMarshalError(t *testing.T) {
+	store := newTestBadgerStore(t)
+	ctx := context.Background()
+
+	// A channel cannot be JSON-marshalled
+	err := store.Save(ctx, "bad-key", make(chan int))
+	if err == nil {
+		t.Fatal("expected marshal error for unsupported type")
+	}
+}
+
+func TestNewBadgerStore_InvalidDir(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("cannot test invalid dir as root")
+	}
+
+	// Use a path under /dev/null which cannot be a directory
+	_, err := NewBadgerStore("/dev/null/badger-test", "/banyan")
+	if err == nil {
+		t.Fatal("expected error for invalid directory")
+	}
+}
+
+func TestBadgerStore_SaveAfterClose(t *testing.T) {
 	opts := badger.DefaultOptions(t.TempDir())
 	opts.Logger = nil
 	db, err := badger.Open(opts)
@@ -164,9 +291,38 @@ func TestBadgerStore_Close(t *testing.T) {
 	}
 
 	store := NewBadgerStoreWithDB(db, "/banyan")
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close failed: %v", err)
-	}
+	store.Close()
+
+	ctx := context.Background()
+
+	t.Run("save after close", func(t *testing.T) {
+		err := store.Save(ctx, "key", "value")
+		if err == nil {
+			t.Fatal("expected error when saving to closed db")
+		}
+	})
+
+	t.Run("get after close", func(t *testing.T) {
+		var got string
+		err := store.Get(ctx, "key", &got)
+		if err == nil {
+			t.Fatal("expected error when getting from closed db")
+		}
+	})
+
+	t.Run("delete after close", func(t *testing.T) {
+		err := store.Delete(ctx, "key")
+		if err == nil {
+			t.Fatal("expected error when deleting from closed db")
+		}
+	})
+
+	t.Run("list after close", func(t *testing.T) {
+		_, err := store.List(ctx, "")
+		if err == nil {
+			t.Fatal("expected error when listing from closed db")
+		}
+	})
 }
 
 func TestBadgerStore_PrefixHandling(t *testing.T) {

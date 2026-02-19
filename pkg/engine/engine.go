@@ -359,6 +359,11 @@ func DetermineEngineIP() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to get interface addresses: %w", err)
 	}
+	return findNonLoopbackIPv4(addrs)
+}
+
+// findNonLoopbackIPv4 returns the first non-loopback IPv4 address from the given list.
+func findNonLoopbackIPv4(addrs []net.Addr) (string, error) {
 	for _, addr := range addrs {
 		ipNet, ok := addr.(*net.IPNet)
 		if !ok {

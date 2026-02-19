@@ -34,6 +34,15 @@ type Agent struct {
 	sessionToken string
 }
 
+// Package-level function variables for testing.
+var (
+	taskExecutor        = executeTask
+	containerStatusFunc = getContainerStatus
+	commandRunner       = runCommand
+	containerIDGetter   = getContainerID
+	containerRemover    = removeContainer
+)
+
 // New creates a new Agent with a random session token.
 func New(opts *Options) (*Agent, error) {
 	tokenBytes := make([]byte, 32)
@@ -129,7 +138,7 @@ func (a *Agent) processTasks(ctx context.Context) {
 		fmt.Printf("[Agent] Executing task %s: %s (image: %s)\n", pbTask.Id, pbTask.Type, pbTask.Image)
 
 		task := pbTaskToLocal(pbTask)
-		result, err := executeTask(ctx, task)
+		result, err := taskExecutor(ctx, task)
 		if err != nil {
 			if reportErr := a.client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusFailed, err.Error(), pbTask.ContainerName, nil); reportErr != nil {
 				fmt.Printf("[Agent] WARNING: failed to report failure for task %s: %v\n", pbTask.Id, reportErr)
@@ -186,18 +195,18 @@ func executeTask(ctx context.Context, task *types.TaskRecord) (*types.TaskResult
 
 func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
 	fmt.Printf("[Agent]   Pulling image %s...\n", task.Image)
-	if err := runCommand(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
+	if err := commandRunner(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
 		return nil, fmt.Errorf("failed to pull image %s: %v", task.Image, err)
 	}
 
 	args := buildNerdctlRunArgs(task)
 
 	fmt.Printf("[Agent]   Starting container %s...\n", task.ContainerName)
-	if err := runCommand(ctx, "nerdctl", args...); err != nil {
+	if err := commandRunner(ctx, "nerdctl", args...); err != nil {
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
 
-	containerID, err := getContainerID(ctx, task.ContainerName)
+	containerID, err := containerIDGetter(ctx, task.ContainerName)
 	if err != nil {
 		containerID = "unknown"
 	}
@@ -210,19 +219,27 @@ func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.
 func executeStopAndRemove(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
 	fmt.Printf("[Agent]   Removing container %s...\n", task.ContainerName)
 
-	rmCmd := exec.CommandContext(ctx, "nerdctl", "rm", "-f", task.ContainerName) //nolint:gosec // container name comes from engine
+	if err := containerRemover(ctx, task.ContainerName); err != nil {
+		return nil, err
+	}
+
+	return &types.TaskResultRecord{}, nil
+}
+
+// removeContainer force-removes a container by name using nerdctl.
+func removeContainer(ctx context.Context, containerName string) error {
+	rmCmd := exec.CommandContext(ctx, "nerdctl", "rm", "-f", containerName) //nolint:gosec // container name comes from engine
 	var stderr bytes.Buffer
 	rmCmd.Stderr = &stderr
 	if err := rmCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "No such container") {
-			fmt.Printf("[Agent]   Container %s already removed\n", task.ContainerName)
-			return &types.TaskResultRecord{}, nil
+			fmt.Printf("[Agent]   Container %s already removed\n", containerName)
+			return nil
 		}
-		return nil, fmt.Errorf("failed to remove container: %s", errMsg)
+		return fmt.Errorf("failed to remove container: %s", errMsg)
 	}
-
-	return &types.TaskResultRecord{}, nil
+	return nil
 }
 
 func runCommand(ctx context.Context, name string, args ...string) error {
@@ -319,7 +336,7 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 
 	var statuses []*banyanpb.ContainerStatus
 	for _, c := range tracked {
-		status := getContainerStatus(ctx, c.containerName)
+		status := containerStatusFunc(ctx, c.containerName)
 		statuses = append(statuses, &banyanpb.ContainerStatus{
 			ContainerName: c.containerName,
 			Status:        status,

@@ -223,22 +223,14 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Store backend: %s\n", storeBackend)
 
 	// Resolve default addresses per backend
+	storeAddress = resolveDefaultStoreAddress(storeBackend, storeAddress, engineDataDir)
 	switch storeBackend {
 	case "badger":
-		if storeAddress == "" {
-			storeAddress = filepath.Join(engineDataDir, "store")
-		}
 		if mkdirErr := os.MkdirAll(storeAddress, 0o755); mkdirErr != nil {
 			return fmt.Errorf("failed to create badger data directory: %w", mkdirErr)
 		}
-	case "redis":
-		if storeAddress == "" {
-			storeAddress = "localhost:6379"
-		}
-	case "etcd":
-		if storeAddress == "" {
-			storeAddress = "http://localhost:2379"
-		}
+	case "redis", "etcd":
+		// no-op: external backends don't need local directories
 	default:
 		return fmt.Errorf("unsupported store backend: %s", storeBackend)
 	}
@@ -276,6 +268,23 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("Engine stopped")
 	return nil
+}
+
+// resolveDefaultStoreAddress returns the store address, applying defaults per backend.
+func resolveDefaultStoreAddress(backend, address, dataDir string) string {
+	if address != "" {
+		return address
+	}
+	switch backend {
+	case "badger":
+		return filepath.Join(dataDir, "store")
+	case "redis":
+		return "localhost:6379"
+	case "etcd":
+		return "http://localhost:2379"
+	default:
+		return address
+	}
 }
 
 func runEngineStop(cmd *cobra.Command, args []string) error {

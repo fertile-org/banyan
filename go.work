@@ -4,7 +4,6 @@ use (
 	./cmd/banyan-agent
 	./cmd/banyan-cli
 	./cmd/banyan-engine
-	./internal/common
 	./pkg/agent
 	./pkg/engine
 	./pkg/rpc

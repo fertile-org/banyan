@@ -41,28 +41,35 @@ func init() {
 	downCmd.Flags().BoolVar(&downNoWait, "no-wait", false, "Don't wait for services to stop")
 }
 
+// resolveAppName determines the application name from explicit name or manifest file.
+func resolveAppName(name, filePath string) (string, error) {
+	if name != "" {
+		return name, nil
+	}
+	if filePath == "" {
+		return "", fmt.Errorf("either --name or --file must be provided")
+	}
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read manifest: %w", err)
+	}
+	var manifest types.BanyanManifest
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		return "", fmt.Errorf("failed to parse manifest: %w", err)
+	}
+	if manifest.Name == "" {
+		return "", fmt.Errorf("manifest must have a name")
+	}
+	return manifest.Name, nil
+}
+
 func runDown(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Down")
 	fmt.Println("========================================")
 
-	// Determine app name from --name or --file
-	appName := downName
-	if appName == "" && downFile == "" {
-		return fmt.Errorf("either --name or --file must be provided")
-	}
-	if appName == "" {
-		data, err := os.ReadFile(downFile)
-		if err != nil {
-			return fmt.Errorf("failed to read manifest: %w", err)
-		}
-		var manifest types.BanyanManifest
-		if err := yaml.Unmarshal(data, &manifest); err != nil {
-			return fmt.Errorf("failed to parse manifest: %w", err)
-		}
-		if manifest.Name == "" {
-			return fmt.Errorf("manifest must have a name")
-		}
-		appName = manifest.Name
+	appName, err := resolveAppName(downName, downFile)
+	if err != nil {
+		return err
 	}
 
 	// Resolve engine endpoint from config

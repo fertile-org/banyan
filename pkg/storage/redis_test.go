@@ -153,10 +153,61 @@ func TestRedisStore_List(t *testing.T) {
 }
 
 func TestRedisStore_Close(t *testing.T) {
-	store, _ := newTestRedisStore(t)
+	t.Run("close open client", func(t *testing.T) {
+		store, _ := newTestRedisStore(t)
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close failed: %v", err)
+		}
+	})
 
-	if err := store.Close(); err != nil {
-		t.Fatalf("Close failed: %v", err)
+	t.Run("close nil client", func(t *testing.T) {
+		store := &RedisStore{client: nil, prefix: "/banyan/"}
+		if err := store.Close(); err != nil {
+			t.Fatalf("Close with nil client should not error: %v", err)
+		}
+	})
+}
+
+func TestRedisStore_Overwrite(t *testing.T) {
+	store, _ := newTestRedisStore(t)
+	ctx := context.Background()
+
+	store.Save(ctx, "key", "first")
+	store.Save(ctx, "key", "second")
+
+	var got string
+	if err := store.Get(ctx, "key", &got); err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got != "second" {
+		t.Errorf("expected 'second', got %q", got)
+	}
+}
+
+func TestNewRedisStore_DefaultAddress(t *testing.T) {
+	// This test verifies the constructor behavior with miniredis
+	mr := miniredis.RunT(t)
+	store, err := NewRedisStore(mr.Addr(), "")
+	if err != nil {
+		t.Fatalf("NewRedisStore failed: %v", err)
+	}
+	defer store.Close()
+
+	if store.prefix != "/banyan/" {
+		t.Errorf("expected default prefix '/banyan/', got %q", store.prefix)
+	}
+}
+
+func TestNewRedisStore_PrefixNoSlash(t *testing.T) {
+	mr := miniredis.RunT(t)
+	store, err := NewRedisStore(mr.Addr(), "/custom")
+	if err != nil {
+		t.Fatalf("NewRedisStore failed: %v", err)
+	}
+	defer store.Close()
+
+	if store.prefix != "/custom/" {
+		t.Errorf("expected '/custom/', got %q", store.prefix)
 	}
 }
 
@@ -175,6 +226,71 @@ func TestRedisStore_PrefixHandling(t *testing.T) {
 		store := NewRedisStoreWithClient(client, "/test")
 		if store.prefix != "/test/" {
 			t.Errorf("expected '/test/', got %q", store.prefix)
+		}
+	})
+}
+
+func TestRedisStore_SaveMarshalError(t *testing.T) {
+	store, _ := newTestRedisStore(t)
+	ctx := context.Background()
+
+	// A channel cannot be JSON-marshalled
+	err := store.Save(ctx, "bad-key", make(chan int))
+	if err == nil {
+		t.Fatal("expected marshal error for unsupported type")
+	}
+}
+
+func TestRedisStore_GetUnmarshalError(t *testing.T) {
+	store, mr := newTestRedisStore(t)
+	ctx := context.Background()
+
+	// Write invalid JSON directly to miniredis
+	mr.Set(store.prefix+"bad-json", "not valid json {{{")
+
+	var got string
+	err := store.Get(ctx, "bad-json", &got)
+	if err == nil {
+		t.Fatal("expected unmarshal error for corrupt data")
+	}
+}
+
+func TestRedisStore_ServerDown(t *testing.T) {
+	store, mr := newTestRedisStore(t)
+	ctx := context.Background()
+
+	// Save some data first
+	store.Save(ctx, "key1", "value1")
+
+	// Close miniredis to simulate server failure
+	mr.Close()
+
+	t.Run("save fails", func(t *testing.T) {
+		err := store.Save(ctx, "key2", "value2")
+		if err == nil {
+			t.Fatal("expected error when redis is down")
+		}
+	})
+
+	t.Run("get fails", func(t *testing.T) {
+		var got string
+		err := store.Get(ctx, "key1", &got)
+		if err == nil {
+			t.Fatal("expected error when redis is down")
+		}
+	})
+
+	t.Run("delete fails", func(t *testing.T) {
+		err := store.Delete(ctx, "key1")
+		if err == nil {
+			t.Fatal("expected error when redis is down")
+		}
+	})
+
+	t.Run("list fails", func(t *testing.T) {
+		_, err := store.List(ctx, "")
+		if err == nil {
+			t.Fatal("expected error when redis is down")
 		}
 	})
 }

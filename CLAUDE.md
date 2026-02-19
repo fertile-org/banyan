@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Claude Code when working with code in this repository.
 
 ## **IMPORTANT: Development Rules**
 
@@ -19,6 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **All functions in this repository need unit tests.** When adding new functions or updating existing ones, you MUST review and update the corresponding unit tests.
 
 - **When writing unit tests, make them simple and easy to understand.** Don't over-engineer unit tests.
+
+- **Unit test code coverage must be > 90%** When adding new functions or updating existing ones, you MUST add unit tests to ensure that the code coverage remains above 90%. In case the function already has low coverage before, you MUST add unit tests to increase the coverage to above 90%.
 
 - **ALWAYS use Serena MCP server for codebase understanding.** Before starting any task, use the Serena tools to understand the current codebase structure and context. This ensures you have complete, up-to-date knowledge of the project.
 

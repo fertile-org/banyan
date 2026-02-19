@@ -1,6 +1,9 @@
 package types
 
 import (
+	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -247,6 +250,193 @@ func TestSortedServiceNames(t *testing.T) {
 			t.Errorf("expected 0 names, got %d", len(names))
 		}
 	})
+}
+
+// helperStateStore is an in-memory StateStore for testing helpers.
+type helperStateStore struct {
+	data map[string]any
+}
+
+func (m *helperStateStore) Save(_ context.Context, key string, value any) error {
+	m.data[key] = value
+	return nil
+}
+
+func (m *helperStateStore) Get(_ context.Context, key string, dest any) error {
+	v, ok := m.data[key]
+	if !ok {
+		return fmt.Errorf("key not found: %s", key)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, dest)
+}
+
+func (m *helperStateStore) List(_ context.Context, prefix string) ([]string, error) {
+	var keys []string
+	for k := range m.data {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+func TestCollectDeploymentTasks(t *testing.T) {
+	t.Run("collects tasks across multiple agents", func(t *testing.T) {
+		store := &helperStateStore{data: map[string]any{}}
+		ctx := context.Background()
+
+		// Create two nodes
+		store.Save(ctx, KeyNodes+"agent-1", NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, KeyNodes+"agent-2", NodeRecord{Name: "agent-2", Status: "ready"})
+
+		// Create tasks for deployment "deploy-1"
+		store.Save(ctx, KeyTasks+"agent-1/task-1", TaskRecord{ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1"})
+		store.Save(ctx, KeyTasks+"agent-2/task-2", TaskRecord{ID: "task-2", DeploymentID: "deploy-1", AgentID: "agent-2"})
+
+		// Create a task for a different deployment
+		store.Save(ctx, KeyTasks+"agent-1/task-3", TaskRecord{ID: "task-3", DeploymentID: "deploy-2", AgentID: "agent-1"})
+
+		tasks := CollectDeploymentTasks(ctx, store, "deploy-1")
+		if len(tasks) != 2 {
+			t.Fatalf("expected 2 tasks, got %d", len(tasks))
+		}
+	})
+
+	t.Run("empty store returns nil", func(t *testing.T) {
+		store := &helperStateStore{data: map[string]any{}}
+		tasks := CollectDeploymentTasks(context.Background(), store, "deploy-1")
+		if len(tasks) != 0 {
+			t.Errorf("expected 0 tasks, got %d", len(tasks))
+		}
+	})
+
+	t.Run("no matching deployment returns nil", func(t *testing.T) {
+		store := &helperStateStore{data: map[string]any{}}
+		ctx := context.Background()
+
+		store.Save(ctx, KeyNodes+"agent-1", NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, KeyTasks+"agent-1/task-1", TaskRecord{ID: "task-1", DeploymentID: "other-deploy", AgentID: "agent-1"})
+
+		tasks := CollectDeploymentTasks(ctx, store, "deploy-1")
+		if len(tasks) != 0 {
+			t.Errorf("expected 0 tasks, got %d", len(tasks))
+		}
+	})
+}
+
+// errorStateStore is a StateStore that can inject errors for specific operations.
+type errorStateStore struct {
+	data          map[string]any
+	listError     error           // if set, List returns this error
+	listErrorFor  string          // if set, List returns listError only for this prefix
+	getErrorKeys  map[string]bool // keys for which Get returns an error
+}
+
+func (m *errorStateStore) Save(_ context.Context, key string, value any) error {
+	m.data[key] = value
+	return nil
+}
+
+func (m *errorStateStore) Get(_ context.Context, key string, dest any) error {
+	if m.getErrorKeys != nil && m.getErrorKeys[key] {
+		return fmt.Errorf("injected get error for key: %s", key)
+	}
+	v, ok := m.data[key]
+	if !ok {
+		return fmt.Errorf("key not found: %s", key)
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, dest)
+}
+
+func (m *errorStateStore) List(_ context.Context, prefix string) ([]string, error) {
+	if m.listError != nil {
+		if m.listErrorFor == "" || m.listErrorFor == prefix {
+			return nil, m.listError
+		}
+	}
+	var keys []string
+	for k := range m.data {
+		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
+			keys = append(keys, k)
+		}
+	}
+	return keys, nil
+}
+
+func TestCollectDeploymentTasks_NodeListError(t *testing.T) {
+	store := &errorStateStore{
+		data:      map[string]any{},
+		listError: fmt.Errorf("store unavailable"),
+	}
+	tasks := CollectDeploymentTasks(context.Background(), store, "deploy-1")
+	if tasks != nil {
+		t.Errorf("expected nil when node list fails, got %v", tasks)
+	}
+}
+
+func TestCollectDeploymentTasks_NodeGetError(t *testing.T) {
+	store := &errorStateStore{
+		data:         map[string]any{},
+		getErrorKeys: map[string]bool{KeyNodes + "agent-bad": true},
+	}
+	ctx := context.Background()
+
+	// Save a valid node and a "bad" node key
+	store.Save(ctx, KeyNodes+"agent-good", NodeRecord{Name: "agent-good", Status: "ready"})
+	store.data[KeyNodes+"agent-bad"] = "invalid-data" // raw string that will fail to unmarshal into NodeRecord
+
+	// Save a task under agent-good
+	store.Save(ctx, KeyTasks+"agent-good/task-1", TaskRecord{ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-good"})
+
+	tasks := CollectDeploymentTasks(ctx, store, "deploy-1")
+	// Should still collect tasks from agent-good, skipping agent-bad
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task (from good agent), got %d", len(tasks))
+	}
+}
+
+func TestCollectDeploymentTasks_TaskListError(t *testing.T) {
+	store := &errorStateStore{
+		data:         map[string]any{},
+		listError:    fmt.Errorf("task list error"),
+		listErrorFor: KeyTasks + "agent-1/",
+	}
+	ctx := context.Background()
+
+	store.Save(ctx, KeyNodes+"agent-1", NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, KeyTasks+"agent-1/task-1", TaskRecord{ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1"})
+
+	tasks := CollectDeploymentTasks(ctx, store, "deploy-1")
+	// task list fails for agent-1, so no tasks collected
+	if len(tasks) != 0 {
+		t.Errorf("expected 0 tasks when task list fails, got %d", len(tasks))
+	}
+}
+
+func TestCollectDeploymentTasks_TaskGetError(t *testing.T) {
+	store := &errorStateStore{
+		data:         map[string]any{},
+		getErrorKeys: map[string]bool{KeyTasks + "agent-1/task-bad": true},
+	}
+	ctx := context.Background()
+
+	store.Save(ctx, KeyNodes+"agent-1", NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, KeyTasks+"agent-1/task-good", TaskRecord{ID: "task-good", DeploymentID: "deploy-1", AgentID: "agent-1"})
+	store.data[KeyTasks+"agent-1/task-bad"] = "corrupt" // will cause Get error
+
+	tasks := CollectDeploymentTasks(ctx, store, "deploy-1")
+	// Should collect task-good but skip task-bad
+	if len(tasks) != 1 {
+		t.Errorf("expected 1 task (skipping bad task), got %d", len(tasks))
+	}
 }
 
 func assertSliceEqual(t *testing.T, expected, got []string) {

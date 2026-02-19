@@ -16,6 +16,10 @@ jobs:
           - cmd/banyan-agent
           - cmd/banyan-cli
           - pkg/types
+          - pkg/rpc
+          - pkg/storage
+          - pkg/engine
+          - pkg/agent
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +40,13 @@ jobs:
       matrix:
         module:
           - cmd/banyan-engine
+          - cmd/banyan-agent
           - cmd/banyan-cli
           - pkg/types
+          - pkg/rpc
+          - pkg/storage
+          - pkg/engine
+          - pkg/agent
     steps:
       - uses: actions/checkout@v4
 
@@ -50,7 +59,12 @@ jobs:
           GOWORK: "off"
         run: |
           cd ${{ matrix.module }}
-          go test -coverprofile=coverage.out -covermode=atomic ./...
+          # Exclude generated protobuf code (banyanpb) from coverage
+          if [ "${{ matrix.module }}" = "pkg/rpc" ]; then
+            go test -coverprofile=coverage.out -covermode=atomic -coverpkg=github.com/fertile-org/banyan/pkg/rpc ./...
+          else
+            go test -coverprofile=coverage.out -covermode=atomic ./...
+          fi
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

@@ -10,9 +10,21 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
+// etcdKV abstracts the etcd client operations used by EtcdStore.
+// *clientv3.Client satisfies this interface.
+type etcdKV interface {
+	Put(ctx context.Context, key, val string, opts ...clientv3.OpOption) (*clientv3.PutResponse, error)
+	Get(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.GetResponse, error)
+	Delete(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error)
+	Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error)
+	KeepAliveOnce(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseKeepAliveResponse, error)
+	Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan
+	Close() error
+}
+
 // EtcdStore implements StateStore using etcd as the backend
 type EtcdStore struct {
-	client *clientv3.Client
+	client etcdKV
 	prefix string // Key prefix for all VPC data (e.g., "/banyan/vpc/")
 }
 
@@ -55,7 +67,7 @@ func NewEtcdStore(endpoints []string, prefix string) (*EtcdStore, error) {
 }
 
 // NewEtcdStoreWithClient creates an EtcdStore with an existing client (useful for testing)
-func NewEtcdStoreWithClient(client *clientv3.Client, prefix string) *EtcdStore {
+func NewEtcdStoreWithClient(client etcdKV, prefix string) *EtcdStore {
 	if prefix == "" {
 		prefix = "/banyan/vpc/"
 	}

@@ -178,9 +178,11 @@ Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` fo
 
 Banyan is built for teams who:
 
-- Deploy to 1–20 servers
-- Know Docker Compose and want the same simplicity in production
-- Value getting things running over configuring infrastructure
+- **Know Docker Compose** and want the same simplicity across multiple servers
+- **Need to scale beyond one machine** without learning Kubernetes
+- **Value shipping software** over operating infrastructure
+
+Banyan bridges the gap between "docker compose up" and production orchestration — same syntax, distributed execution.
 
 ## Documentation
 

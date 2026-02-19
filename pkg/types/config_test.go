@@ -123,6 +123,34 @@ func TestLoadSaveConfig(t *testing.T) {
 			t.Errorf("expected engine.api_port=8443, got %s", loaded.Engine.APIPort)
 		}
 	})
+
+	t.Run("round-trip with store backend config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+		cfg := BanyanConfig{
+			Engine: EngineConfig{
+				StoreBackend: "redis",
+				StoreAddress: "localhost:6379",
+			},
+		}
+
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+
+		loaded, err := LoadConfig(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		if loaded.Engine.StoreBackend != "redis" {
+			t.Errorf("expected store_backend=redis, got %s", loaded.Engine.StoreBackend)
+		}
+		if loaded.Engine.StoreAddress != "localhost:6379" {
+			t.Errorf("expected store_address=localhost:6379, got %s", loaded.Engine.StoreAddress)
+		}
+	})
 }
 
 func TestGetConfigEngineEndpoint(t *testing.T) {
@@ -252,6 +280,22 @@ func TestGetCLIEngineEndpoint(t *testing.T) {
 		result := GetCLIEngineEndpoint(cfgPath)
 		if result != "" {
 			t.Errorf("expected empty string, got %s", result)
+		}
+	})
+}
+
+func TestGetStoreBackend(t *testing.T) {
+	t.Run("defaults to badger when empty", func(t *testing.T) {
+		cfg := EngineConfig{}
+		if got := cfg.GetStoreBackend(); got != "badger" {
+			t.Errorf("expected 'badger', got %q", got)
+		}
+	})
+
+	t.Run("returns configured backend", func(t *testing.T) {
+		cfg := EngineConfig{StoreBackend: "etcd"}
+		if got := cfg.GetStoreBackend(); got != "etcd" {
+			t.Errorf("expected 'etcd', got %q", got)
 		}
 	})
 }

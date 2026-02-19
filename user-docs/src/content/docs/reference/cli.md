@@ -9,7 +9,7 @@ Banyan uses three binaries:
 
 | Binary | Role | Install on |
 |--------|------|------------|
-| `banyan-engine` | Control plane (etcd, gRPC server, scheduling) | Engine node |
+| `banyan-engine` | Control plane (store backend, gRPC server, scheduling) | Engine node |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes |
 | `banyan-cli` | Client (deploy, status, logs) | Any machine |
 
@@ -21,7 +21,7 @@ Run on your control plane node.
 
 ### init
 
-Prepare the Engine node: creates data directories, verifies etcd is installed, and configures the cluster password.
+Prepare the Engine node: creates data directories, checks for the store backend, and configures the cluster password and store backend.
 
 ```bash
 sudo banyan-engine init
@@ -31,11 +31,14 @@ sudo banyan-engine init
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
 
-During init, you'll be prompted to set a cluster password. This password is stored in `/etc/banyan/banyan.yaml` and must match on all agents and CLI clients.
+During init, you'll be prompted to:
+1. Set a cluster password (stored in `/etc/banyan/banyan.yaml`, must match on all agents and CLI clients).
+2. Choose a store backend (`badger`, `redis`, or `etcd`, default: `badger`).
+3. For Redis/etcd: provide the store address (e.g. `localhost:6379` for Redis, `http://localhost:2379` for etcd). You must manage these processes yourself.
 
 ### start
 
-Start the Engine. Launches etcd, initializes networking, starts the gRPC server, and watches for deployments.
+Start the Engine. Opens the store backend (embedded BadgerDB by default, or connects to a user-managed Redis/etcd instance), initializes networking (etcd backend only), starts the gRPC server, and watches for deployments.
 
 ```bash
 sudo banyan-engine start
@@ -46,18 +49,15 @@ Runs in the foreground. Stop with `Ctrl+C`.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--etcd` | `http://localhost:2379` | Etcd endpoint |
-| `--etcd-client-urls` | `http://0.0.0.0:2379` | Etcd listen address |
-| `--etcd-data-dir` | `/var/lib/banyan/etcd` | Etcd data directory |
-| `--etcd-pid-file` | `/var/run/banyan-etcd.pid` | Etcd PID file |
-| `--etcd-log-file` | `/var/log/banyan-etcd.log` | Etcd log file |
+| `--store-backend` | (from config) | Store backend (`badger`, `redis`, or `etcd`) |
+| `--store-address` | (from config) | Store address (badger: data dir; redis/etcd: server address) |
 | `--grpc-port` | `50051` | Engine gRPC server port |
 | `--vpc-cidr` | `10.0.0.0/16` | VPC network CIDR range |
 | `--registry-port` | `5000` | Embedded OCI registry port |
 
 ### stop
 
-Stop the Engine and etcd.
+Stop the Engine.
 
 ```bash
 sudo banyan-engine stop
@@ -65,7 +65,7 @@ sudo banyan-engine stop
 
 ### status
 
-Show Engine status (agents, deployments, containers). Connects to etcd directly.
+Show Engine status (agents, deployments, containers). Connects to the configured store backend.
 
 ```bash
 banyan-engine status
@@ -73,8 +73,8 @@ banyan-engine status
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--etcd` | `http://localhost:2379` | Etcd endpoint |
-| `--etcd-pid-file` | `/var/run/banyan-etcd.pid` | Etcd PID file |
+| `--store-backend` | (from config) | Store backend (`badger`, `redis`, or `etcd`) |
+| `--store-address` | (from config) | Store address |
 
 ---
 

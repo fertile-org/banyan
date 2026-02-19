@@ -17,6 +17,7 @@ security:
     password: ${E2E_PASSWORD}
 engine:
     grpc_port: "50051"
+    store_backend: "badger"
 cli:
     engine_host: localhost
     engine_port: "50051"
@@ -27,6 +28,6 @@ chmod 600 /etc/banyan/banyan.yaml
 echo "Initializing engine..."
 echo "" | banyan-engine init
 
-# Start engine (this will also start etcd and the gRPC server)
+# Start engine (this will open the badger store and start the gRPC server)
 echo "Starting engine..."
-exec banyan-engine start --etcd-client-urls http://0.0.0.0:2379
+exec banyan-engine start

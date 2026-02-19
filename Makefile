@@ -33,6 +33,8 @@ proto:
 
 # Lint and format code
 lint:
+	cd pkg/engine && $(shell go env GOPATH)/bin/golangci-lint run
+	cd pkg/agent && $(shell go env GOPATH)/bin/golangci-lint run
 	cd cmd/banyan-engine && $(shell go env GOPATH)/bin/golangci-lint run
 	cd cmd/banyan-agent && $(shell go env GOPATH)/bin/golangci-lint run
 	cd cmd/banyan-cli && $(shell go env GOPATH)/bin/golangci-lint run
@@ -42,6 +44,8 @@ lint:
 
 # Auto-fix linting issues
 lint-fix:
+	cd pkg/engine && $(shell go env GOPATH)/bin/golangci-lint run --fix
+	cd pkg/agent && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd cmd/banyan-engine && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd cmd/banyan-agent && $(shell go env GOPATH)/bin/golangci-lint run --fix
 	cd cmd/banyan-cli && $(shell go env GOPATH)/bin/golangci-lint run --fix

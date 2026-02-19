@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Create CNI directories
-RUN mkdir -p /etc/cni/net.d /opt/cni/bin /var/lib/banyan /var/run
+RUN mkdir -p /etc/cni/net.d /opt/cni/bin /var/lib/banyan /var/lib/banyan/store /var/run
 
 # Download CNI plugins
 RUN curl -L https://github.com/containernetworking/plugins/releases/download/v1.4.0/cni-plugins-linux-amd64-v1.4.0.tgz \

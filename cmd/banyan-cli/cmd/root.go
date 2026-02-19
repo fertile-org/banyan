@@ -6,10 +6,10 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/vpc/security"
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 // configPath is the default path to the Banyan config file.

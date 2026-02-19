@@ -16,7 +16,7 @@ sudo banyan-engine init
 sudo banyan-engine start
 ```
 
-The Engine starts etcd, the gRPC server, and begins watching for deployments. It runs in the foreground — open a new terminal for the next steps.
+The Engine opens its embedded data store (BadgerDB), starts the gRPC server, and begins watching for deployments. No external database required. It runs in the foreground — open a new terminal for the next steps.
 
 ## 2. Start an Agent
 

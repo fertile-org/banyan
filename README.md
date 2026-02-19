@@ -127,7 +127,7 @@ Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` fo
 - **Minimal binaries** — `banyan-engine`, `banyan-agent`, and `banyan-cli`. Each does one job well.
 - **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
 - **Automatic distribution** — Containers spread across workers with round-robin scheduling. Add a server, it joins the next deployment.
-- **Proven foundations** — etcd for state coordination. containerd for running containers. No experimental runtimes.
+- **Proven foundations** — Embedded data store (BadgerDB) with zero external dependencies. Optional pluggable backends (Redis or etcd). containerd for running containers.
 
 ## Is Banyan right for you?
 

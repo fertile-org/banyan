@@ -5,16 +5,12 @@ use (
 	./cmd/banyan-cli
 	./cmd/banyan-engine
 	./internal/common
-	./pkg/agent/container
-	./pkg/agent/health
-	./pkg/agent/network
-	./pkg/agent/security
-	./pkg/agent/server
-	./pkg/agent/task
+	./pkg/agent
 	./pkg/engine
 	./pkg/rpc
 	./pkg/shared/domain
 	./pkg/shared/infrastructure
+	./pkg/storage
 	./pkg/types
 	./pkg/vpc
 	./test

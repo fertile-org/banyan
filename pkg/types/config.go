@@ -33,8 +33,18 @@ type SecurityConfig struct {
 
 // EngineConfig holds engine-specific settings.
 type EngineConfig struct {
-	APIPort  string `yaml:"api_port,omitempty"`
-	GRPCPort string `yaml:"grpc_port,omitempty"`
+	APIPort      string `yaml:"api_port,omitempty"`
+	GRPCPort     string `yaml:"grpc_port,omitempty"`
+	StoreBackend string `yaml:"store_backend,omitempty"` // "badger", "redis", or "etcd"
+	StoreAddress string `yaml:"store_address,omitempty"` // badger: data directory; redis/etcd: server address
+}
+
+// GetStoreBackend returns the configured store backend, defaulting to "badger".
+func (c *EngineConfig) GetStoreBackend() string {
+	if c.StoreBackend == "" {
+		return "badger"
+	}
+	return c.StoreBackend
 }
 
 // AgentConfig holds agent-specific settings.

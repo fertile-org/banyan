@@ -10,8 +10,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/vpc/cni"
-	"github.com/fertile-org/banyan/pkg/vpc/storage"
 )
 
 var cniCmd = &cobra.Command{

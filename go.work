@@ -8,7 +8,6 @@ use (
 	./pkg/engine
 	./pkg/rpc
 	./pkg/shared/domain
-	./pkg/shared/infrastructure
 	./pkg/storage
 	./pkg/types
 	./pkg/vpc

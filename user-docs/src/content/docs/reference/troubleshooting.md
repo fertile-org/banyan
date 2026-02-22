@@ -33,11 +33,23 @@ Agents connect to the Engine's gRPC port (default: 50051). Check:
    agent:
      engine_host: <engine-ip>
      engine_port: "50051"
+     auth_token: <token>
    ```
 
 3. Port 50051 is open in your firewall between workers and the engine.
 
-4. The agent and engine have the same cluster password.
+4. The agent has a valid auth token. If the token was revoked or the engine was re-initialized, run `sudo banyan-agent auth` to get a new token (or `sudo banyan-agent init` for full setup).
+
+### "Unauthenticated" errors
+
+If agents or CLI clients receive "Unauthenticated" errors:
+
+1. The auth token may have been revoked. Run `sudo banyan-agent auth` (or `sudo banyan-cli auth`) to re-authenticate with just the cluster password — no need to re-enter engine host/port/node name.
+2. If the engine was re-initialized, all existing tokens are invalidated. Run `auth` on all agents and CLI clients.
+3. If no config exists yet, run `sudo banyan-agent init` (or `sudo banyan-cli init`) for the full setup wizard.
+4. Make sure the engine was running when you ran `auth` or `init` — the password-to-token exchange requires a live connection.
+
+See [Authentication](/guides/authentication/) for details on how tokens work and their lifecycle.
 
 ### "VPC initialization: failed to write Flannel config"
 

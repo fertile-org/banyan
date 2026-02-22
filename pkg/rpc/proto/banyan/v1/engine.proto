@@ -18,6 +18,9 @@ service EngineService {
   rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
   rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Auth RPC — authenticated with password, returns a token
+  rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeTokenResponse);
 }
 
 // --- Agent messages ---
@@ -211,4 +214,13 @@ message HealthRequest {}
 
 message HealthResponse {
   string status = 1;
+}
+
+message ExchangeTokenRequest {
+  string name = 1;
+  string role = 2;
+}
+
+message ExchangeTokenResponse {
+  string token = 1;
 }

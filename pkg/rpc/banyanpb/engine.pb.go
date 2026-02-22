@@ -1977,6 +1977,102 @@ func (x *HealthResponse) GetStatus() string {
 	return ""
 }
 
+type ExchangeTokenRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Role          string                 `protobuf:"bytes,2,opt,name=role,proto3" json:"role,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExchangeTokenRequest) Reset() {
+	*x = ExchangeTokenRequest{}
+	mi := &file_engine_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExchangeTokenRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExchangeTokenRequest) ProtoMessage() {}
+
+func (x *ExchangeTokenRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExchangeTokenRequest.ProtoReflect.Descriptor instead.
+func (*ExchangeTokenRequest) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *ExchangeTokenRequest) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *ExchangeTokenRequest) GetRole() string {
+	if x != nil {
+		return x.Role
+	}
+	return ""
+}
+
+type ExchangeTokenResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExchangeTokenResponse) Reset() {
+	*x = ExchangeTokenResponse{}
+	mi := &file_engine_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExchangeTokenResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExchangeTokenResponse) ProtoMessage() {}
+
+func (x *ExchangeTokenResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExchangeTokenResponse.ProtoReflect.Descriptor instead.
+func (*ExchangeTokenResponse) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ExchangeTokenResponse) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
 var File_engine_proto protoreflect.FileDescriptor
 
 const file_engine_proto_rawDesc = "" +
@@ -2134,7 +2230,12 @@ const file_engine_proto_rawDesc = "" +
 	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\"\x0f\n" +
 	"\rHealthRequest\"(\n" +
 	"\x0eHealthResponse\x12\x16\n" +
-	"\x06status\x18\x01 \x01(\tR\x06status2\xbe\x06\n" +
+	"\x06status\x18\x01 \x01(\tR\x06status\">\n" +
+	"\x14ExchangeTokenRequest\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x12\n" +
+	"\x04role\x18\x02 \x01(\tR\x04role\"-\n" +
+	"\x15ExchangeTokenResponse\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token2\x92\a\n" +
 	"\rEngineService\x12C\n" +
 	"\bRegister\x12\x1a.banyan.v1.RegisterRequest\x1a\x1b.banyan.v1.RegisterResponse\x12F\n" +
 	"\tHeartbeat\x12\x1b.banyan.v1.HeartbeatRequest\x1a\x1c.banyan.v1.HeartbeatResponse\x12F\n" +
@@ -2146,7 +2247,8 @@ const file_engine_proto_rawDesc = "" +
 	"\tGetStatus\x12\x1b.banyan.v1.GetStatusRequest\x1a\x1c.banyan.v1.GetStatusResponse\x12B\n" +
 	"\aGetLogs\x12\x19.banyan.v1.GetLogsRequest\x1a\x1a.banyan.v1.GetLogsResponse0\x01\x12@\n" +
 	"\aGetInfo\x12\x19.banyan.v1.GetInfoRequest\x1a\x1a.banyan.v1.GetInfoResponse\x12=\n" +
-	"\x06Health\x12\x18.banyan.v1.HealthRequest\x1a\x19.banyan.v1.HealthResponseB0Z.github.com/fertile-org/banyan/pkg/rpc/banyanpbb\x06proto3"
+	"\x06Health\x12\x18.banyan.v1.HealthRequest\x1a\x19.banyan.v1.HealthResponse\x12R\n" +
+	"\rExchangeToken\x12\x1f.banyan.v1.ExchangeTokenRequest\x1a .banyan.v1.ExchangeTokenResponseB0Z.github.com/fertile-org/banyan/pkg/rpc/banyanpbb\x06proto3"
 
 var (
 	file_engine_proto_rawDescOnce sync.Once
@@ -2160,7 +2262,7 @@ func file_engine_proto_rawDescGZIP() []byte {
 	return file_engine_proto_rawDescData
 }
 
-var file_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 37)
 var file_engine_proto_goTypes = []any{
 	(*RegisterRequest)(nil),               // 0: banyan.v1.RegisterRequest
 	(*RegisterResponse)(nil),              // 1: banyan.v1.RegisterResponse
@@ -2195,20 +2297,22 @@ var file_engine_proto_goTypes = []any{
 	(*GetInfoResponse)(nil),               // 30: banyan.v1.GetInfoResponse
 	(*HealthRequest)(nil),                 // 31: banyan.v1.HealthRequest
 	(*HealthResponse)(nil),                // 32: banyan.v1.HealthResponse
-	nil,                                   // 33: banyan.v1.Manifest.ServicesEntry
-	nil,                                   // 34: banyan.v1.DeploymentInfo.ServicesEntry
+	(*ExchangeTokenRequest)(nil),          // 33: banyan.v1.ExchangeTokenRequest
+	(*ExchangeTokenResponse)(nil),         // 34: banyan.v1.ExchangeTokenResponse
+	nil,                                   // 35: banyan.v1.Manifest.ServicesEntry
+	nil,                                   // 36: banyan.v1.DeploymentInfo.ServicesEntry
 }
 var file_engine_proto_depIdxs = []int32{
 	12, // 0: banyan.v1.PollTasksResponse.tasks:type_name -> banyan.v1.TaskRecord
 	7,  // 1: banyan.v1.ReportTaskResultRequest.result:type_name -> banyan.v1.TaskResult
 	10, // 2: banyan.v1.ReportContainerHealthRequest.containers:type_name -> banyan.v1.ContainerStatus
 	15, // 3: banyan.v1.DeployRPCRequest.manifest:type_name -> banyan.v1.Manifest
-	33, // 4: banyan.v1.Manifest.services:type_name -> banyan.v1.Manifest.ServicesEntry
+	35, // 4: banyan.v1.Manifest.services:type_name -> banyan.v1.Manifest.ServicesEntry
 	17, // 5: banyan.v1.ManifestService.build:type_name -> banyan.v1.ManifestBuild
 	18, // 6: banyan.v1.ManifestService.deploy:type_name -> banyan.v1.ManifestDeploy
 	23, // 7: banyan.v1.GetStatusResponse.agents:type_name -> banyan.v1.AgentInfo
 	24, // 8: banyan.v1.GetStatusResponse.deployments:type_name -> banyan.v1.DeploymentInfo
-	34, // 9: banyan.v1.DeploymentInfo.services:type_name -> banyan.v1.DeploymentInfo.ServicesEntry
+	36, // 9: banyan.v1.DeploymentInfo.services:type_name -> banyan.v1.DeploymentInfo.ServicesEntry
 	26, // 10: banyan.v1.DeploymentInfo.tasks:type_name -> banyan.v1.TaskInfo
 	16, // 11: banyan.v1.Manifest.ServicesEntry.value:type_name -> banyan.v1.ManifestService
 	25, // 12: banyan.v1.DeploymentInfo.ServicesEntry.value:type_name -> banyan.v1.ServiceInfo
@@ -2223,19 +2327,21 @@ var file_engine_proto_depIdxs = []int32{
 	27, // 21: banyan.v1.EngineService.GetLogs:input_type -> banyan.v1.GetLogsRequest
 	29, // 22: banyan.v1.EngineService.GetInfo:input_type -> banyan.v1.GetInfoRequest
 	31, // 23: banyan.v1.EngineService.Health:input_type -> banyan.v1.HealthRequest
-	1,  // 24: banyan.v1.EngineService.Register:output_type -> banyan.v1.RegisterResponse
-	3,  // 25: banyan.v1.EngineService.Heartbeat:output_type -> banyan.v1.HeartbeatResponse
-	5,  // 26: banyan.v1.EngineService.PollTasks:output_type -> banyan.v1.PollTasksResponse
-	8,  // 27: banyan.v1.EngineService.ReportTaskResult:output_type -> banyan.v1.ReportTaskResultResponse
-	11, // 28: banyan.v1.EngineService.ReportContainerHealth:output_type -> banyan.v1.ReportContainerHealthResponse
-	14, // 29: banyan.v1.EngineService.Deploy:output_type -> banyan.v1.DeployRPCResponse
-	20, // 30: banyan.v1.EngineService.Down:output_type -> banyan.v1.DownRPCResponse
-	22, // 31: banyan.v1.EngineService.GetStatus:output_type -> banyan.v1.GetStatusResponse
-	28, // 32: banyan.v1.EngineService.GetLogs:output_type -> banyan.v1.GetLogsResponse
-	30, // 33: banyan.v1.EngineService.GetInfo:output_type -> banyan.v1.GetInfoResponse
-	32, // 34: banyan.v1.EngineService.Health:output_type -> banyan.v1.HealthResponse
-	24, // [24:35] is the sub-list for method output_type
-	13, // [13:24] is the sub-list for method input_type
+	33, // 24: banyan.v1.EngineService.ExchangeToken:input_type -> banyan.v1.ExchangeTokenRequest
+	1,  // 25: banyan.v1.EngineService.Register:output_type -> banyan.v1.RegisterResponse
+	3,  // 26: banyan.v1.EngineService.Heartbeat:output_type -> banyan.v1.HeartbeatResponse
+	5,  // 27: banyan.v1.EngineService.PollTasks:output_type -> banyan.v1.PollTasksResponse
+	8,  // 28: banyan.v1.EngineService.ReportTaskResult:output_type -> banyan.v1.ReportTaskResultResponse
+	11, // 29: banyan.v1.EngineService.ReportContainerHealth:output_type -> banyan.v1.ReportContainerHealthResponse
+	14, // 30: banyan.v1.EngineService.Deploy:output_type -> banyan.v1.DeployRPCResponse
+	20, // 31: banyan.v1.EngineService.Down:output_type -> banyan.v1.DownRPCResponse
+	22, // 32: banyan.v1.EngineService.GetStatus:output_type -> banyan.v1.GetStatusResponse
+	28, // 33: banyan.v1.EngineService.GetLogs:output_type -> banyan.v1.GetLogsResponse
+	30, // 34: banyan.v1.EngineService.GetInfo:output_type -> banyan.v1.GetInfoResponse
+	32, // 35: banyan.v1.EngineService.Health:output_type -> banyan.v1.HealthResponse
+	34, // 36: banyan.v1.EngineService.ExchangeToken:output_type -> banyan.v1.ExchangeTokenResponse
+	25, // [25:37] is the sub-list for method output_type
+	13, // [13:25] is the sub-list for method input_type
 	13, // [13:13] is the sub-list for extension type_name
 	13, // [13:13] is the sub-list for extension extendee
 	0,  // [0:13] is the sub-list for field type_name
@@ -2252,7 +2358,7 @@ func file_engine_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_engine_proto_rawDesc), len(file_engine_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   37,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

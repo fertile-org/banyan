@@ -17,7 +17,7 @@ sudo banyan-engine start
 ```
 
 The init wizard asks for:
-- **Cluster password** — protects all engine-agent-CLI communication. Every agent and CLI client must use the same password.
+- **Cluster password** — used to authenticate agents and CLI clients. The password is hashed with bcrypt and stored securely — the plain-text password is never saved to disk.
 - **Etcd setup** — choose **Managed** (Banyan runs etcd for you, recommended) or **External** (connect to your own etcd cluster).
 
 For a quickstart, pick **Managed** and you're done — no external database required.
@@ -36,7 +36,10 @@ sudo banyan-agent start --node-name local-worker
 The init wizard asks for:
 - **Engine host** — where the engine is running (`localhost` for single-machine).
 - **Engine gRPC port** — default `50051`.
-- **Banyan cluster password** — must match the password you set on the engine.
+- **Node name** — unique name for this worker (default: hostname).
+- **Cluster password** — must match the password you set on the engine.
+
+The wizard connects to the engine, exchanges the password for an auth token, and saves the token locally. The password is never stored on the agent.
 
 ## 3. Configure the CLI
 
@@ -47,7 +50,7 @@ sudo banyan-cli init
 banyan-cli status
 ```
 
-The init wizard asks the same three things: engine host, port, and cluster password.
+The init wizard asks for engine host, port, and cluster password. Like the agent, it exchanges the password for a token — the password is not stored.
 
 ```
 Agents: 1
@@ -222,5 +225,6 @@ On a single machine this looks like overkill. The value shows up when you add mo
 ## Next steps
 
 - [Multi-Node Setup](/guides/multi-node/) — distribute containers across multiple servers
+- [Authentication](/guides/authentication/) — how Banyan secures communication
 - [Manifest Reference](/guides/manifest-reference/) — all banyan.yaml fields and examples
 - [CLI Commands](/reference/cli/) — complete command reference

@@ -1,15 +1,10 @@
 package types
 
 import (
-	"bufio"
-	"context"
 	"crypto/sha256"
-	"crypto/subtle"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,20 +14,14 @@ const DefaultConfigPath = "/etc/banyan/banyan.yaml"
 
 // BanyanConfig is the top-level configuration structure.
 type BanyanConfig struct {
-	Security SecurityConfig `yaml:"security,omitempty"`
-	Agent    AgentConfig    `yaml:"agent,omitempty"`
-	CLI      CLIConfig      `yaml:"cli,omitempty"`
-	Engine   EngineConfig   `yaml:"engine,omitempty"`
-}
-
-// SecurityConfig holds authentication settings.
-type SecurityConfig struct {
-	AuthType string `yaml:"auth_type,omitempty"`
-	Password string `yaml:"password,omitempty"`
+	Agent  AgentConfig  `yaml:"agent,omitempty"`
+	CLI    CLIConfig    `yaml:"cli,omitempty"`
+	Engine EngineConfig `yaml:"engine,omitempty"`
 }
 
 // EngineConfig holds engine-specific settings.
 type EngineConfig struct {
+	PasswordHash string `yaml:"password_hash,omitempty"`
 	APIPort      string `yaml:"api_port,omitempty"`
 	GRPCPort     string `yaml:"grpc_port,omitempty"`
 	StoreBackend string `yaml:"store_backend,omitempty"`
@@ -57,12 +46,16 @@ func (c *EngineConfig) GetStoreBackend() string {
 type AgentConfig struct {
 	EngineHost string `yaml:"engine_host,omitempty"`
 	EnginePort string `yaml:"engine_port,omitempty"`
+	AuthToken  string `yaml:"auth_token,omitempty"`
+	NodeName   string `yaml:"node_name,omitempty"`
 }
 
 // CLIConfig holds CLI-specific settings.
 type CLIConfig struct {
 	EngineHost string `yaml:"engine_host,omitempty"`
 	EnginePort string `yaml:"engine_port,omitempty"`
+	AuthToken  string `yaml:"auth_token,omitempty"`
+	Name       string `yaml:"name,omitempty"`
 }
 
 // LoadConfig reads and parses the Banyan config file at the given path.
@@ -110,36 +103,22 @@ func HashPassword(password string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// ReadLine reads a single trimmed line from stdin.
-func ReadLine() string {
-	scanner := bufio.NewScanner(os.Stdin)
-	if scanner.Scan() {
-		return strings.TrimSpace(scanner.Text())
-	}
-	return ""
-}
-
-// BasicAuthMiddleware wraps an HTTP handler with Basic Auth verification.
-// Username is ignored; only the password is checked.
-func BasicAuthMiddleware(next http.Handler, password string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, pass, ok := r.BasicAuth()
-		if !ok || subtle.ConstantTimeCompare([]byte(pass), []byte(password)) != 1 {
-			w.Header().Set("WWW-Authenticate", `Basic realm="banyan"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-// GetConfigPassword returns the password from the config file at the given path.
-func GetConfigPassword(configPath string) string {
+// GetAgentAuthToken returns the agent auth token from the config file.
+func GetAgentAuthToken(configPath string) string {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		return ""
 	}
-	return cfg.Security.Password
+	return cfg.Agent.AuthToken
+}
+
+// GetCLIAuthToken returns the CLI auth token from the config file.
+func GetCLIAuthToken(configPath string) string {
+	cfg, err := LoadConfig(configPath)
+	if err != nil {
+		return ""
+	}
+	return cfg.CLI.AuthToken
 }
 
 // GetConfigEngineEndpoint builds the engine gRPC endpoint from agent config.
@@ -182,38 +161,4 @@ func GetCLIEngineEndpoint(configPath string) string {
 	}
 
 	return fmt.Sprintf("%s:%s", host, port)
-}
-
-// StateStore is a minimal interface for etcd operations used by VerifyAuth and helpers.
-type StateStore interface {
-	Get(ctx context.Context, key string, dest interface{}) error
-	Save(ctx context.Context, key string, value interface{}) error
-	List(ctx context.Context, prefix string) ([]string, error)
-}
-
-// VerifyAuth checks the config password against the hash stored in etcd.
-// Returns nil if passwords match or if no auth is configured.
-func VerifyAuth(ctx context.Context, store StateStore, configPath string) error {
-	cfg, err := LoadConfig(configPath)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-
-	password := cfg.Security.Password
-	if password == "" {
-		return fmt.Errorf("authentication required. Set password in %s", configPath)
-	}
-
-	var storedHash string
-	err = store.Get(ctx, KeyAuthHash, &storedHash)
-	if err != nil {
-		return fmt.Errorf("authentication failed: no auth hash found in cluster. Ensure engine has been started with a password")
-	}
-
-	localHash := HashPassword(password)
-	if subtle.ConstantTimeCompare([]byte(localHash), []byte(storedHash)) != 1 {
-		return fmt.Errorf("authentication failed: password does not match cluster")
-	}
-
-	return nil
 }

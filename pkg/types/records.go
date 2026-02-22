@@ -6,13 +6,17 @@ import (
 	"time"
 )
 
+// DefaultCLITokenTTL is how long CLI tokens remain valid before requiring re-authentication.
+const DefaultCLITokenTTL = 30 * 24 * time.Hour // 30 days
+
 // Etcd key prefixes (relative to store prefix "/banyan/").
 const (
 	KeyDeployments = "deployments/"
 	KeyNodes       = "nodes/"
 	KeyTasks       = "tasks/"
 	KeyRegistry    = "config/registry"
-	KeyAuthHash    = "config/auth_hash"
+	KeyTokens      = "tokens/"
+	KeyTokenIndex  = "token-index/"
 )
 
 // Deployment statuses.
@@ -31,6 +35,21 @@ const (
 	TaskTypeCreateAndStart = "create_and_start"
 	TaskTypeStopAndRemove  = "stop_and_remove"
 )
+
+// TokenRecord is stored at /tokens/{sha256-hash} in etcd.
+type TokenRecord struct {
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	Name      string    `json:"name"`
+	Role      string    `json:"role"`
+}
+
+// IsExpired returns true if the token has a non-zero expiry time that is in the past.
+func (t *TokenRecord) IsExpired() bool {
+	if t.ExpiresAt.IsZero() {
+		return false
+	}
+	return time.Now().After(t.ExpiresAt)
+}
 
 // DeploymentRecord is stored at /deployments/<id> in etcd.
 type DeploymentRecord struct {
@@ -87,6 +106,13 @@ type NodeRecord struct {
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
 	APIAddress string    `json:"api_address,omitempty"`
+}
+
+// StateStore is a minimal interface for store operations used by helpers.
+type StateStore interface {
+	Get(ctx context.Context, key string, dest interface{}) error
+	Save(ctx context.Context, key string, value interface{}) error
+	List(ctx context.Context, prefix string) ([]string, error)
 }
 
 // LogProvider retrieves container logs.

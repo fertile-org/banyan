@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"fmt"
+	"strings"
 
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -14,13 +16,15 @@ import (
 )
 
 const (
-	// MetadataKeyPassword is the gRPC metadata key for agent→engine password auth.
+	// MetadataKeyPassword is the gRPC metadata key for password auth (ExchangeToken only).
 	MetadataKeyPassword = "x-banyan-password" //nolint:gosec // not a credential, just a metadata key name
+	// MetadataKeyAuthToken is the gRPC metadata key for token auth (all other RPCs).
+	MetadataKeyAuthToken = "x-banyan-auth-token" //nolint:gosec // not a credential, just a metadata key name
 	// MetadataKeySessionToken is the gRPC metadata key for engine→agent session auth.
 	MetadataKeySessionToken = "x-banyan-session-token" //nolint:gosec // not a credential, just a metadata key name
 )
 
-// PasswordCredentials implements credentials.PerRPCCredentials for agent→engine calls.
+// PasswordCredentials implements credentials.PerRPCCredentials for ExchangeToken calls.
 // It attaches the cluster password to every RPC.
 type PasswordCredentials struct {
 	Password string
@@ -38,6 +42,24 @@ func (c *PasswordCredentials) RequireTransportSecurity() bool {
 
 // Verify interface compliance.
 var _ credentials.PerRPCCredentials = (*PasswordCredentials)(nil)
+
+// TokenCredentials implements credentials.PerRPCCredentials for token-based auth.
+// It attaches the auth token to every RPC.
+type TokenCredentials struct {
+	Token string
+}
+
+func (c *TokenCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{
+		MetadataKeyAuthToken: c.Token,
+	}, nil
+}
+
+func (c *TokenCredentials) RequireTransportSecurity() bool {
+	return false
+}
+
+var _ credentials.PerRPCCredentials = (*TokenCredentials)(nil)
 
 // SessionTokenCredentials implements credentials.PerRPCCredentials for engine→agent calls.
 // It attaches the session token to every RPC.
@@ -63,29 +85,45 @@ func HashPassword(password string) string {
 	return fmt.Sprintf("%x", h)
 }
 
-// PasswordAuthInterceptor returns a unary server interceptor that validates the
-// password in gRPC metadata against the provided hash using constant-time comparison.
-func PasswordAuthInterceptor(passwordHash string) grpc.UnaryServerInterceptor {
+// TokenValidator validates auth tokens against the store.
+type TokenValidator interface {
+	ValidateToken(ctx context.Context, tokenHash string) error
+}
+
+// NewAuthInterceptor returns a unary server interceptor with dual-mode auth:
+//   - ExchangeToken RPC: validates password via bcrypt against passwordHash
+//   - All other RPCs: validates token via TokenValidator
+func NewAuthInterceptor(passwordHash string, validator TokenValidator) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if err := validatePassword(ctx, passwordHash); err != nil {
+		if isExchangeTokenMethod(info.FullMethod) {
+			if err := validatePasswordBcrypt(ctx, passwordHash); err != nil {
+				return nil, err
+			}
+			return handler(ctx, req)
+		}
+		if err := validateAuthToken(ctx, validator); err != nil {
 			return nil, err
 		}
 		return handler(ctx, req)
 	}
 }
 
-// PasswordAuthStreamInterceptor returns a stream server interceptor that validates
-// the password in gRPC metadata.
-func PasswordAuthStreamInterceptor(passwordHash string) grpc.StreamServerInterceptor {
+// NewAuthStreamInterceptor returns a stream server interceptor with dual-mode auth.
+// Stream RPCs always use token auth (ExchangeToken is unary-only).
+func NewAuthStreamInterceptor(validator TokenValidator) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if err := validatePassword(ss.Context(), passwordHash); err != nil {
+		if err := validateAuthToken(ss.Context(), validator); err != nil {
 			return err
 		}
 		return handler(srv, ss)
 	}
 }
 
-func validatePassword(ctx context.Context, passwordHash string) error {
+func isExchangeTokenMethod(fullMethod string) bool {
+	return strings.HasSuffix(fullMethod, "/ExchangeToken")
+}
+
+func validatePasswordBcrypt(ctx context.Context, passwordHash string) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return status.Error(codes.Unauthenticated, "missing metadata")
@@ -94,12 +132,26 @@ func validatePassword(ctx context.Context, passwordHash string) error {
 	if len(values) == 0 {
 		return status.Error(codes.Unauthenticated, "missing password")
 	}
-	clientHash := HashPassword(values[0])
-	if subtle.ConstantTimeCompare([]byte(clientHash), []byte(passwordHash)) != 1 {
+	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(values[0])); err != nil {
 		return status.Error(codes.Unauthenticated, "invalid password")
 	}
 	return nil
 }
+
+func validateAuthToken(ctx context.Context, validator TokenValidator) error {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return status.Error(codes.Unauthenticated, "missing metadata")
+	}
+	values := md.Get(MetadataKeyAuthToken)
+	if len(values) == 0 {
+		return status.Error(codes.Unauthenticated, "missing auth token")
+	}
+	tokenHash := HashPassword(values[0])
+	return validator.ValidateToken(ctx, tokenHash)
+}
+
+// --- Legacy interceptors kept for agent gRPC server (session token auth) ---
 
 // SessionTokenAuthInterceptor returns a unary server interceptor that validates
 // the session token in gRPC metadata against the locally held token.

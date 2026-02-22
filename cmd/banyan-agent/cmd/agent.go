@@ -29,6 +29,7 @@ var (
 	agentPidFile        string
 	agentAPIPort        string
 	agentAPIAddress     string
+	agentInitPassword   string
 )
 
 // configPath is the default path to the Banyan config file.
@@ -81,6 +82,9 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 
 	rootCmd.PersistentFlags().StringVar(&agentDataDir, "data-dir", "/var/lib/banyan", "Data directory")
+
+	// Init flags
+	initCmd.Flags().StringVar(&agentInitPassword, "password", "", "Cluster password (non-interactive mode)")
 
 	startCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "localhost:50051", "Engine gRPC endpoint")
 	startCmd.Flags().StringVar(&agentNodeName, "node-name", "", "Node name (defaults to hostname)")
@@ -144,15 +148,59 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// --- Engine connection + authentication ---
+	// --- Engine connection + token exchange ---
 	existingCfg, _ := types.LoadConfig(configPath)
 	fmt.Println()
-	if existingCfg.Security.Password != "" && existingCfg.Agent.EngineHost != "" {
+	switch {
+	case existingCfg.Agent.AuthToken != "" && existingCfg.Agent.EngineHost != "":
 		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
-		fmt.Printf("         Engine: %s:%s (password set)\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
-	} else {
+		fmt.Printf("         Engine: %s:%s (token set)\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
+	case agentInitPassword != "" && existingCfg.Agent.EngineHost != "":
+		// Password provided via --password flag — exchange token non-interactively.
+		hostname, _ := os.Hostname()
+		nodeName := existingCfg.Agent.NodeName
+		if nodeName == "" {
+			nodeName = hostname
+		}
+		enginePort := existingCfg.Agent.EnginePort
+		if enginePort == "" {
+			enginePort = "50051"
+		}
+
+		engineAddr := fmt.Sprintf("%s:%s", existingCfg.Agent.EngineHost, enginePort)
+		fmt.Printf("  %s Connecting to engine at %s...\n", styleInfo.Render("[..]"), engineAddr)
+
+		client, connErr := agent.NewEngineClientWithPassword(engineAddr, agentInitPassword)
+		if connErr != nil {
+			return fmt.Errorf("failed to connect to engine: %w", connErr)
+		}
+		defer client.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		token, tokenErr := client.ExchangeToken(ctx, nodeName, "agent")
+		if tokenErr != nil {
+			fmt.Printf("  %s Token exchange failed: %v\n", styleWarn.Render("[FAIL]"), tokenErr)
+			return fmt.Errorf("token exchange failed: %w", tokenErr)
+		}
+
+		fmt.Printf("  %s Token obtained from engine\n", styleOK.Render("[OK]"))
+
+		existingCfg.Agent.AuthToken = token
+		existingCfg.Agent.NodeName = nodeName
+		existingCfg.Agent.EnginePort = enginePort
+
+		if err := types.SaveConfig(configPath, &existingCfg); err != nil {
+			fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
+		} else {
+			fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
+		}
+	default:
+		hostname, _ := os.Hostname()
 		engineHost := "localhost"
 		enginePort := "50051"
+		nodeName := hostname
 		var password string
 
 		form := huh.NewForm(
@@ -165,9 +213,19 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 					Title("Engine gRPC port").
 					Value(&enginePort),
 				huh.NewInput().
+					Title("Node name").
+					Description("Unique name for this agent node").
+					Value(&nodeName),
+				huh.NewInput().
 					Title("Banyan cluster password").
-					Description("Must match the engine password to connect (leave empty to skip)").
+					Description("Used once to obtain an auth token from the engine").
 					EchoMode(huh.EchoModePassword).
+					Validate(func(s string) error {
+						if s == "" {
+							return fmt.Errorf("password is required")
+						}
+						return nil
+					}).
 					Value(&password),
 			),
 		)
@@ -179,16 +237,33 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("agent config input: %w", err)
 		}
 
+		// Connect to engine and exchange password for token
+		engineAddr := fmt.Sprintf("%s:%s", engineHost, enginePort)
+		fmt.Printf("  %s Connecting to engine at %s...\n", styleInfo.Render("[..]"), engineAddr)
+
+		client, connErr := agent.NewEngineClientWithPassword(engineAddr, password)
+		if connErr != nil {
+			return fmt.Errorf("failed to connect to engine: %w", connErr)
+		}
+		defer client.Close()
+
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		token, tokenErr := client.ExchangeToken(ctx, nodeName, "agent")
+		if tokenErr != nil {
+			fmt.Printf("  %s Token exchange failed: %v\n", styleWarn.Render("[FAIL]"), tokenErr)
+			return fmt.Errorf("token exchange failed: %w", tokenErr)
+		}
+
+		fmt.Printf("  %s Token obtained from engine\n", styleOK.Render("[OK]"))
+
 		cfg := existingCfg
 		cfg.Agent = types.AgentConfig{
 			EngineHost: engineHost,
 			EnginePort: enginePort,
-		}
-		if password != "" {
-			cfg.Security = types.SecurityConfig{
-				AuthType: "password",
-				Password: password,
-			}
+			AuthToken:  token,
+			NodeName:   nodeName,
 		}
 
 		if err := types.SaveConfig(configPath, &cfg); err != nil {
@@ -221,8 +296,17 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// Get node name
+	// Load config
+	cfg, cfgErr := types.LoadConfig(configPath)
+	if cfgErr != nil {
+		fmt.Printf("Warning: Failed to load config: %v\n", cfgErr)
+	}
+
+	// Get node name: flag > config > hostname
 	nodeName := agentNodeName
+	if nodeName == "" {
+		nodeName = cfg.Agent.NodeName
+	}
 	if nodeName == "" {
 		hostname, err := os.Hostname()
 		if err != nil {
@@ -241,10 +325,10 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get password from config
-	password := types.GetConfigPassword(configPath)
-	if password == "" {
-		return fmt.Errorf("authentication required. Set password in %s", configPath)
+	// Get auth token from config
+	authToken := types.GetAgentAuthToken(configPath)
+	if authToken == "" {
+		return fmt.Errorf("auth token not configured. Run 'banyan-agent init' to obtain a token from the engine")
 	}
 
 	// Check for nerdctl
@@ -267,7 +351,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	a, err := agent.New(&agent.Options{
 		NodeName:       nodeName,
 		EngineEndpoint: agentEngineEndpoint,
-		Password:       password,
+		AuthToken:      authToken,
 		APIPort:        agentAPIPort,
 		APIAddress:     agentAPIAddress,
 		PidFile:        agentPidFile,
@@ -337,13 +421,13 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Print("Engine connection: ")
-	password := types.GetConfigPassword(configPath)
-	if password == "" {
-		fmt.Println("NOT CONFIGURED (no password)")
+	authToken := types.GetAgentAuthToken(configPath)
+	if authToken == "" {
+		fmt.Println("NOT CONFIGURED (no auth token)")
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		client, err := agent.NewEngineClient(agentEngineEndpoint, password)
+		client, err := agent.NewEngineClient(agentEngineEndpoint, authToken)
 		if err != nil {
 			fmt.Printf("FAILED (%v)\n", err)
 		} else {

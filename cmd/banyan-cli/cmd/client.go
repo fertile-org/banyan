@@ -20,11 +20,11 @@ type EngineClient struct {
 	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient creates a new engine gRPC client.
-func NewEngineClient(engineAddr, password string) (*EngineClient, error) {
+// NewEngineClient creates a new engine gRPC client with token-based auth.
+func NewEngineClient(engineAddr, token string) (*EngineClient, error) {
 	conn, err := grpc.NewClient(engineAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
+		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: token}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)

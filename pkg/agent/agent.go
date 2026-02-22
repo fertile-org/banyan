@@ -20,7 +20,7 @@ import (
 type Options struct {
 	NodeName       string
 	EngineEndpoint string
-	Password       string
+	AuthToken      string
 	APIPort        string
 	APIAddress     string
 	PidFile        string
@@ -62,7 +62,7 @@ func New(opts *Options) (*Agent, error) {
 func (a *Agent) Run(ctx context.Context) error {
 	// Connect to engine via gRPC
 	fmt.Printf("Connecting to Engine at %s...\n", a.opts.EngineEndpoint)
-	client, err := NewEngineClient(a.opts.EngineEndpoint, a.opts.Password)
+	client, err := NewEngineClient(a.opts.EngineEndpoint, a.opts.AuthToken)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}

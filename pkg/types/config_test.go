@@ -1,47 +1,10 @@
 package types
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 )
-
-// mockStateStore is an in-memory StateStore for testing.
-type mockStateStore struct {
-	data map[string]any
-}
-
-func (m *mockStateStore) Save(ctx context.Context, key string, value any) error {
-	m.data[key] = value
-	return nil
-}
-
-func (m *mockStateStore) Get(ctx context.Context, key string, dest any) error {
-	v, ok := m.data[key]
-	if !ok {
-		return fmt.Errorf("key not found: %s", key)
-	}
-	b, err := json.Marshal(v)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(b, dest)
-}
-
-func (m *mockStateStore) List(ctx context.Context, prefix string) ([]string, error) {
-	var keys []string
-	for k := range m.data {
-		if len(k) >= len(prefix) && k[:len(prefix)] == prefix {
-			keys = append(keys, k)
-		}
-	}
-	return keys, nil
-}
 
 func TestHashPassword(t *testing.T) {
 	t.Run("deterministic output", func(t *testing.T) {
@@ -74,13 +37,17 @@ func TestLoadSaveConfig(t *testing.T) {
 		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 
 		cfg := BanyanConfig{
-			Security: SecurityConfig{
-				AuthType: "password",
-				Password: "my-cluster-secret",
+			Engine: EngineConfig{
+				PasswordHash: HashPassword("my-cluster-secret"),
 			},
 			Agent: AgentConfig{
 				EngineHost: "192.168.1.10",
 				EnginePort: "2379",
+				AuthToken:  "agent-token-abc",
+				NodeName:   "worker-1",
+			},
+			CLI: CLIConfig{
+				AuthToken: "cli-token-xyz",
 			},
 		}
 
@@ -101,17 +68,23 @@ func TestLoadSaveConfig(t *testing.T) {
 			t.Fatalf("LoadConfig failed: %v", err)
 		}
 
-		if loaded.Security.AuthType != "password" {
-			t.Errorf("expected auth_type=password, got %s", loaded.Security.AuthType)
-		}
-		if loaded.Security.Password != "my-cluster-secret" {
-			t.Errorf("expected password=my-cluster-secret, got %s", loaded.Security.Password)
+		if loaded.Engine.PasswordHash != cfg.Engine.PasswordHash {
+			t.Errorf("expected password_hash=%s, got %s", cfg.Engine.PasswordHash, loaded.Engine.PasswordHash)
 		}
 		if loaded.Agent.EngineHost != "192.168.1.10" {
 			t.Errorf("expected engine_host=192.168.1.10, got %s", loaded.Agent.EngineHost)
 		}
 		if loaded.Agent.EnginePort != "2379" {
 			t.Errorf("expected engine_port=2379, got %s", loaded.Agent.EnginePort)
+		}
+		if loaded.Agent.AuthToken != "agent-token-abc" {
+			t.Errorf("expected agent auth_token=agent-token-abc, got %s", loaded.Agent.AuthToken)
+		}
+		if loaded.Agent.NodeName != "worker-1" {
+			t.Errorf("expected agent node_name=worker-1, got %s", loaded.Agent.NodeName)
+		}
+		if loaded.CLI.AuthToken != "cli-token-xyz" {
+			t.Errorf("expected cli auth_token=cli-token-xyz, got %s", loaded.CLI.AuthToken)
 		}
 	})
 
@@ -120,8 +93,14 @@ func TestLoadSaveConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected no error for missing file, got %v", err)
 		}
-		if cfg.Security.Password != "" {
-			t.Errorf("expected empty password, got %s", cfg.Security.Password)
+		if cfg.Engine.PasswordHash != "" {
+			t.Errorf("expected empty password_hash, got %s", cfg.Engine.PasswordHash)
+		}
+		if cfg.Agent.AuthToken != "" {
+			t.Errorf("expected empty agent auth_token, got %s", cfg.Agent.AuthToken)
+		}
+		if cfg.CLI.AuthToken != "" {
+			t.Errorf("expected empty cli auth_token, got %s", cfg.CLI.AuthToken)
 		}
 	})
 
@@ -133,6 +112,7 @@ func TestLoadSaveConfig(t *testing.T) {
 			CLI: CLIConfig{
 				EngineHost: "10.0.0.1",
 				EnginePort: "8443",
+				AuthToken:  "cli-token-123",
 			},
 			Engine: EngineConfig{
 				APIPort: "8443",
@@ -153,6 +133,9 @@ func TestLoadSaveConfig(t *testing.T) {
 		}
 		if loaded.CLI.EnginePort != "8443" {
 			t.Errorf("expected cli.engine_port=8443, got %s", loaded.CLI.EnginePort)
+		}
+		if loaded.CLI.AuthToken != "cli-token-123" {
+			t.Errorf("expected cli.auth_token=cli-token-123, got %s", loaded.CLI.AuthToken)
 		}
 		if loaded.Engine.APIPort != "8443" {
 			t.Errorf("expected engine.api_port=8443, got %s", loaded.Engine.APIPort)
@@ -377,103 +360,10 @@ func TestGetStoreBackend(t *testing.T) {
 	})
 }
 
-func TestVerifyAuth(t *testing.T) {
-	t.Run("valid password matches store hash", func(t *testing.T) {
-		store := &mockStateStore{data: map[string]any{}}
-		password := "my-secret"
-		store.data[KeyAuthHash] = HashPassword(password)
-
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{Security: SecurityConfig{Password: password}}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		err := VerifyAuth(context.Background(), store, cfgPath)
-		if err != nil {
-			t.Errorf("expected no error, got %v", err)
-		}
-	})
-
-	t.Run("wrong password fails", func(t *testing.T) {
-		store := &mockStateStore{data: map[string]any{}}
-		store.data[KeyAuthHash] = HashPassword("correct-password")
-
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{Security: SecurityConfig{Password: "wrong-password"}}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		err := VerifyAuth(context.Background(), store, cfgPath)
-		if err == nil {
-			t.Error("expected error for wrong password")
-		}
-	})
-
-	t.Run("missing hash in store fails", func(t *testing.T) {
-		store := &mockStateStore{data: map[string]any{}}
-
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{Security: SecurityConfig{Password: "any-password"}}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		err := VerifyAuth(context.Background(), store, cfgPath)
-		if err == nil {
-			t.Error("expected error when hash not in store")
-		}
-	})
-
-	t.Run("missing password in config fails", func(t *testing.T) {
-		store := &mockStateStore{data: map[string]any{}}
-
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		err := VerifyAuth(context.Background(), store, cfgPath)
-		if err == nil {
-			t.Error("expected error when no password in config")
-		}
-	})
-}
-
-func TestGetConfigPassword(t *testing.T) {
-	t.Run("returns password from config", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{Security: SecurityConfig{Password: "my-secret"}}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		got := GetConfigPassword(cfgPath)
-		if got != "my-secret" {
-			t.Errorf("expected 'my-secret', got %q", got)
-		}
-	})
-
-	t.Run("missing config returns empty", func(t *testing.T) {
-		got := GetConfigPassword("/tmp/nonexistent-banyan-test-config.yaml")
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-}
-
 func TestLoadConfig_InvalidYAML(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "bad.yaml")
-	// Use content that fails to unmarshal into BanyanConfig struct
-	os.WriteFile(cfgPath, []byte("security: [unterminated"), 0o644)
+	os.WriteFile(cfgPath, []byte("engine: [unterminated"), 0o644)
 
 	_, err := LoadConfig(cfgPath)
 	if err == nil {
@@ -484,7 +374,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 func TestLoadConfig_UnreadableFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "unreadable.yaml")
-	os.WriteFile(cfgPath, []byte("security:\n  password: secret\n"), 0o644)
+	os.WriteFile(cfgPath, []byte("engine:\n  password_hash: secret\n"), 0o644)
 
 	// Make file unreadable (skip if root)
 	if os.Geteuid() == 0 {
@@ -503,7 +393,7 @@ func TestSaveConfig_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "subdir", "nested", "banyan.yaml")
 
-	cfg := BanyanConfig{Security: SecurityConfig{Password: "test"}}
+	cfg := BanyanConfig{Engine: EngineConfig{PasswordHash: "testhash"}}
 	if err := SaveConfig(cfgPath, &cfg); err != nil {
 		t.Fatalf("SaveConfig should create nested dirs: %v", err)
 	}
@@ -512,15 +402,15 @@ func TestSaveConfig_CreatesDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	if loaded.Security.Password != "test" {
-		t.Errorf("expected password 'test', got %q", loaded.Security.Password)
+	if loaded.Engine.PasswordHash != "testhash" {
+		t.Errorf("expected password_hash 'testhash', got %q", loaded.Engine.PasswordHash)
 	}
 }
 
 func TestGetConfigEngineEndpoint_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "bad.yaml")
-	os.WriteFile(cfgPath, []byte("security: [unterminated"), 0o644)
+	os.WriteFile(cfgPath, []byte("engine: [unterminated"), 0o644)
 
 	result := GetConfigEngineEndpoint(cfgPath)
 	if result != "" {
@@ -531,23 +421,11 @@ func TestGetConfigEngineEndpoint_InvalidConfig(t *testing.T) {
 func TestGetCLIEngineEndpoint_InvalidConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "bad.yaml")
-	os.WriteFile(cfgPath, []byte("security: [unterminated"), 0o644)
+	os.WriteFile(cfgPath, []byte("engine: [unterminated"), 0o644)
 
 	result := GetCLIEngineEndpoint(cfgPath)
 	if result != "" {
 		t.Errorf("expected empty string for invalid config, got %q", result)
-	}
-}
-
-func TestVerifyAuth_InvalidConfigPath(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "bad.yaml")
-	os.WriteFile(cfgPath, []byte("security: [unterminated"), 0o644)
-
-	store := &mockStateStore{data: map[string]any{}}
-	err := VerifyAuth(context.Background(), store, cfgPath)
-	if err == nil {
-		t.Fatal("expected error for invalid config")
 	}
 }
 
@@ -566,7 +444,7 @@ func TestSaveConfig_WriteError(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(readOnlyDir, 0o755) })
 
 	cfgPath := filepath.Join(readOnlyDir, "banyan.yaml")
-	cfg := BanyanConfig{Security: SecurityConfig{Password: "test"}}
+	cfg := BanyanConfig{Engine: EngineConfig{PasswordHash: "testhash"}}
 	err := SaveConfig(cfgPath, &cfg)
 	if err == nil {
 		t.Fatal("expected error writing to read-only directory")
@@ -584,74 +462,105 @@ func TestSaveConfig_MkdirAllError(t *testing.T) {
 	os.WriteFile(blockingFile, []byte("x"), 0o644)
 
 	cfgPath := filepath.Join(blockingFile, "subdir", "banyan.yaml")
-	cfg := BanyanConfig{Security: SecurityConfig{Password: "test"}}
+	cfg := BanyanConfig{Engine: EngineConfig{PasswordHash: "testhash"}}
 	err := SaveConfig(cfgPath, &cfg)
 	if err == nil {
 		t.Fatal("expected error when MkdirAll fails")
 	}
 }
 
-func TestGetConfigPassword_InvalidYAML(t *testing.T) {
-	tmpDir := t.TempDir()
-	cfgPath := filepath.Join(tmpDir, "bad.yaml")
-	os.WriteFile(cfgPath, []byte("security: [unterminated"), 0o644)
+func TestGetAgentAuthToken(t *testing.T) {
+	t.Run("returns token from config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := BanyanConfig{Agent: AgentConfig{AuthToken: "agent-secret-token"}}
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
 
-	got := GetConfigPassword(cfgPath)
-	if got != "" {
-		t.Errorf("expected empty string for invalid config, got %q", got)
-	}
+		got := GetAgentAuthToken(cfgPath)
+		if got != "agent-secret-token" {
+			t.Errorf("expected 'agent-secret-token', got %q", got)
+		}
+	})
+
+	t.Run("missing config returns empty", func(t *testing.T) {
+		got := GetAgentAuthToken("/tmp/nonexistent-banyan-test-config.yaml")
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+
+	t.Run("invalid YAML returns empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "bad.yaml")
+		os.WriteFile(cfgPath, []byte("agent: [unterminated"), 0o644)
+
+		got := GetAgentAuthToken(cfgPath)
+		if got != "" {
+			t.Errorf("expected empty string for invalid config, got %q", got)
+		}
+	})
+
+	t.Run("empty agent config returns empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := BanyanConfig{}
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+
+		got := GetAgentAuthToken(cfgPath)
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
 }
 
-func TestBasicAuthMiddleware(t *testing.T) {
-	okHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
-	})
+func TestGetCLIAuthToken(t *testing.T) {
+	t.Run("returns token from config", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := BanyanConfig{CLI: CLIConfig{AuthToken: "cli-secret-token"}}
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
 
-	t.Run("rejects request with no auth", func(t *testing.T) {
-		handler := BasicAuthMiddleware(okHandler, "secret")
-		req := httptest.NewRequest("GET", "/", nil)
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rr.Code)
+		got := GetCLIAuthToken(cfgPath)
+		if got != "cli-secret-token" {
+			t.Errorf("expected 'cli-secret-token', got %q", got)
 		}
 	})
 
-	t.Run("rejects wrong password", func(t *testing.T) {
-		handler := BasicAuthMiddleware(okHandler, "secret")
-		req := httptest.NewRequest("GET", "/", nil)
-		req.SetBasicAuth("banyan", "wrong")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-
-		if rr.Code != http.StatusUnauthorized {
-			t.Errorf("expected 401, got %d", rr.Code)
+	t.Run("missing config returns empty", func(t *testing.T) {
+		got := GetCLIAuthToken("/tmp/nonexistent-banyan-test-config.yaml")
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
 		}
 	})
 
-	t.Run("accepts correct password", func(t *testing.T) {
-		handler := BasicAuthMiddleware(okHandler, "secret")
-		req := httptest.NewRequest("GET", "/", nil)
-		req.SetBasicAuth("banyan", "secret")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+	t.Run("invalid YAML returns empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "bad.yaml")
+		os.WriteFile(cfgPath, []byte("cli: [unterminated"), 0o644)
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", rr.Code)
+		got := GetCLIAuthToken(cfgPath)
+		if got != "" {
+			t.Errorf("expected empty string for invalid config, got %q", got)
 		}
 	})
 
-	t.Run("accepts any username with correct password", func(t *testing.T) {
-		handler := BasicAuthMiddleware(okHandler, "secret")
-		req := httptest.NewRequest("GET", "/", nil)
-		req.SetBasicAuth("anyuser", "secret")
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
+	t.Run("empty cli config returns empty", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := BanyanConfig{}
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
 
-		if rr.Code != http.StatusOK {
-			t.Errorf("expected 200, got %d", rr.Code)
+		got := GetCLIAuthToken(cfgPath)
+		if got != "" {
+			t.Errorf("expected empty string, got %q", got)
 		}
 	})
 }

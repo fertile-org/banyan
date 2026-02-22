@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
+
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
@@ -17,6 +19,18 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
+
+// testTokenValidator validates tokens against a set of known valid hashes.
+type testTokenValidator struct {
+	validTokens map[string]bool
+}
+
+func (v *testTokenValidator) ValidateToken(ctx context.Context, tokenHash string) error {
+	if !v.validTokens[tokenHash] {
+		return status.Error(codes.Unauthenticated, "invalid auth token")
+	}
+	return nil
+}
 
 // mockAgentService implements AgentServiceServer for testing the GetLogs proxy path.
 type mockAgentService struct {
@@ -103,16 +117,13 @@ func startMockAgentServer(t *testing.T, logData [][]byte) (string, func()) {
 
 const bufSize = 1024 * 1024
 
-func setupTestServer(t *testing.T, password string) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
+func setupTestServer(t *testing.T, _ string) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
 	t.Helper()
 
 	store := storage.NewMemoryStore()
-	authProvider := &banyanrpc.PasswordAuthProvider{PasswordHash: banyanrpc.HashPassword(password)}
 
 	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-	)
+	srv := grpc.NewServer()
 
 	engineSrv := &engineGRPCServer{
 		store:       store,
@@ -131,7 +142,6 @@ func setupTestServer(t *testing.T, password string) (banyanpb.EngineServiceClien
 			return lis.DialContext(ctx)
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
 	)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
@@ -1025,15 +1035,15 @@ func TestGetLogs(t *testing.T) {
 	})
 }
 
-func TestPasswordAuth(t *testing.T) {
-	_, _, cleanup := setupTestServer(t, "correct-password")
-	defer cleanup()
+func TestTokenAuth(t *testing.T) {
+	const testToken = "valid-test-token"
+	tokenHash := banyanrpc.HashPassword(testToken)
+	validator := &testTokenValidator{validTokens: map[string]bool{tokenHash: true}}
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
 
-	// Create a client with wrong password
 	lis := bufconn.Listen(bufSize)
-	authProvider := &banyanrpc.PasswordAuthProvider{PasswordHash: banyanrpc.HashPassword("correct-password")}
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
 	)
 	engineSrv := &engineGRPCServer{
 		store:       storage.NewMemoryStore(),
@@ -1043,22 +1053,351 @@ func TestPasswordAuth(t *testing.T) {
 	go srv.Serve(lis)
 	defer srv.Stop()
 
+	t.Run("valid token succeeds", func(t *testing.T) {
+		conn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: testToken}),
+		)
+		defer conn.Close()
+
+		client := banyanpb.NewEngineServiceClient(conn)
+		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
+		if err != nil {
+			t.Fatalf("expected success with valid token, got: %v", err)
+		}
+	})
+
+	t.Run("wrong token rejected", func(t *testing.T) {
+		conn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: "wrong-token"}),
+		)
+		defer conn.Close()
+
+		client := banyanpb.NewEngineServiceClient(conn)
+		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
+		if err == nil {
+			t.Fatal("expected error with wrong token")
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
+		}
+	})
+
+	t.Run("missing token rejected", func(t *testing.T) {
+		conn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+				return lis.DialContext(ctx)
+			}),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+		)
+		defer conn.Close()
+
+		client := banyanpb.NewEngineServiceClient(conn)
+		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
+		if err == nil {
+			t.Fatal("expected error with no token")
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
+		}
+	})
+}
+
+func TestExchangeToken(t *testing.T) {
+	store := storage.NewMemoryStore()
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
+
+	engineSrv := &engineGRPCServer{
+		store:        store,
+		registryURL:  "localhost:5000",
+		passwordHash: string(passwordHash),
+	}
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer(
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), engineSrv)),
+	)
+	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
+	go srv.Serve(lis)
+	defer srv.Stop()
+
+	dialer := func(ctx context.Context, s string) (net.Conn, error) {
+		return lis.DialContext(ctx)
+	}
+
+	t.Run("valid password returns token", func(t *testing.T) {
+		conn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(dialer),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
+		)
+		defer conn.Close()
+
+		client := banyanpb.NewEngineServiceClient(conn)
+		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
+			Name: "agent-1", Role: "agent",
+		})
+		if err != nil {
+			t.Fatalf("ExchangeToken failed: %v", err)
+		}
+		if resp.Token == "" {
+			t.Error("expected non-empty token")
+		}
+
+		// Verify the returned token works for other RPCs
+		tokenConn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(dialer),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp.Token}),
+		)
+		defer tokenConn.Close()
+
+		tokenClient := banyanpb.NewEngineServiceClient(tokenConn)
+		_, err = tokenClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-1"})
+		if err != nil {
+			t.Fatalf("Heartbeat with exchanged token failed: %v", err)
+		}
+	})
+
+	t.Run("wrong password rejected", func(t *testing.T) {
+		conn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(dialer),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "wrong-password"}),
+		)
+		defer conn.Close()
+
+		client := banyanpb.NewEngineServiceClient(conn)
+		_, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
+			Name: "agent-2", Role: "agent",
+		})
+		if err == nil {
+			t.Fatal("expected error with wrong password")
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
+		}
+	})
+
+	t.Run("re-issue replaces old token", func(t *testing.T) {
+		conn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(dialer),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
+		)
+		defer conn.Close()
+
+		client := banyanpb.NewEngineServiceClient(conn)
+
+		resp1, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
+			Name: "agent-reissue", Role: "agent",
+		})
+		if err != nil {
+			t.Fatalf("first ExchangeToken failed: %v", err)
+		}
+
+		resp2, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
+			Name: "agent-reissue", Role: "agent",
+		})
+		if err != nil {
+			t.Fatalf("second ExchangeToken failed: %v", err)
+		}
+
+		if resp1.Token == resp2.Token {
+			t.Error("re-issued token should be different from original")
+		}
+
+		// Old token should no longer work
+		oldConn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(dialer),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp1.Token}),
+		)
+		defer oldConn.Close()
+
+		oldClient := banyanpb.NewEngineServiceClient(oldConn)
+		_, err = oldClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-reissue"})
+		if err == nil {
+			t.Fatal("expected error with old token after re-issue")
+		}
+
+		// New token should work
+		newConn, _ := grpc.NewClient("passthrough:///bufnet",
+			grpc.WithContextDialer(dialer),
+			grpc.WithTransportCredentials(insecure.NewCredentials()),
+			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp2.Token}),
+		)
+		defer newConn.Close()
+
+		newClient := banyanpb.NewEngineServiceClient(newConn)
+		_, err = newClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-reissue"})
+		if err != nil {
+			t.Fatalf("Heartbeat with new token failed: %v", err)
+		}
+	})
+}
+
+func TestExchangeToken_CLITokenHasExpiry(t *testing.T) {
+	store := storage.NewMemoryStore()
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
+
+	engineSrv := &engineGRPCServer{
+		store:        store,
+		registryURL:  "localhost:5000",
+		passwordHash: string(passwordHash),
+	}
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer(
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), engineSrv)),
+	)
+	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
+	go srv.Serve(lis)
+	defer srv.Stop()
+
+	dialer := func(ctx context.Context, s string) (net.Conn, error) {
+		return lis.DialContext(ctx)
+	}
+
 	conn, _ := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-			return lis.DialContext(ctx)
-		}),
+		grpc.WithContextDialer(dialer),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "wrong-password"}),
+		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
 	)
 	defer conn.Close()
 
-	wrongClient := banyanpb.NewEngineServiceClient(conn)
+	client := banyanpb.NewEngineServiceClient(conn)
 
-	_, err := wrongClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{
-		AgentName: "test",
+	t.Run("CLI token has expiry set", func(t *testing.T) {
+		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
+			Name: "cli-laptop", Role: "cli",
+		})
+		if err != nil {
+			t.Fatalf("ExchangeToken failed: %v", err)
+		}
+
+		// Verify the stored record has an ExpiresAt set
+		tokenHash := banyanrpc.HashPassword(resp.Token)
+		var record types.TokenRecord
+		if err := store.Get(context.Background(), types.KeyTokens+tokenHash, &record); err != nil {
+			t.Fatalf("failed to get token record: %v", err)
+		}
+		if record.Name != "cli-laptop" {
+			t.Errorf("expected name 'cli-laptop', got %q", record.Name)
+		}
+		if record.Role != "cli" {
+			t.Errorf("expected role 'cli', got %q", record.Role)
+		}
+		if record.ExpiresAt.IsZero() {
+			t.Error("expected non-zero ExpiresAt for CLI token")
+		}
+		// Expiry should be ~30 days from now (allow 1 minute tolerance)
+		expectedExpiry := time.Now().Add(types.DefaultCLITokenTTL)
+		if record.ExpiresAt.Before(expectedExpiry.Add(-time.Minute)) || record.ExpiresAt.After(expectedExpiry.Add(time.Minute)) {
+			t.Errorf("ExpiresAt %v not within 1 minute of expected %v", record.ExpiresAt, expectedExpiry)
+		}
 	})
+
+	t.Run("agent token has no expiry", func(t *testing.T) {
+		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
+			Name: "worker-1", Role: "agent",
+		})
+		if err != nil {
+			t.Fatalf("ExchangeToken failed: %v", err)
+		}
+
+		tokenHash := banyanrpc.HashPassword(resp.Token)
+		var record types.TokenRecord
+		if err := store.Get(context.Background(), types.KeyTokens+tokenHash, &record); err != nil {
+			t.Fatalf("failed to get token record: %v", err)
+		}
+		if record.Name != "worker-1" {
+			t.Errorf("expected name 'worker-1', got %q", record.Name)
+		}
+		if record.Role != "agent" {
+			t.Errorf("expected role 'agent', got %q", record.Role)
+		}
+		if !record.ExpiresAt.IsZero() {
+			t.Errorf("expected zero ExpiresAt for agent token, got %v", record.ExpiresAt)
+		}
+	})
+}
+
+func TestValidateToken_Expired(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+	ctx := context.Background()
+
+	// Store a token that expired 1 hour ago
+	expiredRecord := &types.TokenRecord{
+		Name:      "cli-expired",
+		Role:      "cli",
+		ExpiresAt: time.Now().Add(-time.Hour),
+	}
+	store.Save(ctx, types.KeyTokens+"expired-hash", expiredRecord)
+
+	err := srv.ValidateToken(ctx, "expired-hash")
 	if err == nil {
-		t.Fatal("expected error with wrong password")
+		t.Fatal("expected error for expired token")
+	}
+	if status.Code(err) != codes.Unauthenticated {
+		t.Errorf("expected Unauthenticated, got %v", status.Code(err))
+	}
+	if status.Convert(err).Message() != "token expired, run 'auth' to re-authenticate" {
+		t.Errorf("unexpected error message: %q", status.Convert(err).Message())
+	}
+}
+
+func TestValidateToken_Valid(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+	ctx := context.Background()
+
+	// Store a valid non-expired CLI token
+	validRecord := &types.TokenRecord{
+		Name:      "cli-valid",
+		Role:      "cli",
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	store.Save(ctx, types.KeyTokens+"valid-hash", validRecord)
+
+	if err := srv.ValidateToken(ctx, "valid-hash"); err != nil {
+		t.Fatalf("expected no error for valid token, got: %v", err)
+	}
+}
+
+func TestValidateToken_AgentNeverExpires(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+	ctx := context.Background()
+
+	// Store an agent token (no expiry)
+	agentRecord := &types.TokenRecord{
+		Name: "worker-1",
+		Role: "agent",
+	}
+	store.Save(ctx, types.KeyTokens+"agent-hash", agentRecord)
+
+	if err := srv.ValidateToken(ctx, "agent-hash"); err != nil {
+		t.Fatalf("expected no error for agent token, got: %v", err)
+	}
+}
+
+func TestValidateToken_NotFound(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+	ctx := context.Background()
+
+	err := srv.ValidateToken(ctx, "nonexistent-hash")
+	if err == nil {
+		t.Fatal("expected error for nonexistent token")
 	}
 	if status.Code(err) != codes.Unauthenticated {
 		t.Errorf("expected Unauthenticated, got %v", status.Code(err))
@@ -1088,12 +1427,8 @@ func TestGetLogs_SuccessProxy(t *testing.T) {
 	})
 
 	// Create engine gRPC server with both unary and stream interceptors
-	authProvider := &banyanrpc.NoAuthProvider{}
 	lis := bufconn.Listen(bufSize)
-	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-		grpc.StreamInterceptor(banyanrpc.AuthStreamInterceptor(authProvider)),
-	)
+	grpcSrv := grpc.NewServer()
 	engineSrv := &engineGRPCServer{
 		store:       store,
 		registryURL: "localhost:5000",
@@ -1163,12 +1498,8 @@ func TestGetLogs_AgentConnectionFailure(t *testing.T) {
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 	})
 
-	authProvider := &banyanrpc.NoAuthProvider{}
 	lis := bufconn.Listen(bufSize)
-	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-		grpc.StreamInterceptor(banyanrpc.AuthStreamInterceptor(authProvider)),
-	)
+	grpcSrv := grpc.NewServer()
 	engineSrv := &engineGRPCServer{
 		store:       store,
 		registryURL: "localhost:5000",
@@ -1597,12 +1928,8 @@ func TestGRPCLogReader_BufferedRead(t *testing.T) {
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 	})
 
-	authProvider := &banyanrpc.NoAuthProvider{}
 	lis := bufconn.Listen(bufSize)
-	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-		grpc.StreamInterceptor(banyanrpc.AuthStreamInterceptor(authProvider)),
-	)
+	grpcSrv := grpc.NewServer()
 	engineSrv := &engineGRPCServer{
 		store:       store,
 		registryURL: "localhost:5000",
@@ -2099,12 +2426,8 @@ func TestGetLogs_ClientCancelDuringSend(t *testing.T) {
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 	})
 
-	authProvider := &banyanrpc.NoAuthProvider{}
 	lis := bufconn.Listen(bufSize)
-	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-		grpc.StreamInterceptor(banyanrpc.AuthStreamInterceptor(authProvider)),
-	)
+	grpcSrv := grpc.NewServer()
 	engineSrv := &engineGRPCServer{
 		store:       store,
 		registryURL: "localhost:5000",
@@ -2179,12 +2502,8 @@ func TestGetLogs_SuccessProxyWithFollow(t *testing.T) {
 	})
 
 	// Store a session token for the agent
-	authProvider := &banyanrpc.NoAuthProvider{}
 	lis := bufconn.Listen(bufSize)
-	grpcSrv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-		grpc.StreamInterceptor(banyanrpc.AuthStreamInterceptor(authProvider)),
-	)
+	grpcSrv := grpc.NewServer()
 	engineSrv := &engineGRPCServer{
 		store:       store,
 		registryURL: "localhost:5000",

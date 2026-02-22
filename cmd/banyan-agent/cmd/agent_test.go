@@ -148,7 +148,7 @@ func TestRunAgentStatus_NotRunning_NoPassword(t *testing.T) {
 	}
 }
 
-func TestRunAgentStatus_NotRunning_WithPassword(t *testing.T) {
+func TestRunAgentStatus_NotRunning_WithToken(t *testing.T) {
 	origPidFile := agentPidFile
 	origConfig := configPath
 	origEndpoint := agentEngineEndpoint
@@ -160,17 +160,14 @@ func TestRunAgentStatus_NotRunning_WithPassword(t *testing.T) {
 
 	agentPidFile = filepath.Join(t.TempDir(), "nonexistent.pid")
 
-	// Create config with a password
+	// Create config with an auth token
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 	cfg := types.BanyanConfig{
-		Security: types.SecurityConfig{
-			AuthType: "password",
-			Password: "test-pass",
-		},
 		Agent: types.AgentConfig{
 			EngineHost: "127.0.0.1",
 			EnginePort: "59999", // unreachable port
+			AuthToken:  "test-token-abc",
 		},
 	}
 	if err := types.SaveConfig(cfgPath, &cfg); err != nil {

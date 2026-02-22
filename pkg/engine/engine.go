@@ -11,7 +11,6 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/registry"
 
-	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/fertile-org/banyan/pkg/vpc"
@@ -24,7 +23,7 @@ type Options struct {
 	VPCCIDR      string
 	RegistryPort string
 	GRPCPort     string
-	Password     string
+	PasswordHash string // bcrypt hash of cluster password
 	DataDir      string
 	EtcdUsername string // etcd RBAC username
 	EtcdPassword string // etcd RBAC password
@@ -67,18 +66,10 @@ func New(opts *Options) (*Engine, error) {
 // Run starts the engine: VPC init, registry, gRPC server, and orchestration loop.
 // It blocks until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) error {
-	// Create AuthProvider based on config
-	var authProvider banyanrpc.AuthProvider
-	if e.opts.Password != "" {
-		hash := types.HashPassword(e.opts.Password)
-		if saveErr := e.store.Save(ctx, types.KeyAuthHash, hash); saveErr != nil {
-			return fmt.Errorf("failed to store auth hash: %w", saveErr)
-		}
-		authProvider = &banyanrpc.PasswordAuthProvider{PasswordHash: hash}
-		fmt.Println("Password authentication enabled")
+	if e.opts.PasswordHash != "" {
+		fmt.Println("Token-based authentication enabled")
 	} else {
-		authProvider = &banyanrpc.NoAuthProvider{}
-		fmt.Println("No authentication configured")
+		fmt.Println("WARNING: No authentication configured")
 	}
 
 	// Initialize VPC network (etcd only — Flannel requires etcd natively)
@@ -114,7 +105,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Start Engine gRPC server
 	fmt.Printf("Starting Engine gRPC server on port %s...\n", e.opts.GRPCPort)
-	grpcSrv, err := startEngineGRPC(ctx, e.store, e.opts.GRPCPort, authProvider, e.registryURL)
+	grpcSrv, err := startEngineGRPC(ctx, e.store, e.opts.GRPCPort, e.opts.PasswordHash, e.registryURL)
 	if err != nil {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}

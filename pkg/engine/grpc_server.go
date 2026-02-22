@@ -2,6 +2,8 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -21,27 +23,30 @@ import (
 // engineGRPCServer implements the EngineService gRPC server.
 type engineGRPCServer struct {
 	banyanpb.UnimplementedEngineServiceServer
-	store       storage.StateStore
-	sessions    sync.Map // map[agentName]sessionToken
-	registryURL string
+	store        storage.StateStore
+	sessions     sync.Map // map[agentName]sessionToken
+	registryURL  string
+	passwordHash string
 }
 
 // startEngineGRPC starts the gRPC server for agent communication.
-func startEngineGRPC(ctx context.Context, store storage.StateStore, port string, authProvider banyanrpc.AuthProvider, registryURL string) (*engineGRPCServer, error) {
+func startEngineGRPC(ctx context.Context, store storage.StateStore, port, passwordHash, registryURL string) (*engineGRPCServer, error) {
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on gRPC port %s: %w", port, err)
 	}
 
+	engineSrv := &engineGRPCServer{
+		store:        store,
+		registryURL:  registryURL,
+		passwordHash: passwordHash,
+	}
+
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
-		grpc.StreamInterceptor(banyanrpc.AuthStreamInterceptor(authProvider)),
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(passwordHash, engineSrv)),
+		grpc.StreamInterceptor(banyanrpc.NewAuthStreamInterceptor(engineSrv)),
 	)
 
-	engineSrv := &engineGRPCServer{
-		store:       store,
-		registryURL: registryURL,
-	}
 	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
 
 	go func() {
@@ -495,6 +500,62 @@ func (s *engineGRPCServer) GetInfo(ctx context.Context, req *banyanpb.GetInfoReq
 
 func (s *engineGRPCServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
 	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
+// ExchangeToken validates the password and returns a random auth token.
+func (s *engineGRPCServer) ExchangeToken(ctx context.Context, req *banyanpb.ExchangeTokenRequest) (*banyanpb.ExchangeTokenResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	if req.Role == "" {
+		return nil, status.Error(codes.InvalidArgument, "role is required")
+	}
+
+	// Delete existing token for this name (re-issue)
+	var existingHash string
+	indexKey := types.KeyTokenIndex + req.Name
+	if err := s.store.Get(ctx, indexKey, &existingHash); err == nil {
+		_ = s.store.Delete(ctx, types.KeyTokens+existingHash)
+		_ = s.store.Delete(ctx, indexKey)
+	}
+
+	// Generate random token (32 bytes → 64-char hex)
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to generate token: %v", err)
+	}
+	token := hex.EncodeToString(tokenBytes)
+	tokenHash := banyanrpc.HashPassword(token)
+
+	// Build token record with TTL for CLI tokens
+	record := types.TokenRecord{Name: req.Name, Role: req.Role}
+	if req.Role == "cli" {
+		record.ExpiresAt = time.Now().Add(types.DefaultCLITokenTTL)
+	}
+
+	// Store dual index: hash→record and name→hash
+	if err := s.store.Save(ctx, types.KeyTokens+tokenHash, &record); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to store token: %v", err)
+	}
+	if err := s.store.Save(ctx, indexKey, tokenHash); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to store token index: %v", err)
+	}
+
+	fmt.Printf("[Engine] Token issued for %s (role: %s)\n", req.Name, req.Role)
+
+	return &banyanpb.ExchangeTokenResponse{Token: token}, nil
+}
+
+// ValidateToken implements rpc.TokenValidator by looking up the token hash in the store.
+func (s *engineGRPCServer) ValidateToken(ctx context.Context, tokenHash string) error {
+	var record types.TokenRecord
+	if err := s.store.Get(ctx, types.KeyTokens+tokenHash, &record); err != nil {
+		return status.Error(codes.Unauthenticated, "invalid auth token")
+	}
+	if record.IsExpired() {
+		return status.Error(codes.Unauthenticated, "token expired, run 'auth' to re-authenticate")
+	}
+	return nil
 }
 
 // --- Helper functions ---

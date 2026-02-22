@@ -30,6 +30,7 @@ const (
 	EngineService_GetLogs_FullMethodName               = "/banyan.v1.EngineService/GetLogs"
 	EngineService_GetInfo_FullMethodName               = "/banyan.v1.EngineService/GetInfo"
 	EngineService_Health_FullMethodName                = "/banyan.v1.EngineService/Health"
+	EngineService_ExchangeToken_FullMethodName         = "/banyan.v1.EngineService/ExchangeToken"
 )
 
 // EngineServiceClient is the client API for EngineService service.
@@ -51,6 +52,8 @@ type EngineServiceClient interface {
 	GetLogs(ctx context.Context, in *GetLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GetLogsResponse], error)
 	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	// Auth RPC — authenticated with password, returns a token
+	ExchangeToken(ctx context.Context, in *ExchangeTokenRequest, opts ...grpc.CallOption) (*ExchangeTokenResponse, error)
 }
 
 type engineServiceClient struct {
@@ -180,6 +183,16 @@ func (c *engineServiceClient) Health(ctx context.Context, in *HealthRequest, opt
 	return out, nil
 }
 
+func (c *engineServiceClient) ExchangeToken(ctx context.Context, in *ExchangeTokenRequest, opts ...grpc.CallOption) (*ExchangeTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ExchangeTokenResponse)
+	err := c.cc.Invoke(ctx, EngineService_ExchangeToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EngineServiceServer is the server API for EngineService service.
 // All implementations must embed UnimplementedEngineServiceServer
 // for forward compatibility.
@@ -199,6 +212,8 @@ type EngineServiceServer interface {
 	GetLogs(*GetLogsRequest, grpc.ServerStreamingServer[GetLogsResponse]) error
 	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	// Auth RPC — authenticated with password, returns a token
+	ExchangeToken(context.Context, *ExchangeTokenRequest) (*ExchangeTokenResponse, error)
 	mustEmbedUnimplementedEngineServiceServer()
 }
 
@@ -241,6 +256,9 @@ func (UnimplementedEngineServiceServer) GetInfo(context.Context, *GetInfoRequest
 }
 func (UnimplementedEngineServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedEngineServiceServer) ExchangeToken(context.Context, *ExchangeTokenRequest) (*ExchangeTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ExchangeToken not implemented")
 }
 func (UnimplementedEngineServiceServer) mustEmbedUnimplementedEngineServiceServer() {}
 func (UnimplementedEngineServiceServer) testEmbeddedByValue()                       {}
@@ -454,6 +472,24 @@ func _EngineService_Health_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineService_ExchangeToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ExchangeTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ExchangeToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ExchangeToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ExchangeToken(ctx, req.(*ExchangeTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EngineService_ServiceDesc is the grpc.ServiceDesc for EngineService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -500,6 +536,10 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _EngineService_Health_Handler,
+		},
+		{
+			MethodName: "ExchangeToken",
+			Handler:    _EngineService_ExchangeToken_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

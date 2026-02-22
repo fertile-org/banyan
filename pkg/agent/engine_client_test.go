@@ -7,34 +7,51 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/crypto/bcrypt"
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
 
 const testBufSize = 1024 * 1024
 
+// testToken is a fixed token used in tests.
+const testToken = "test-auth-token-abc123"
+
+// testTokenValidator validates tokens for testing.
+type testTokenValidator struct {
+	validHash string // sha256 of the valid token
+}
+
+func (v *testTokenValidator) ValidateToken(ctx context.Context, tokenHash string) error {
+	if tokenHash != v.validHash {
+		return status.Error(codes.Unauthenticated, "invalid auth token")
+	}
+	return nil
+}
+
 // setupEngineServer creates a bufconn-based engine gRPC server and an EngineClient connected to it.
-func setupEngineServer(t *testing.T, password string) (*EngineClient, storage.StateStore, func()) {
+func setupEngineServer(t *testing.T, token string) (*EngineClient, storage.StateStore, func()) {
 	t.Helper()
 
 	store := storage.NewMemoryStore()
-	authProvider := &banyanrpc.PasswordAuthProvider{PasswordHash: banyanrpc.HashPassword(password)}
+
+	// Create a bcrypt hash for the password (used for ExchangeToken RPC)
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
+
+	validator := &testTokenValidator{validHash: banyanrpc.HashPassword(token)}
 
 	lis := bufconn.Listen(testBufSize)
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
 	)
 
-	// We need to register the real engine server here.
-	// Import the engine package's gRPC server type — but since it's in another package
-	// and unexported, we use the banyanpb registration directly with a minimal implementation.
-	// Instead, let's use the real protobuf-registered server from pkg/engine.
-	// Since we can't import unexported types, we create a minimal test server.
 	engineSrv := &testEngineServer{store: store, registryURL: "localhost:5000"}
 	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
 
@@ -49,7 +66,7 @@ func setupEngineServer(t *testing.T, password string) (*EngineClient, storage.St
 			return lis.DialContext(ctx)
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
+		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: token}),
 	)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
@@ -175,15 +192,17 @@ func (s *failingReportServer) Health(ctx context.Context, req *banyanpb.HealthRe
 }
 
 // setupFailingReportServer creates a bufconn-based server where ReportTaskResult always fails.
-func setupFailingReportServer(t *testing.T, password string) (*EngineClient, storage.StateStore, func()) {
+func setupFailingReportServer(t *testing.T, token string) (*EngineClient, storage.StateStore, func()) {
 	t.Helper()
 
 	store := storage.NewMemoryStore()
-	authProvider := &banyanrpc.PasswordAuthProvider{PasswordHash: banyanrpc.HashPassword(password)}
+
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
+	validator := &testTokenValidator{validHash: banyanrpc.HashPassword(token)}
 
 	lis := bufconn.Listen(testBufSize)
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.AuthUnaryInterceptor(authProvider)),
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
 	)
 
 	engineSrv := &failingReportServer{store: store, registryURL: "localhost:5000"}
@@ -200,7 +219,7 @@ func setupFailingReportServer(t *testing.T, password string) (*EngineClient, sto
 			return lis.DialContext(ctx)
 		}),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
+		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: token}),
 	)
 	if err != nil {
 		t.Fatalf("failed to dial: %v", err)
@@ -221,7 +240,7 @@ func setupFailingReportServer(t *testing.T, password string) (*EngineClient, sto
 
 func TestNewEngineClient(t *testing.T) {
 	// NewEngineClient creates a lazy gRPC connection (no actual network needed)
-	client, err := NewEngineClient("localhost:50051", "test-password")
+	client, err := NewEngineClient("localhost:50051", "test-token")
 	if err != nil {
 		t.Fatalf("NewEngineClient failed: %v", err)
 	}
@@ -235,8 +254,23 @@ func TestNewEngineClient(t *testing.T) {
 	}
 }
 
+func TestNewEngineClientWithPassword(t *testing.T) {
+	client, err := NewEngineClientWithPassword("localhost:50051", "test-password")
+	if err != nil {
+		t.Fatalf("NewEngineClientWithPassword failed: %v", err)
+	}
+	defer client.Close()
+
+	if client.conn == nil {
+		t.Error("expected non-nil conn")
+	}
+	if client.client == nil {
+		t.Error("expected non-nil client")
+	}
+}
+
 func TestEngineClient_Register(t *testing.T) {
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
 	registryURL, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc")
@@ -249,7 +283,7 @@ func TestEngineClient_Register(t *testing.T) {
 }
 
 func TestEngineClient_Heartbeat(t *testing.T) {
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
 	err := client.Heartbeat(context.Background(), "worker-1", "token-abc")
@@ -259,7 +293,7 @@ func TestEngineClient_Heartbeat(t *testing.T) {
 }
 
 func TestEngineClient_PollTasks(t *testing.T) {
-	client, store, cleanup := setupEngineServer(t, "test-pass")
+	client, store, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -293,7 +327,7 @@ func TestEngineClient_PollTasks(t *testing.T) {
 }
 
 func TestEngineClient_ReportTaskResult(t *testing.T) {
-	client, store, cleanup := setupEngineServer(t, "test-pass")
+	client, store, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -316,7 +350,7 @@ func TestEngineClient_ReportTaskResult(t *testing.T) {
 }
 
 func TestEngineClient_ReportContainerHealth(t *testing.T) {
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
 	err := client.ReportContainerHealth(context.Background(), "worker-1", []*banyanpb.ContainerStatus{
@@ -328,7 +362,7 @@ func TestEngineClient_ReportContainerHealth(t *testing.T) {
 }
 
 func TestEngineClient_Health(t *testing.T) {
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
 	err := client.Health(context.Background())
@@ -338,7 +372,7 @@ func TestEngineClient_Health(t *testing.T) {
 }
 
 func TestEngineClient_Close(t *testing.T) {
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
 	// Close should not panic
@@ -351,7 +385,7 @@ func TestEngineClient_Close(t *testing.T) {
 
 func TestEngineClient_ErrorPaths(t *testing.T) {
 	// Create a server and immediately stop it to trigger RPC errors.
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t, testToken)
 	cleanup() // Stop server immediately
 
 	ctx := context.Background()

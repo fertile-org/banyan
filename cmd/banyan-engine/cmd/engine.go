@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/fertile-org/banyan/pkg/engine"
 	"github.com/fertile-org/banyan/pkg/storage"
@@ -29,6 +30,7 @@ var (
 	engineGRPCPort     string
 	engineStoreBackend string
 	engineStoreAddress string
+	engineInitPassword string
 )
 
 // configPath is the default path to the Banyan config file.
@@ -83,6 +85,9 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&engineDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
+	// Init flags
+	initCmd.Flags().StringVar(&engineInitPassword, "password", "", "Cluster password (non-interactive mode)")
+
 	// Store backend flags (for external etcd override)
 	startCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
 	startCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
@@ -127,9 +132,18 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	// --- Cluster password ---
 	fmt.Println()
-	if existingCfg.Security.Password != "" {
+	switch {
+	case existingCfg.Engine.PasswordHash != "":
 		fmt.Printf("  %s Cluster password already configured\n", styleOK.Render("[OK]"))
-	} else {
+	case engineInitPassword != "":
+		// Password provided via --password flag (e.g., for automation or E2E).
+		hash, hashErr := bcrypt.GenerateFromPassword([]byte(engineInitPassword), bcrypt.DefaultCost)
+		if hashErr != nil {
+			return fmt.Errorf("failed to hash password: %w", hashErr)
+		}
+		existingCfg.Engine.PasswordHash = string(hash)
+		fmt.Printf("  %s Cluster password configured\n", styleOK.Render("[OK]"))
+	default:
 		var password string
 		form := huh.NewForm(
 			huh.NewGroup(
@@ -148,10 +162,11 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("password input: %w", err)
 		}
 		if password != "" {
-			existingCfg.Security = types.SecurityConfig{
-				AuthType: "password",
-				Password: password,
+			hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+			if hashErr != nil {
+				return fmt.Errorf("failed to hash password: %w", hashErr)
 			}
+			existingCfg.Engine.PasswordHash = string(hash)
 		}
 	}
 
@@ -383,7 +398,7 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		VPCCIDR:      engineVPCCIDR,
 		RegistryPort: engineRegistryPort,
 		GRPCPort:     engineGRPCPort,
-		Password:     cfg.Security.Password,
+		PasswordHash: cfg.Engine.PasswordHash,
 		DataDir:      engineDataDir,
 		EtcdUsername: cfg.Engine.EtcdUsername,
 		EtcdPassword: cfg.Engine.EtcdPassword,
@@ -541,10 +556,6 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Store (%s): RUNNING\n", storeBackend)
 	fmt.Println("Connection: OK")
-
-	if err := types.VerifyAuth(ctx, store, configPath); err != nil {
-		return fmt.Errorf("authentication failed: %w", err)
-	}
 
 	agents, _ := engine.ListAvailableAgents(ctx, store)
 	fmt.Printf("\nAgents: %d\n", len(agents))

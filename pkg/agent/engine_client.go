@@ -17,8 +17,25 @@ type EngineClient struct {
 	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient dials the engine gRPC server with password credentials.
-func NewEngineClient(engineAddr, password string) (*EngineClient, error) {
+// NewEngineClient dials the engine gRPC server with token credentials.
+func NewEngineClient(engineAddr, token string) (*EngineClient, error) {
+	conn, err := grpc.NewClient(engineAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: token}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
+	}
+
+	return &EngineClient{
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}, nil
+}
+
+// NewEngineClientWithPassword dials the engine gRPC server with password credentials.
+// Used during init to call ExchangeToken.
+func NewEngineClientWithPassword(engineAddr, password string) (*EngineClient, error) {
 	conn, err := grpc.NewClient(engineAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
@@ -31,6 +48,18 @@ func NewEngineClient(engineAddr, password string) (*EngineClient, error) {
 		conn:   conn,
 		client: banyanpb.NewEngineServiceClient(conn),
 	}, nil
+}
+
+// ExchangeToken calls the ExchangeToken RPC to get an auth token.
+func (c *EngineClient) ExchangeToken(ctx context.Context, name, role string) (string, error) {
+	resp, err := c.client.ExchangeToken(ctx, &banyanpb.ExchangeTokenRequest{
+		Name: name,
+		Role: role,
+	})
+	if err != nil {
+		return "", fmt.Errorf("token exchange failed: %w", err)
+	}
+	return resp.Token, nil
 }
 
 func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string) (string, error) {

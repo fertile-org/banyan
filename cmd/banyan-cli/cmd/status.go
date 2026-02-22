@@ -33,8 +33,8 @@ func runStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
-	password := types.GetConfigPassword(configPath)
-	client, err := NewEngineClient(engineAddr, password)
+	token := types.GetCLIAuthToken(configPath)
+	client, err := NewEngineClient(engineAddr, token)
 	if err != nil {
 		fmt.Printf("Engine: UNREACHABLE (%v)\n", err)
 		fmt.Println("========================================")

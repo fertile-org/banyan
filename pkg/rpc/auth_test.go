@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
@@ -19,6 +20,22 @@ func TestPasswordCredentials(t *testing.T) {
 	}
 	if md[MetadataKeyPassword] != "secret123" {
 		t.Errorf("expected password 'secret123', got %q", md[MetadataKeyPassword])
+	}
+
+	if creds.RequireTransportSecurity() {
+		t.Error("expected RequireTransportSecurity to return false")
+	}
+}
+
+func TestTokenCredentials(t *testing.T) {
+	creds := &TokenCredentials{Token: "my-auth-token"}
+
+	md, err := creds.GetRequestMetadata(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if md[MetadataKeyAuthToken] != "my-auth-token" {
+		t.Errorf("expected token 'my-auth-token', got %q", md[MetadataKeyAuthToken])
 	}
 
 	if creds.RequireTransportSecurity() {
@@ -42,9 +59,25 @@ func TestSessionTokenCredentials(t *testing.T) {
 	}
 }
 
-func TestValidatePassword(t *testing.T) {
+// mockTokenValidator is a test TokenValidator that validates tokens against an in-memory map.
+type mockTokenValidator struct {
+	tokens map[string]string // sha256(token) → name
+}
+
+func (m *mockTokenValidator) ValidateToken(ctx context.Context, tokenHash string) error {
+	if _, ok := m.tokens[tokenHash]; !ok {
+		return status.Error(codes.Unauthenticated, "invalid auth token")
+	}
+	return nil
+}
+
+func TestValidatePasswordBcrypt(t *testing.T) {
 	password := "mypassword"
-	passwordHash := HashPassword(password)
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("failed to hash password: %v", err)
+	}
+	passwordHash := string(hash)
 
 	tests := []struct {
 		name    string
@@ -75,7 +108,59 @@ func TestValidatePassword(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := validatePassword(tt.ctx, passwordHash)
+			err := validatePasswordBcrypt(tt.ctx, passwordHash)
+			if tt.wantErr == codes.OK {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Error("expected error, got nil")
+				return
+			}
+			if got := status.Code(err); got != tt.wantErr {
+				t.Errorf("expected code %v, got %v", tt.wantErr, got)
+			}
+		})
+	}
+}
+
+func TestValidateAuthToken(t *testing.T) {
+	token := "my-auth-token-abc123"
+	tokenHash := HashPassword(token)
+	validator := &mockTokenValidator{tokens: map[string]string{tokenHash: "test-agent"}}
+
+	tests := []struct {
+		name    string
+		ctx     context.Context
+		wantErr codes.Code
+	}{
+		{
+			name:    "valid token",
+			ctx:     metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyAuthToken, token)),
+			wantErr: codes.OK,
+		},
+		{
+			name:    "wrong token",
+			ctx:     metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyAuthToken, "wrong")),
+			wantErr: codes.Unauthenticated,
+		},
+		{
+			name:    "missing metadata",
+			ctx:     context.Background(),
+			wantErr: codes.Unauthenticated,
+		},
+		{
+			name:    "empty metadata",
+			ctx:     metadata.NewIncomingContext(context.Background(), metadata.MD{}),
+			wantErr: codes.Unauthenticated,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateAuthToken(tt.ctx, validator)
 			if tt.wantErr == codes.OK {
 				if err != nil {
 					t.Errorf("expected no error, got %v", err)
@@ -138,18 +223,33 @@ func TestValidateSessionToken(t *testing.T) {
 	}
 }
 
-func TestPasswordAuthInterceptor(t *testing.T) {
+// mockServerStream implements grpc.ServerStream for testing.
+type mockServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (m *mockServerStream) Context() context.Context { return m.ctx }
+
+func TestNewAuthInterceptor(t *testing.T) {
 	password := "test-password"
-	hash := HashPassword(password)
-	interceptor := PasswordAuthInterceptor(hash)
+	hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.MinCost)
+	passwordHash := string(hash)
+
+	token := "valid-token"
+	tokenHash := HashPassword(token)
+	validator := &mockTokenValidator{tokens: map[string]string{tokenHash: "test-agent"}}
+
+	interceptor := NewAuthInterceptor(passwordHash, validator)
 
 	handler := func(ctx context.Context, req any) (any, error) {
 		return "ok", nil
 	}
 
-	t.Run("valid password passes through", func(t *testing.T) {
+	t.Run("ExchangeToken with valid password", func(t *testing.T) {
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyPassword, password))
-		resp, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+		info := &grpc.UnaryServerInfo{FullMethod: "/banyan.v1.EngineService/ExchangeToken"}
+		resp, err := interceptor(ctx, nil, info, handler)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -158,9 +258,46 @@ func TestPasswordAuthInterceptor(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid password rejected", func(t *testing.T) {
+	t.Run("ExchangeToken with wrong password", func(t *testing.T) {
 		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyPassword, "wrong"))
-		_, err := interceptor(ctx, nil, &grpc.UnaryServerInfo{}, handler)
+		info := &grpc.UnaryServerInfo{FullMethod: "/banyan.v1.EngineService/ExchangeToken"}
+		_, err := interceptor(ctx, nil, info, handler)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
+		}
+	})
+
+	t.Run("other RPC with valid token", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyAuthToken, token))
+		info := &grpc.UnaryServerInfo{FullMethod: "/banyan.v1.EngineService/Register"}
+		resp, err := interceptor(ctx, nil, info, handler)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if resp != "ok" {
+			t.Errorf("expected 'ok', got %v", resp)
+		}
+	})
+
+	t.Run("other RPC with invalid token", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyAuthToken, "bad-token"))
+		info := &grpc.UnaryServerInfo{FullMethod: "/banyan.v1.EngineService/Register"}
+		_, err := interceptor(ctx, nil, info, handler)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if status.Code(err) != codes.Unauthenticated {
+			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
+		}
+	})
+
+	t.Run("other RPC with missing token", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.MD{})
+		info := &grpc.UnaryServerInfo{FullMethod: "/banyan.v1.EngineService/Deploy"}
+		_, err := interceptor(ctx, nil, info, handler)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -170,33 +307,27 @@ func TestPasswordAuthInterceptor(t *testing.T) {
 	})
 }
 
-// mockServerStream implements grpc.ServerStream for testing.
-type mockServerStream struct {
-	grpc.ServerStream
-	ctx context.Context
-}
+func TestNewAuthStreamInterceptor(t *testing.T) {
+	token := "valid-token"
+	tokenHash := HashPassword(token)
+	validator := &mockTokenValidator{tokens: map[string]string{tokenHash: "test-agent"}}
 
-func (m *mockServerStream) Context() context.Context { return m.ctx }
-
-func TestPasswordAuthStreamInterceptor(t *testing.T) {
-	password := "test-password"
-	hash := HashPassword(password)
-	interceptor := PasswordAuthStreamInterceptor(hash)
+	interceptor := NewAuthStreamInterceptor(validator)
 
 	handler := func(srv any, stream grpc.ServerStream) error {
 		return nil
 	}
 
-	t.Run("valid password passes through", func(t *testing.T) {
-		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyPassword, password))
+	t.Run("valid token passes through", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyAuthToken, token))
 		err := interceptor(nil, &mockServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, handler)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
 	})
 
-	t.Run("invalid password rejected", func(t *testing.T) {
-		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyPassword, "wrong"))
+	t.Run("invalid token rejected", func(t *testing.T) {
+		ctx := metadata.NewIncomingContext(context.Background(), metadata.Pairs(MetadataKeyAuthToken, "wrong"))
 		err := interceptor(nil, &mockServerStream{ctx: ctx}, &grpc.StreamServerInfo{}, handler)
 		if err == nil {
 			t.Fatal("expected error")
@@ -276,5 +407,17 @@ func TestHashPassword(t *testing.T) {
 	hash3 := HashPassword("other")
 	if hash1 == hash3 {
 		t.Error("different passwords should produce different hashes")
+	}
+}
+
+func TestIsExchangeTokenMethod(t *testing.T) {
+	if !isExchangeTokenMethod("/banyan.v1.EngineService/ExchangeToken") {
+		t.Error("expected true for ExchangeToken method")
+	}
+	if isExchangeTokenMethod("/banyan.v1.EngineService/Register") {
+		t.Error("expected false for Register method")
+	}
+	if isExchangeTokenMethod("/banyan.v1.EngineService/Deploy") {
+		t.Error("expected false for Deploy method")
 	}
 }

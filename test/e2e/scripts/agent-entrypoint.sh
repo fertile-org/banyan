@@ -13,13 +13,10 @@ ENGINE_GRPC_PORT=${ENGINE_GRPC_PORT:-50051}
 # Default E2E password (must match engine password)
 E2E_PASSWORD=${E2E_PASSWORD:-banyan-e2e-secret}
 
-# Write config file with password and engine connection
+# Write config file (everything except password — that goes via --password flag)
 echo "Writing config..."
 mkdir -p /etc/banyan
 cat > /etc/banyan/banyan.yaml <<EOF
-security:
-    auth_type: password
-    password: ${E2E_PASSWORD}
 agent:
     engine_host: ${ENGINE_HOST}
     engine_port: "${ENGINE_GRPC_PORT}"
@@ -34,9 +31,9 @@ until nc -z "${ENGINE_HOST}" "${ENGINE_GRPC_PORT}" 2>/dev/null; do
 done
 echo "Engine is ready!"
 
-# Initialize agent
+# Initialize agent (password via flag to avoid interactive prompt)
 echo "Initializing agent..."
-echo "" | banyan-agent init
+banyan-agent init --password "${E2E_PASSWORD}"
 
 # Start containerd in background
 echo "Starting containerd..."

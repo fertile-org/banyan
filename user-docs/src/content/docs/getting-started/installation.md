@@ -107,6 +107,14 @@ If you choose "External" during `banyan-engine init`, the wizard asks for:
 
 You must install, run, and manage external etcd yourself. See the [etcd documentation](https://etcd.io/docs/) for setup instructions.
 
+## Important: init order
+
+The engine must be running before you run `banyan-agent init` or `banyan-cli init`. During init, agents and CLI clients connect to the engine to exchange the cluster password for an auth token (see [Authentication](/guides/authentication/) for details). This means the setup order is always:
+
+1. `banyan-engine init` + `banyan-engine start`
+2. `banyan-agent init` (on each worker)
+3. `banyan-cli init` (on any deploy machine)
+
 ## Verify
 
 ```bash

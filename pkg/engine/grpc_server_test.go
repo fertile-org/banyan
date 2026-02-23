@@ -3289,7 +3289,7 @@ func TestTeardownNonRunningDeployments(t *testing.T) {
 func TestDeployServices(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("creates recreate deployment for target services", func(t *testing.T) {
+	t.Run("creates blue-green deployment for target services", func(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
@@ -3329,11 +3329,11 @@ func TestDeployServices(t *testing.T) {
 			t.Errorf("expected pending, got %s", resp.Status)
 		}
 
-		// Verify new deployment has recreate strategy
+		// Verify new deployment has blue-green strategy (not recreate)
 		var newDeploy types.DeploymentRecord
 		store.Get(ctx, types.KeyDeployments+resp.DeploymentId, &newDeploy)
-		if newDeploy.UpdateStrategy != types.UpdateStrategyRecreate {
-			t.Errorf("expected recreate strategy, got %s", newDeploy.UpdateStrategy)
+		if newDeploy.UpdateStrategy != types.UpdateStrategyBlueGreen {
+			t.Errorf("expected blue-green strategy, got %s", newDeploy.UpdateStrategy)
 		}
 		if newDeploy.ReplacesID != "old-deploy" {
 			t.Errorf("expected replaces_id 'old-deploy', got %s", newDeploy.ReplacesID)
@@ -3347,10 +3347,10 @@ func TestDeployServices(t *testing.T) {
 			t.Error("expected 'web' service in new deployment")
 		}
 
-		// Stop task should exist for web in old deployment
+		// No stop task should exist upfront — blue-green tears down old after new is running
 		var webStop types.TaskRecord
-		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &webStop); err != nil {
-			t.Fatalf("expected web stop task: %v", err)
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &webStop); err == nil {
+			t.Error("expected no upfront stop task for blue-green strategy")
 		}
 	})
 

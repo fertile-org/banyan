@@ -3,6 +3,7 @@ module github.com/fertile-org/banyan/pkg/agent
 go 1.24.3
 
 require (
+	github.com/fertile-org/banyan/pkg/proxy v0.0.0
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
@@ -30,6 +31,7 @@ require (
 )
 
 replace (
+	github.com/fertile-org/banyan/pkg/proxy => ../proxy
 	github.com/fertile-org/banyan/pkg/rpc => ../rpc
 	github.com/fertile-org/banyan/pkg/storage => ../storage
 	github.com/fertile-org/banyan/pkg/types => ../types

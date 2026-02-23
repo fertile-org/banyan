@@ -116,8 +116,9 @@ Scale services based on metrics and support zero-downtime updates.
 - **Auto-scaling**: Define scaling rules in the manifest (min/max replicas, target thresholds)
 - **Auto-scaling**: Engine evaluates metrics against rules and adjusts replica count
 - **Auto-scaling**: Graceful scale-down (drain before stopping)
-- ~~**Redeployment**: Rolling update when service image or config changes~~ → **Done**: Blue-green redeployment via `banyan-cli up`
+- ~~**Redeployment**: Rolling update when service image or config changes~~ → **Done**: Blue-green redeployment via `banyan-cli up` (full and per-service)
 - ~~**Redeployment**: Health check between rollout steps~~ → **Done**: New deployment must reach `running` before old is torn down
+- ~~**Port management**: Built-in TCP proxy on agents~~ → **Done**: Agents proxy host ports to containers, enabling port sharing and zero-downtime per-service deploys
 - **Redeployment**: Automatic rollback on failure
 
 ---

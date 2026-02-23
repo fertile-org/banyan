@@ -254,7 +254,7 @@ Sends the deployment to the Engine via gRPC, then waits for agents to run all co
 
 **Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: it starts the new containers alongside the old ones, waits for the new deployment to reach `running` status, then tears down the old containers. If the new deployment fails, the old containers keep running — no downtime.
 
-**Per-service deployment.** Pass service names as arguments to redeploy only those services. The full manifest is still sent to the Engine for validation, but only the specified services are redeployed. Per-service deploys use a recreate strategy (stop old containers, then start new ones) to avoid port conflicts. Services not listed are untouched.
+**Per-service deployment.** Pass service names as arguments to redeploy only those services. The full manifest is still sent to the Engine for validation, but only the specified services are redeployed. Per-service deploys use the same blue-green strategy as full deploys — new containers start alongside old ones and old containers are torn down only after the new deployment is healthy. Zero downtime. Services not listed are untouched.
 
 `depends_on` is validated: if a target service depends on another service, that dependency must already be running or be included in the same deploy command. Otherwise the deploy is rejected.
 

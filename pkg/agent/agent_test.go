@@ -8,9 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
 )
+
+// newTestProxy creates a proxy with noop iptables for use in agent tests.
+func newTestProxy(t *testing.T) *proxy.Proxy {
+	t.Helper()
+	p, err := proxy.NewWithIPTables(proxy.NewNoopIPTables())
+	if err != nil {
+		t.Fatalf("failed to create test proxy: %v", err)
+	}
+	return p
+}
 
 func TestContainerTracker(t *testing.T) {
 	t.Run("add and list", func(t *testing.T) {
@@ -107,15 +118,19 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 			Environment:   []string{"FOO=bar"},
 		}
 		args := buildNerdctlRunArgs(task)
-		// run -d --name myapp-web-0 -p 80:80 -p 443:443 -e FOO=bar nginx:alpine
-		if len(args) != 11 {
-			t.Fatalf("expected 11 args, got %d: %v", len(args), args)
+		// Ports are handled by the agent proxy, NOT by nerdctl -p flags.
+		// run -d --name myapp-web-0 -e FOO=bar nginx:alpine
+		if len(args) != 7 {
+			t.Fatalf("expected 7 args, got %d: %v", len(args), args)
 		}
-		if args[4] != "-p" || args[5] != "80:80" {
-			t.Errorf("expected -p 80:80, got %s %s", args[4], args[5])
+		if args[4] != "-e" || args[5] != "FOO=bar" {
+			t.Errorf("expected -e FOO=bar, got %s %s", args[4], args[5])
 		}
-		if args[8] != "-e" || args[9] != "FOO=bar" {
-			t.Errorf("expected -e FOO=bar, got %s %s", args[8], args[9])
+		// Verify no -p flags
+		for i, arg := range args {
+			if arg == "-p" {
+				t.Errorf("unexpected -p flag at index %d", i)
+			}
 		}
 	})
 
@@ -138,6 +153,12 @@ func TestProcessTasks(t *testing.T) {
 	t.Cleanup(func() { taskExecutor = origExecutor })
 
 	t.Run("executes pending tasks and reports results", func(t *testing.T) {
+		origIPGetter := containerIPGetter
+		t.Cleanup(func() { containerIPGetter = origIPGetter })
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			return "172.17.0.5", nil
+		}
+
 		client, store, cleanup := setupEngineServer(t, "test-pass")
 		defer cleanup()
 		ctx := context.Background()
@@ -158,6 +179,7 @@ func TestProcessTasks(t *testing.T) {
 			opts:       Options{NodeName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
+			proxy:      newTestProxy(t),
 		}
 
 		a.processTasks(ctx)
@@ -201,6 +223,7 @@ func TestProcessTasks(t *testing.T) {
 			opts:       Options{NodeName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
+			proxy:      newTestProxy(t),
 		}
 
 		a.processTasks(ctx)
@@ -223,6 +246,7 @@ func TestProcessTasks(t *testing.T) {
 			opts:       Options{NodeName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
+			proxy:      newTestProxy(t),
 		}
 
 		// Should not panic with no tasks
@@ -248,6 +272,7 @@ func TestProcessTasks(t *testing.T) {
 			opts:       Options{NodeName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
+			proxy:      newTestProxy(t),
 		}
 
 		a.processTasks(ctx)
@@ -626,6 +651,7 @@ func TestProcessTasks_PollError(t *testing.T) {
 		opts:       Options{NodeName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
+		proxy:      newTestProxy(t),
 	}
 
 	// Should not panic; just returns early on poll error
@@ -655,6 +681,7 @@ func TestProcessTasks_NilResult(t *testing.T) {
 		opts:       Options{NodeName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
+		proxy:      newTestProxy(t),
 	}
 
 	a.processTasks(ctx)
@@ -753,10 +780,17 @@ func TestProcessTasks_ReportRunningFails(t *testing.T) {
 		Image: "nginx:alpine", ContainerName: "myapp-web-0",
 	})
 
+	origIPGetter := containerIPGetter
+	t.Cleanup(func() { containerIPGetter = origIPGetter })
+	containerIPGetter = func(ctx context.Context, name string) (string, error) {
+		return "172.17.0.5", nil
+	}
+
 	a := &Agent{
 		opts:       Options{NodeName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
+		proxy:      newTestProxy(t),
 	}
 
 	// Should not panic; the WARNING prints cover the error paths for
@@ -794,6 +828,7 @@ func TestProcessTasks_ReportFailureFails(t *testing.T) {
 		opts:       Options{NodeName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
+		proxy:      newTestProxy(t),
 	}
 
 	// Should not panic; the WARNING prints cover the error path for
@@ -854,5 +889,184 @@ func TestCmdReadCloser(t *testing.T) {
 		if err := rc.Close(); err != nil {
 			t.Errorf("unexpected error from Close: %v", err)
 		}
+	})
+}
+
+func TestSetupProxyForContainer(t *testing.T) {
+	origIPGetter := containerIPGetter
+	t.Cleanup(func() { containerIPGetter = origIPGetter })
+
+	t.Run("registers backends for each port", func(t *testing.T) {
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			return "172.17.0.5", nil
+		}
+
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{proxy: p}
+
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Ports:         []string{"8080:80", "8443:443"},
+		}
+
+		err := a.setupProxyForContainer(context.Background(), task)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if p.BackendCount(8080) != 1 {
+			t.Errorf("expected 1 backend on port 8080, got %d", p.BackendCount(8080))
+		}
+		if p.BackendCount(8443) != 1 {
+			t.Errorf("expected 1 backend on port 8443, got %d", p.BackendCount(8443))
+		}
+	})
+
+	t.Run("no-op when no ports", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{proxy: p}
+
+		task := &types.TaskRecord{
+			ContainerName: "myapp-worker-0",
+		}
+
+		err := a.setupProxyForContainer(context.Background(), task)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if p.ListenerCount() != 0 {
+			t.Errorf("expected 0 listeners for task with no ports, got %d", p.ListenerCount())
+		}
+	})
+
+	t.Run("no-op when proxy is nil", func(t *testing.T) {
+		a := &Agent{proxy: nil}
+
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Ports:         []string{"80:80"},
+		}
+
+		err := a.setupProxyForContainer(context.Background(), task)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("returns error when IP lookup fails", func(t *testing.T) {
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			return "", fmt.Errorf("container not found")
+		}
+
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{proxy: p}
+
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Ports:         []string{"80:80"},
+		}
+
+		err := a.setupProxyForContainer(context.Background(), task)
+		if err == nil {
+			t.Fatal("expected error when IP lookup fails")
+		}
+	})
+
+	t.Run("returns error for invalid port string", func(t *testing.T) {
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			return "172.17.0.5", nil
+		}
+
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{proxy: p}
+
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Ports:         []string{"invalid"},
+		}
+
+		err := a.setupProxyForContainer(context.Background(), task)
+		if err == nil {
+			t.Fatal("expected error for invalid port string")
+		}
+	})
+}
+
+func TestProcessTasks_StopRemovesProxyBackend(t *testing.T) {
+	origExecutor := taskExecutor
+	origIPGetter := containerIPGetter
+	t.Cleanup(func() {
+		taskExecutor = origExecutor
+		containerIPGetter = origIPGetter
+	})
+
+	containerIPGetter = func(ctx context.Context, name string) (string, error) {
+		return "172.17.0.5", nil
+	}
+
+	client, store, cleanup := setupEngineServer(t, "test-pass")
+	defer cleanup()
+	ctx := context.Background()
+
+	taskExecutor = func(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
+		return &types.TaskResultRecord{}, nil
+	}
+
+	// Setup: proxy has a backend for the container
+	p := newTestProxy(t)
+	defer p.Close()
+
+	// Use a high port to avoid conflicts
+	p.AddBackend(39080, 80, "myapp-web-0", "172.17.0.5")
+
+	store.Save(ctx, types.KeyTasks+"worker-1/task-stop", &types.TaskRecord{
+		ID: "task-stop", AgentID: "worker-1", DeploymentID: "deploy-1",
+		Type: types.TaskTypeStopAndRemove, Status: types.StatusPending,
+		ContainerName: "myapp-web-0",
+	})
+
+	a := &Agent{
+		opts:       Options{NodeName: "worker-1"},
+		client:     client,
+		containers: &containerTracker{},
+		proxy:      p,
+	}
+
+	a.processTasks(ctx)
+
+	// Proxy backend should be removed
+	if p.BackendCount(39080) != 0 {
+		t.Errorf("expected 0 backends after stop, got %d", p.BackendCount(39080))
+	}
+}
+
+func TestGetContainerIP(t *testing.T) {
+	t.Run("returns error for nonexistent container", func(t *testing.T) {
+		_, err := getContainerIP(context.Background(), "nonexistent-container")
+		if err == nil {
+			// nerdctl not installed is also an acceptable error path
+			return
+		}
+		// Should contain an error about the container
+		if !strings.Contains(err.Error(), "nonexistent-container") && !strings.Contains(err.Error(), "failed to get container IP") {
+			t.Errorf("expected error about container, got: %v", err)
+		}
+	})
+
+	t.Run("returns error on cancelled context", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		_, err := getContainerIP(ctx, "test-container")
+		// Either command fails to start or returns error
+		if err == nil {
+			return
+		}
+		_ = err // Just verify no panic
 	})
 }

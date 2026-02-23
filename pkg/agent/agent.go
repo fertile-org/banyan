@@ -8,13 +8,23 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
 )
+
+// PortProxy manages TCP port forwarding to container backends.
+// The agent uses this interface so the proxy implementation can be swapped.
+type PortProxy interface {
+	AddBackend(hostPort, containerPort int, containerName, containerIP string) error
+	RemoveBackend(containerName string) error
+	io.Closer
+}
 
 // Options configures the Agent.
 type Options struct {
@@ -33,6 +43,7 @@ type Agent struct {
 	client       *EngineClient
 	containers   *containerTracker
 	sessionToken string
+	proxy        PortProxy
 }
 
 // Package-level function variables for testing.
@@ -42,6 +53,7 @@ var (
 	commandRunner       = runCommand
 	containerIDGetter   = getContainerID
 	containerRemover    = removeContainer
+	containerIPGetter   = getContainerIP
 )
 
 // New creates a new Agent with a random session token.
@@ -61,6 +73,14 @@ func New(opts *Options) (*Agent, error) {
 // Run connects to the engine, registers, and starts all loops.
 // It blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	// Initialize iptables proxy for port management
+	p, err := proxy.New()
+	if err != nil {
+		return fmt.Errorf("failed to initialize port proxy: %w", err)
+	}
+	a.proxy = p
+	defer a.proxy.Close()
+
 	// Connect to engine via gRPC
 	fmt.Printf("Connecting to Engine at %s...\n", a.opts.EngineEndpoint)
 	client, err := NewEngineClient(a.opts.EngineEndpoint, a.opts.AuthToken)
@@ -136,6 +156,11 @@ func (a *Agent) processTasks(ctx context.Context) {
 			fmt.Printf("[Agent] WARNING: failed to report running for task %s: %v\n", pbTask.Id, err)
 		}
 
+		// Remove proxy backends before stopping a container
+		if pbTask.Type == types.TaskTypeStopAndRemove && a.proxy != nil {
+			a.proxy.RemoveBackend(pbTask.ContainerName)
+		}
+
 		fmt.Printf("[Agent] Executing task %s: %s (image: %s)\n", pbTask.Id, pbTask.Type, pbTask.Image)
 
 		task := pbTaskToLocal(pbTask)
@@ -156,8 +181,11 @@ func (a *Agent) processTasks(ctx context.Context) {
 			fmt.Printf("[Agent] WARNING: failed to report completion for task %s: %v\n", pbTask.Id, err)
 		}
 
-		// Track containers created by create_and_start tasks
+		// Track containers and setup proxy after successful create_and_start
 		if pbTask.Type == types.TaskTypeCreateAndStart {
+			if proxyErr := a.setupProxyForContainer(ctx, task); proxyErr != nil {
+				fmt.Printf("[Agent] WARNING: proxy setup failed for %s: %v\n", task.ContainerName, proxyErr)
+			}
 			a.containers.Add(pbTask.ContainerName, pbTask.Id)
 		}
 
@@ -267,13 +295,27 @@ func getContainerID(ctx context.Context, containerName string) (string, error) {
 	return strings.TrimSpace(stdout.String()), nil
 }
 
+func getContainerIP(ctx context.Context, containerName string) (string, error) {
+	cmd := exec.CommandContext(ctx, "nerdctl", "inspect", "--format", "{{.NetworkSettings.IPAddress}}", containerName) //nolint:gosec // container name comes from engine
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		return "", fmt.Errorf("failed to get container IP for %s: %s", containerName, errMsg)
+	}
+	ip := strings.TrimSpace(stdout.String())
+	if ip == "" {
+		return "", fmt.Errorf("empty IP for container %s", containerName)
+	}
+	return ip, nil
+}
+
 // buildNerdctlRunArgs builds the argument list for "nerdctl run" from a task.
+// Ports are handled by the agent's TCP proxy, not by nerdctl port mapping.
 func buildNerdctlRunArgs(task *types.TaskRecord) []string {
 	args := []string{"run", "-d", "--name", task.ContainerName}
 
-	for _, port := range task.Ports {
-		args = append(args, "-p", port)
-	}
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
 	}
@@ -347,6 +389,30 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 	if err := a.client.ReportContainerHealth(ctx, a.opts.NodeName, statuses); err != nil {
 		fmt.Printf("[Agent] WARNING: failed to report container health: %v\n", err)
 	}
+}
+
+// setupProxyForContainer registers a container's ports with the TCP proxy.
+// If the task has no ports, this is a no-op.
+func (a *Agent) setupProxyForContainer(ctx context.Context, task *types.TaskRecord) error {
+	if len(task.Ports) == 0 || a.proxy == nil {
+		return nil
+	}
+
+	containerIP, err := containerIPGetter(ctx, task.ContainerName)
+	if err != nil {
+		return err
+	}
+
+	for _, portStr := range task.Ports {
+		hostPort, containerPort, parseErr := proxy.ParsePort(portStr)
+		if parseErr != nil {
+			return parseErr
+		}
+		if addErr := a.proxy.AddBackend(hostPort, containerPort, task.ContainerName, containerIP); addErr != nil {
+			return addErr
+		}
+	}
+	return nil
 }
 
 // waitForEngineGRPC retries a health check to verify the engine gRPC server is ready.

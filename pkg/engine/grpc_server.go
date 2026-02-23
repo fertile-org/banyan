@@ -671,7 +671,9 @@ func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string, 
 
 // --- Per-service deploy ---
 
-// deployServices handles per-service redeployment using the recreate strategy.
+// deployServices handles per-service redeployment using the blue-green strategy.
+// With the TCP proxy on each agent, containers no longer bind host ports directly,
+// so old and new containers can run simultaneously without port conflicts.
 func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, allServices map[string]types.ServiceRecord, serviceNames []string, tags []string) (*banyanpb.DeployRPCResponse, error) {
 	// Validate service names exist
 	for _, name := range serviceNames {
@@ -697,16 +699,15 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 	// Clean up non-running deployments (pending/deploying/failed)
 	s.teardownNonRunningDeployments(ctx, appName, tags)
 
-	// Create stop tasks for target services in the running deployment
-	s.teardownDeploymentServices(ctx, runningDeploy.ID, serviceNames)
-
 	// Filter services to only the target ones
 	filteredServices := make(map[string]types.ServiceRecord, len(serviceNames))
 	for _, name := range serviceNames {
 		filteredServices[name] = allServices[name]
 	}
 
-	// Create new deployment with recreate strategy
+	// Create new deployment with blue-green strategy.
+	// Old containers stay running until the new deployment reaches StatusRunning,
+	// then the engine's blueGreenTeardownOld() tears them down.
 	deploymentID := fmt.Sprintf("%s-%d", appName, time.Now().Unix())
 	record := &types.DeploymentRecord{
 		ID:             deploymentID,
@@ -716,7 +717,7 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 		Tags:           tags,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
-		UpdateStrategy: types.UpdateStrategyRecreate,
+		UpdateStrategy: types.UpdateStrategyBlueGreen,
 		ReplacesID:     runningDeploy.ID,
 	}
 

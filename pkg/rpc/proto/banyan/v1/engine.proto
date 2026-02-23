@@ -96,6 +96,7 @@ message TaskRecord {
 
 message DeployRPCRequest {
   Manifest manifest = 1;
+  repeated string services = 2;  // optional: deploy only these services
 }
 
 message DeployRPCResponse {

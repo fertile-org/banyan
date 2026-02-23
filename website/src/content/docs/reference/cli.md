@@ -11,7 +11,7 @@ Banyan uses three binaries:
 |--------|------|------------|
 | `banyan-engine` | Control plane (store backend, gRPC server, scheduling) | Engine node |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes |
-| `banyan-cli` | Client (deploy, status, logs) | Any machine |
+| `banyan-cli` | Client (up, status, logs, down) | Any machine |
 
 ---
 
@@ -187,7 +187,7 @@ banyan-agent status
 
 ## banyan-cli
 
-Run on any machine to manage deployments. Before using deploy/status/down/logs commands, run `banyan-cli init` once to configure the engine connection.
+Run on any machine to manage deployments. Before using up/status/down/logs commands, run `banyan-cli init` once to configure the engine connection.
 
 ### auth
 
@@ -240,17 +240,27 @@ EOF
 sudo banyan-cli init --password "my-cluster-secret"
 ```
 
-### deploy
+### up
 
 Deploy an application from a `banyan.yaml` manifest.
 
 ```bash
-banyan-cli deploy -f banyan.yaml
+banyan-cli up -f banyan.yaml
 ```
 
 Sends the deployment to the Engine via gRPC, then waits for agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
 
+**Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: it starts the new containers alongside the old ones, waits for the new deployment to reach `running` status, then tears down the old containers. If the new deployment fails, the old containers keep running — no downtime.
+
+**Per-service deployment.** Pass service names as arguments to redeploy only those services. The full manifest is still sent to the Engine for validation, but only the specified services are redeployed. Per-service deploys use a recreate strategy (stop old containers, then start new ones) to avoid port conflicts. Services not listed are untouched.
+
+`depends_on` is validated: if a target service depends on another service, that dependency must already be running or be included in the same deploy command. Otherwise the deploy is rejected.
+
 Services with a `build:` directive are built locally with `nerdctl build`, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
+
+:::tip
+`banyan-cli deploy` still works as an alias for `up`. If you're coming from an older version, your scripts don't need to change.
+:::
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -261,14 +271,23 @@ Services with a `build:` directive are built locally with `nerdctl build`, pushe
 Examples:
 
 ```bash
-# Deploy locally
-banyan-cli deploy -f banyan.yaml
+# Deploy an application
+banyan-cli up -f banyan.yaml
+
+# Redeploy after code changes (old containers are replaced automatically)
+banyan-cli up -f banyan.yaml
+
+# Redeploy only the web service
+banyan-cli up -f banyan.yaml web
+
+# Redeploy web and api together
+banyan-cli up -f banyan.yaml web api
 
 # Validate without deploying
-banyan-cli deploy -f banyan.yaml --dry-run
+banyan-cli up -f banyan.yaml --dry-run
 
 # Submit and return immediately
-banyan-cli deploy -f banyan.yaml --no-wait
+banyan-cli up -f banyan.yaml --no-wait
 ```
 
 ### down

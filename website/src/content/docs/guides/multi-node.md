@@ -144,7 +144,7 @@ services:
 ```
 
 ```bash
-banyan-cli deploy -f banyan.yaml
+banyan-cli up -f banyan.yaml
 ```
 
 The CLI connects to the Engine using the host and port configured during `banyan-cli init`. Banyan distributes 5 containers across 2 workers using round-robin:
@@ -165,7 +165,7 @@ sudo nerdctl ps
 
 ## Deploying from a remote machine
 
-You don't need to run `deploy` from the Engine node. Any machine with `banyan-cli` can deploy as long as it can reach the Engine's gRPC port:
+You don't need to run `up` from the Engine node. Any machine with `banyan-cli` can deploy as long as it can reach the Engine's gRPC port:
 
 ```bash
 # First configure the CLI (run once — the engine must be running)
@@ -173,7 +173,7 @@ sudo banyan-cli init
 # Enter the engine host, port, and password — receives an auth token
 
 # Then deploy
-banyan-cli deploy -f banyan.yaml
+banyan-cli up -f banyan.yaml
 ```
 
 ## Adding more workers

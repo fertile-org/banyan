@@ -36,6 +36,17 @@ const (
 	TaskTypeStopAndRemove  = "stop_and_remove"
 )
 
+// Update strategies for redeployment.
+const (
+	// UpdateStrategyBlueGreen deploys new containers first, then tears down old ones
+	// after the new deployment is healthy. Requires enough resources to run both simultaneously.
+	UpdateStrategyBlueGreen = "blue-green"
+
+	// UpdateStrategyRecreate tears down old containers before deploying new ones.
+	// Causes downtime but requires no extra resources.
+	UpdateStrategyRecreate = "recreate"
+)
+
 // TokenRecord is stored at /tokens/{sha256-hash} in etcd.
 type TokenRecord struct {
 	ExpiresAt time.Time `json:"expires_at,omitempty"`
@@ -53,13 +64,15 @@ func (t *TokenRecord) IsExpired() bool {
 
 // DeploymentRecord is stored at /deployments/<id> in etcd.
 type DeploymentRecord struct {
-	ID        string                   `json:"id"`
-	Name      string                   `json:"name"`
-	Status    string                   `json:"status"`
-	Services  map[string]ServiceRecord `json:"services"`
-	CreatedAt time.Time                `json:"created_at"`
-	UpdatedAt time.Time                `json:"updated_at"`
-	Error     string                   `json:"error,omitempty"`
+	ID             string                   `json:"id"`
+	Name           string                   `json:"name"`
+	Status         string                   `json:"status"`
+	Services       map[string]ServiceRecord `json:"services"`
+	CreatedAt      time.Time                `json:"created_at"`
+	UpdatedAt      time.Time                `json:"updated_at"`
+	Error          string                   `json:"error,omitempty"`
+	UpdateStrategy string                   `json:"update_strategy,omitempty"`
+	ReplacesID     string                   `json:"replaces_id,omitempty"`
 }
 
 // ServiceRecord describes a service within a deployment.

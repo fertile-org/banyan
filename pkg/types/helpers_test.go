@@ -153,6 +153,42 @@ func TestBuildTasksForDeployment(t *testing.T) {
 			t.Errorf("expected 3 tasks, got %d", len(tasks))
 		}
 	})
+
+	t.Run("uses deployment ID as container prefix when ReplacesID is set", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			ID:         "myapp-1234567890",
+			Name:       "myapp",
+			ReplacesID: "myapp-old",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx:latest", Replicas: 1},
+			},
+		}
+		tasks := BuildTasksForDeployment(deployment, agents)
+		task := tasks[0]
+
+		// Container name should use deployment ID as prefix (for blue-green uniqueness)
+		expected := "myapp-1234567890-web-0"
+		if task.ContainerName != expected {
+			t.Errorf("expected container_name %q, got %q", expected, task.ContainerName)
+		}
+	})
+
+	t.Run("uses deployment Name as container prefix when no ReplacesID", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			ID:   "myapp-1234567890",
+			Name: "myapp",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx:latest", Replicas: 1},
+			},
+		}
+		tasks := BuildTasksForDeployment(deployment, agents)
+		task := tasks[0]
+
+		expected := "myapp-web-0"
+		if task.ContainerName != expected {
+			t.Errorf("expected container_name %q, got %q", expected, task.ContainerName)
+		}
+	})
 }
 
 func TestDetermineDeploymentStatus(t *testing.T) {
@@ -282,6 +318,60 @@ func (m *helperStateStore) List(_ context.Context, prefix string) ([]string, err
 		}
 	}
 	return keys, nil
+}
+
+func TestValidateServiceDependencies(t *testing.T) {
+	allServices := map[string]ServiceRecord{
+		"web": {Image: "nginx", DependsOn: []string{"api", "db"}},
+		"api": {Image: "myapi", DependsOn: []string{"db"}},
+		"db":  {Image: "postgres"},
+	}
+
+	t.Run("deps satisfied by running services", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web"}, allServices, []string{"api", "db"})
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("deps satisfied by target set", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web", "api", "db"}, allServices, nil)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("deps satisfied by mix of running and target", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web", "api"}, allServices, []string{"db"})
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("unsatisfied dependency returns error", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web"}, allServices, []string{"api"})
+		if err == nil {
+			t.Fatal("expected error for unsatisfied dependency")
+		}
+		expected := `service "web" depends on "db" which is not running and not being deployed`
+		if err.Error() != expected {
+			t.Errorf("expected error %q, got %q", expected, err.Error())
+		}
+	})
+
+	t.Run("service with no deps always passes", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"db"}, allServices, nil)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("empty target list passes", func(t *testing.T) {
+		err := ValidateServiceDependencies(nil, allServices, nil)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
 }
 
 func TestCollectDeploymentTasks(t *testing.T) {

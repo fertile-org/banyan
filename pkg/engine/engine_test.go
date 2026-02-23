@@ -257,6 +257,141 @@ func TestSchedulePendingDeployment(t *testing.T) {
 	})
 }
 
+func TestHasConflictingDeployment(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("true for stopping same name", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID: "deploy-old", Name: "app", Status: types.StatusStopping,
+		})
+
+		deployment := &types.DeploymentRecord{ID: "deploy-new", Name: "app"}
+		if !eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected conflict with stopping deployment")
+		}
+	})
+
+	t.Run("true for deploying same name", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID: "deploy-old", Name: "app", Status: types.StatusDeploying,
+		})
+
+		deployment := &types.DeploymentRecord{ID: "deploy-new", Name: "app"}
+		if !eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected conflict with deploying deployment")
+		}
+	})
+
+	t.Run("false for stopped same name", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID: "deploy-old", Name: "app", Status: types.StatusStopped,
+		})
+
+		deployment := &types.DeploymentRecord{ID: "deploy-new", Name: "app"}
+		if eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected no conflict with stopped deployment")
+		}
+	})
+
+	t.Run("false for different name", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-other", &types.DeploymentRecord{
+			ID: "deploy-other", Name: "other-app", Status: types.StatusStopping,
+		})
+
+		deployment := &types.DeploymentRecord{ID: "deploy-new", Name: "app"}
+		if eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected no conflict with different name")
+		}
+	})
+
+	t.Run("false for self", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-self", &types.DeploymentRecord{
+			ID: "deploy-self", Name: "app", Status: types.StatusDeploying,
+		})
+
+		deployment := &types.DeploymentRecord{ID: "deploy-self", Name: "app"}
+		if eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected no conflict with self")
+		}
+	})
+
+	t.Run("false for empty store", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		deployment := &types.DeploymentRecord{ID: "deploy-1", Name: "app"}
+		if eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected no conflict with empty store")
+		}
+	})
+
+	t.Run("false on list error", func(t *testing.T) {
+		store := &errorStore{MemoryStore: storage.NewMemoryStore(), listErr: true}
+		eng := &Engine{store: store}
+
+		deployment := &types.DeploymentRecord{ID: "deploy-1", Name: "app"}
+		if eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected no conflict on list error")
+		}
+	})
+}
+
+func TestSchedulePendingDeployment_SkipsConflicting(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	eng := &Engine{store: store}
+
+	// Register an agent
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+
+	// Old deployment for same app name is still stopping
+	store.Save(ctx, types.KeyDeployments+"app-old", &types.DeploymentRecord{
+		ID: "app-old", Name: "myapp", Status: types.StatusStopping,
+	})
+
+	// New pending deployment for same app name
+	deployment := &types.DeploymentRecord{
+		ID:     "app-new",
+		Name:   "myapp",
+		Status: types.StatusPending,
+		Services: map[string]types.ServiceRecord{
+			"web": {Image: "nginx", Replicas: 1},
+		},
+		CreatedAt: time.Now(),
+	}
+	store.Save(ctx, types.KeyDeployments+"app-new", deployment)
+
+	eng.schedulePendingDeployment(ctx, deployment)
+
+	// Should NOT have been scheduled — status should remain pending
+	var updated types.DeploymentRecord
+	store.Get(ctx, types.KeyDeployments+"app-new", &updated)
+	if updated.Status != types.StatusPending {
+		t.Errorf("expected pending (skipped due to conflict), got %s", updated.Status)
+	}
+
+	// No tasks should have been created
+	taskKeys, _ := store.List(ctx, types.KeyTasks)
+	if len(taskKeys) != 0 {
+		t.Errorf("expected 0 tasks, got %d", len(taskKeys))
+	}
+}
+
 func TestCheckDeployingDeployment(t *testing.T) {
 	ctx := context.Background()
 
@@ -1153,6 +1288,430 @@ func TestFindNonLoopbackIPv4(t *testing.T) {
 		_, err := findNonLoopbackIPv4(addrs)
 		if err == nil {
 			t.Fatal("expected error when only non-IPNet addresses present")
+		}
+	})
+}
+
+func TestBlueGreenTeardownOld(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("tears down old deployment when ReplacesID is set", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment with a completed container task
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-old", &types.TaskRecord{
+			ID: "task-old", DeploymentID: "old-deploy", ServiceName: "web",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-web-0",
+		})
+
+		// New deployment that replaces old
+		newDeploy := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusRunning,
+			ReplacesID: "old-deploy",
+		}
+
+		eng.blueGreenTeardownOld(ctx, newDeploy)
+
+		// Old deployment should now be stopping
+		var old types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"old-deploy", &old)
+		if old.Status != types.StatusStopping {
+			t.Errorf("expected old deployment stopping, got %s", old.Status)
+		}
+
+		// Stop task should exist
+		var stopTask types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-old-stop", &stopTask); err != nil {
+			t.Fatalf("expected stop task: %v", err)
+		}
+		if stopTask.Type != types.TaskTypeStopAndRemove {
+			t.Errorf("expected stop_and_remove, got %s", stopTask.Type)
+		}
+	})
+
+	t.Run("no-op when ReplacesID is empty", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app", Status: types.StatusRunning,
+		}
+
+		eng.blueGreenTeardownOld(ctx, deployment)
+		// Should not panic or error — just return
+	})
+
+	t.Run("handles missing old deployment", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app", Status: types.StatusRunning,
+			ReplacesID: "nonexistent",
+		}
+
+		eng.blueGreenTeardownOld(ctx, deployment)
+		// Should not panic — just log and return
+	})
+
+	t.Run("handles old deployment with no containers", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment with no completed tasks
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusRunning,
+			ReplacesID: "old-deploy",
+		}
+
+		eng.blueGreenTeardownOld(ctx, deployment)
+
+		// Old deployment should be stopped directly (no containers to stop)
+		var old types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"old-deploy", &old)
+		if old.Status != types.StatusStopped {
+			t.Errorf("expected stopped (no containers), got %s", old.Status)
+		}
+	})
+
+	t.Run("handles teardown error", func(t *testing.T) {
+		memStore := storage.NewMemoryStore()
+
+		// Old deployment with a completed task
+		memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		memStore.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+		})
+		memStore.Save(ctx, types.KeyTasks+"agent-1/task-old", &types.TaskRecord{
+			ID: "task-old", DeploymentID: "old-deploy", ServiceName: "web",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-web-0",
+		})
+
+		// Use saveOnlyErrorStore so reading works but saving stop tasks fails
+		store := &saveOnlyErrorStore{MemoryStore: memStore}
+		eng := &Engine{store: store}
+
+		deployment := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusRunning,
+			ReplacesID: "old-deploy",
+		}
+
+		// Should not panic — just log the error
+		eng.blueGreenTeardownOld(ctx, deployment)
+	})
+}
+
+func TestCheckDeployingDeployment_BlueGreen(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("tears down old when new is running", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment with running container
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-old", &types.TaskRecord{
+			ID: "task-old", DeploymentID: "old-deploy", ServiceName: "web",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-web-0",
+		})
+
+		// New deployment tasks are completed
+		store.Save(ctx, types.KeyTasks+"agent-1/task-new", &types.TaskRecord{
+			ID: "task-new", DeploymentID: "new-deploy", AgentID: "agent-1",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+
+		newDeploy := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusDeploying,
+			ReplacesID:     "old-deploy",
+			UpdateStrategy: types.UpdateStrategyBlueGreen,
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", newDeploy)
+
+		eng.checkDeployingDeployment(ctx, newDeploy)
+
+		// New deployment should be running
+		var newUpdated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"new-deploy", &newUpdated)
+		if newUpdated.Status != types.StatusRunning {
+			t.Errorf("expected new deployment running, got %s", newUpdated.Status)
+		}
+
+		// Old deployment should be stopping (blue-green teardown triggered)
+		var oldUpdated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"old-deploy", &oldUpdated)
+		if oldUpdated.Status != types.StatusStopping {
+			t.Errorf("expected old deployment stopping, got %s", oldUpdated.Status)
+		}
+	})
+
+	t.Run("skips blue-green teardown for recreate strategy", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment still exists
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-old", &types.TaskRecord{
+			ID: "task-old", DeploymentID: "old-deploy", ServiceName: "web",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-web-0",
+		})
+
+		// New deployment using recreate strategy — all tasks completed
+		store.Save(ctx, types.KeyTasks+"agent-1/task-new", &types.TaskRecord{
+			ID: "task-new", DeploymentID: "new-deploy", AgentID: "agent-1",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+
+		newDeploy := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusDeploying,
+			ReplacesID:     "old-deploy",
+			UpdateStrategy: types.UpdateStrategyRecreate,
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", newDeploy)
+
+		eng.checkDeployingDeployment(ctx, newDeploy)
+
+		// New deployment should be running
+		var newUpdated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"new-deploy", &newUpdated)
+		if newUpdated.Status != types.StatusRunning {
+			t.Errorf("expected new deployment running, got %s", newUpdated.Status)
+		}
+
+		// Old deployment should STILL be running (no blue-green teardown for recreate)
+		var oldUpdated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"old-deploy", &oldUpdated)
+		if oldUpdated.Status != types.StatusRunning {
+			t.Errorf("expected old deployment still running (recreate skips blue-green), got %s", oldUpdated.Status)
+		}
+	})
+
+	t.Run("keeps old running when new fails", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+		})
+
+		// New deployment has a failed task
+		store.Save(ctx, types.KeyTasks+"agent-1/task-new", &types.TaskRecord{
+			ID: "task-new", DeploymentID: "new-deploy", AgentID: "agent-1",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusFailed,
+			Error: "pull failed",
+		})
+
+		newDeploy := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusDeploying,
+			ReplacesID:     "old-deploy",
+			UpdateStrategy: types.UpdateStrategyBlueGreen,
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", newDeploy)
+
+		eng.checkDeployingDeployment(ctx, newDeploy)
+
+		// New deployment should be failed
+		var newUpdated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"new-deploy", &newUpdated)
+		if newUpdated.Status != types.StatusFailed {
+			t.Errorf("expected new deployment failed, got %s", newUpdated.Status)
+		}
+
+		// Old deployment should STILL be running
+		var oldUpdated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"old-deploy", &oldUpdated)
+		if oldUpdated.Status != types.StatusRunning {
+			t.Errorf("expected old deployment still running, got %s", oldUpdated.Status)
+		}
+	})
+}
+
+func TestAreReplacedServicesStopped(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("true when all stop tasks completed", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web-stop", &types.TaskRecord{
+			ID: "task-web-stop", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID:         "new-deploy",
+			ReplacesID: "old-deploy",
+			Services:   map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+		}
+		if !eng.areReplacedServicesStopped(ctx, deployment) {
+			t.Error("expected true when all stop tasks completed")
+		}
+	})
+
+	t.Run("true when stop tasks failed", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web-stop", &types.TaskRecord{
+			ID: "task-web-stop", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeStopAndRemove, Status: types.StatusFailed,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID:         "new-deploy",
+			ReplacesID: "old-deploy",
+			Services:   map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+		}
+		if !eng.areReplacedServicesStopped(ctx, deployment) {
+			t.Error("expected true when stop tasks failed (still considered done)")
+		}
+	})
+
+	t.Run("false when stop task still pending", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web-stop", &types.TaskRecord{
+			ID: "task-web-stop", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeStopAndRemove, Status: types.StatusPending,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID:         "new-deploy",
+			ReplacesID: "old-deploy",
+			Services:   map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+		}
+		if eng.areReplacedServicesStopped(ctx, deployment) {
+			t.Error("expected false when stop task still pending")
+		}
+	})
+
+	t.Run("true when no stop tasks exist", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		deployment := &types.DeploymentRecord{
+			ID:         "new-deploy",
+			ReplacesID: "old-deploy",
+			Services:   map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+		}
+		if !eng.areReplacedServicesStopped(ctx, deployment) {
+			t.Error("expected true when no stop tasks exist")
+		}
+	})
+
+	t.Run("ignores stop tasks for other services", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		// Stop task for "db" is still pending, but new deployment only has "web"
+		store.Save(ctx, types.KeyTasks+"agent-1/task-db-stop", &types.TaskRecord{
+			ID: "task-db-stop", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "db", Type: types.TaskTypeStopAndRemove, Status: types.StatusPending,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID:         "new-deploy",
+			ReplacesID: "old-deploy",
+			Services:   map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+		}
+		if !eng.areReplacedServicesStopped(ctx, deployment) {
+			t.Error("expected true when pending stop tasks are for other services")
+		}
+	})
+}
+
+func TestSchedulePendingDeployment_RecreateWaitsForStopTasks(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("waits when stop tasks not yet completed", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+
+		// Old deployment stop task still pending
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web-stop", &types.TaskRecord{
+			ID: "task-web-stop", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeStopAndRemove, Status: types.StatusPending,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID:             "new-deploy",
+			Name:           "app",
+			Status:         types.StatusPending,
+			Services:       map[string]types.ServiceRecord{"web": {Image: "nginx:v2", Replicas: 1}},
+			UpdateStrategy: types.UpdateStrategyRecreate,
+			ReplacesID:     "old-deploy",
+			CreatedAt:      time.Now(),
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", deployment)
+
+		eng.schedulePendingDeployment(ctx, deployment)
+
+		// Should remain pending (waiting for stop tasks)
+		var updated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"new-deploy", &updated)
+		if updated.Status != types.StatusPending {
+			t.Errorf("expected pending (waiting for stops), got %s", updated.Status)
+		}
+	})
+
+	t.Run("schedules when stop tasks completed", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+
+		// Old deployment stop task completed
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web-stop", &types.TaskRecord{
+			ID: "task-web-stop", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID:             "new-deploy",
+			Name:           "app",
+			Status:         types.StatusPending,
+			Services:       map[string]types.ServiceRecord{"web": {Image: "nginx:v2", Replicas: 1}},
+			UpdateStrategy: types.UpdateStrategyRecreate,
+			ReplacesID:     "old-deploy",
+			CreatedAt:      time.Now(),
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", deployment)
+
+		eng.schedulePendingDeployment(ctx, deployment)
+
+		// Should be deploying now
+		var updated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"new-deploy", &updated)
+		if updated.Status != types.StatusDeploying {
+			t.Errorf("expected deploying, got %s", updated.Status)
 		}
 	})
 }

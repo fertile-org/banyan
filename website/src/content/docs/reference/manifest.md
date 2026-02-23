@@ -170,7 +170,7 @@ The [full example](#full-example-examplesbanyanyml) above demonstrates mixing `b
 Check your manifest without deploying:
 
 ```bash
-banyan-cli deploy -f banyan.yaml --dry-run
+banyan-cli up -f banyan.yaml --dry-run
 ```
 
 This parses the file, checks for errors, and prints the services that would be deployed.

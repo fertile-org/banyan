@@ -113,13 +113,28 @@ Check the error message in `banyan-cli status`. Common causes:
 
 ### "deployment timed out"
 
-The deploy command waits up to 2 minutes by default. If your images are large, they may take longer to pull. Use `--no-wait` and check status manually:
+The `up` command waits up to 2 minutes by default. If your images are large, they may take longer to pull. Use `--no-wait` and check status manually:
 
 ```bash
-banyan-cli deploy -f banyan.yaml --no-wait
+banyan-cli up -f banyan.yaml --no-wait
 # Check later:
 banyan-cli status
 ```
+
+### Redeployment doesn't replace old containers
+
+When you run `banyan-cli up` again, Banyan should automatically replace old containers using a blue-green strategy. If the old containers aren't being replaced:
+
+1. Check that the application name in `banyan.yaml` matches the running deployment. The name must be identical for Banyan to recognize it as a redeployment.
+2. If the old deployment is in `stopping` or `deploying` state, the Engine waits for it to finish before scheduling the new one. Check `banyan-cli status` and wait a few seconds.
+3. If a previous redeployment failed, the old containers stay running. Fix the issue and run `banyan-cli up` again — it will retry the replacement.
+
+### Old containers still running after redeployment
+
+During blue-green redeployment, old containers run alongside new ones until the new deployment is confirmed healthy. This overlap is expected and usually lasts a few seconds. If old containers persist:
+
+1. The new deployment may have failed. Check `banyan-cli status` for the deployment status and error message.
+2. If the new deployment failed, old containers are intentionally kept running to avoid downtime. Fix the issue and redeploy.
 
 ### Containers are running but the application doesn't work
 
@@ -138,7 +153,7 @@ sudo banyan-engine start
 sudo banyan-agent start --node-name <name>
 ```
 
-The `banyan-cli deploy` and `banyan-cli status` commands do not require root (but `banyan-cli init` does, to write `/etc/banyan/banyan.yaml`).
+The `banyan-cli up` and `banyan-cli status` commands do not require root (but `banyan-cli init` does, to write `/etc/banyan/banyan.yaml`).
 
 ### Checking logs
 

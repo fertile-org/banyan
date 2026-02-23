@@ -165,8 +165,47 @@ func (e *Engine) processDeployments(ctx context.Context) {
 	}
 }
 
+// hasConflictingDeployment checks if another deployment with the same name (different ID)
+// is currently stopping or deploying, which would cause port/container-name conflicts.
+func (e *Engine) hasConflictingDeployment(ctx context.Context, deployment *types.DeploymentRecord) bool {
+	keys, err := e.store.List(ctx, types.KeyDeployments)
+	if err != nil {
+		return false
+	}
+
+	for _, key := range keys {
+		var record types.DeploymentRecord
+		if err := e.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		if record.ID == deployment.ID {
+			continue
+		}
+		if record.Name != deployment.Name {
+			continue
+		}
+		if record.Status == types.StatusStopping || record.Status == types.StatusDeploying {
+			return true
+		}
+	}
+
+	return false
+}
+
 // schedulePendingDeployment assigns tasks to available agents.
 func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *types.DeploymentRecord) {
+	// Wait for conflicting deployments (same name, stopping/deploying) to finish
+	if e.hasConflictingDeployment(ctx, deployment) {
+		return
+	}
+
+	// Recreate strategy: wait for old service stop tasks to complete before scheduling
+	if deployment.UpdateStrategy == types.UpdateStrategyRecreate && deployment.ReplacesID != "" {
+		if !e.areReplacedServicesStopped(ctx, deployment) {
+			return
+		}
+	}
+
 	agents, err := ListAvailableAgents(ctx, e.store)
 	if err != nil || len(agents) == 0 {
 		return
@@ -256,10 +295,66 @@ func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types
 	if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err == nil {
 		if newStatus == types.StatusFailed {
 			fmt.Printf("[Engine] Deployment '%s' FAILED: %s\n", deployment.Name, errMsg)
+			if deployment.ReplacesID != "" {
+				fmt.Printf("[Engine] Blue-green: keeping old deployment '%s' running (new deployment failed)\n", deployment.ReplacesID)
+			}
 		} else {
 			fmt.Printf("[Engine] Deployment '%s' is RUNNING (%d containers)\n", deployment.Name, completedTasks)
+			if deployment.UpdateStrategy != types.UpdateStrategyRecreate {
+				e.blueGreenTeardownOld(ctx, deployment)
+			}
 		}
 	}
+}
+
+// areReplacedServicesStopped checks whether all stop_and_remove tasks for the services
+// in the new deployment have completed (or failed) in the old deployment.
+// This is used by the recreate strategy to wait for old containers to stop before starting new ones.
+func (e *Engine) areReplacedServicesStopped(ctx context.Context, deployment *types.DeploymentRecord) bool {
+	oldTasks := types.CollectDeploymentTasks(ctx, e.store, deployment.ReplacesID)
+
+	// Build set of service names in the new deployment
+	newServiceNames := make(map[string]bool, len(deployment.Services))
+	for name := range deployment.Services {
+		newServiceNames[name] = true
+	}
+
+	for i := range oldTasks {
+		if oldTasks[i].Type != types.TaskTypeStopAndRemove {
+			continue
+		}
+		if !newServiceNames[oldTasks[i].ServiceName] {
+			continue
+		}
+		// If any matching stop task is still pending or running, not ready yet
+		if oldTasks[i].Status != types.StatusCompleted && oldTasks[i].Status != types.StatusFailed {
+			return false
+		}
+	}
+
+	return true
+}
+
+// blueGreenTeardownOld tears down the old deployment referenced by ReplacesID
+// after the new deployment has reached StatusRunning.
+func (e *Engine) blueGreenTeardownOld(ctx context.Context, deployment *types.DeploymentRecord) {
+	if deployment.ReplacesID == "" {
+		return
+	}
+
+	oldKey := types.KeyDeployments + deployment.ReplacesID
+	var oldDeployment types.DeploymentRecord
+	if err := e.store.Get(ctx, oldKey, &oldDeployment); err != nil {
+		fmt.Printf("[Engine] Blue-green: old deployment '%s' not found, skipping teardown\n", deployment.ReplacesID)
+		return
+	}
+
+	count, err := teardownDeployment(ctx, e.store, &oldDeployment, oldKey)
+	if err != nil {
+		fmt.Printf("[Engine] Blue-green: failed to teardown old deployment '%s': %v\n", oldDeployment.ID, err)
+		return
+	}
+	fmt.Printf("[Engine] Blue-green: tearing down old deployment '%s' (%d stop tasks created)\n", oldDeployment.ID, count)
 }
 
 // checkStoppingDeployment checks if all stop_and_remove tasks have completed.

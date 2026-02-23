@@ -16,12 +16,14 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Ports | `ports: ["80:80"]` | `ports: ["80:80"]` | Same format |
 | Environment | `environment:` | `environment:` | Same |
 | Command | `command:` | `command:` | Same |
-| Dependencies | `depends_on:` | `depends_on:` | Same (informational) |
+| Dependencies | `depends_on:` | `depends_on:` | Same (informational for full deploys; validated for per-service deploys) |
 | Replicas | `deploy.replicas:` | `deploy.replicas:` | Same |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
 | Build | `build:` | `build:` | Same syntax (context + dockerfile) |
 | Volumes | `volumes:` | -- | Not yet supported |
 | Networks | `networks:` | -- | Managed automatically |
+
+If you already write Docker Compose files, you already know most of this.
 
 ## Structure
 
@@ -51,7 +53,7 @@ services:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `name` | string | Yes | Application name. Used as a prefix for container names. |
+| `name` | string | Yes | Application name. Used as a prefix for container names and to identify the app during redeployment. |
 | `services` | map | Yes | Map of service definitions. At least one service required. |
 
 ### Service
@@ -64,7 +66,7 @@ services:
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
-| `depends_on` | list | No | -- | Services that should start first. Currently informational only. |
+| `depends_on` | list | No | -- | Services that should start first. Validated during [per-service deploys](/guides/redeployment/#dependency-validation). |
 
 ## Container naming
 
@@ -74,6 +76,10 @@ For `name: my-app` with service `web` and 3 replicas:
 - `my-app-web-0`
 - `my-app-web-1`
 - `my-app-web-2`
+
+:::note
+During a [blue-green redeployment](/guides/redeployment/), new containers get a deployment-ID prefix (e.g., `my-app-1708123456-web-0`) while both old and new containers run simultaneously.
+:::
 
 ## Examples
 

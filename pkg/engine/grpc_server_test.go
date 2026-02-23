@@ -930,7 +930,7 @@ func TestFindDeploymentByName(t *testing.T) {
 			ID: "deploy-1", Name: "my-app", Status: types.StatusRunning, CreatedAt: time.Now(),
 		})
 
-		deployment, key, err := srv.findDeploymentByName(ctx, "my-app")
+		deployment, key, err := srv.findDeploymentByName(ctx, "my-app", nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -946,7 +946,7 @@ func TestFindDeploymentByName(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		_, _, err := srv.findDeploymentByName(ctx, "nonexistent")
+		_, _, err := srv.findDeploymentByName(ctx, "nonexistent", nil)
 		if err == nil {
 			t.Fatal("expected error for nonexistent deployment")
 		}
@@ -965,7 +965,7 @@ func TestFindDeploymentByName(t *testing.T) {
 			ID: "deploy-new", Name: "my-app", CreatedAt: newer,
 		})
 
-		deployment, _, err := srv.findDeploymentByName(ctx, "my-app")
+		deployment, _, err := srv.findDeploymentByName(ctx, "my-app", nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -2324,7 +2324,7 @@ func TestFindDeploymentByName_ListError(t *testing.T) {
 	store := &errorStore{MemoryStore: memStore, listErr: true}
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findDeploymentByName(context.Background(), "app")
+	_, _, err := srv.findDeploymentByName(context.Background(), "app", nil)
 	if err == nil {
 		t.Fatal("expected error when store.List fails")
 	}
@@ -2392,7 +2392,7 @@ func TestFindDeploymentByName_GetError(t *testing.T) {
 	store := &errorStore{MemoryStore: memStore, getErr: true}
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findDeploymentByName(ctx, "app")
+	_, _, err := srv.findDeploymentByName(ctx, "app", nil)
 	if err == nil {
 		t.Fatal("expected error when all deployments fail to deserialize")
 	}
@@ -2627,7 +2627,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			ID: "deploy-1", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "deploy-1" {
 			t.Errorf("expected deploy-1, got %s", replacesID)
 		}
@@ -2648,7 +2648,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			ID: "deploy-f", Name: "app", Status: types.StatusFailed, CreatedAt: time.Now(),
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty replacesID (no running), got %s", replacesID)
 		}
@@ -2669,7 +2669,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			ID: "deploy-p", Name: "app", Status: types.StatusPending, CreatedAt: time.Now(),
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty replacesID, got %s", replacesID)
 		}
@@ -2692,7 +2692,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			ID: "deploy-stopping", Name: "app", Status: types.StatusStopping, CreatedAt: time.Now(),
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty, got %s", replacesID)
 		}
@@ -2711,7 +2711,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			ID: "deploy-new", Name: "app", Status: types.StatusRunning, CreatedAt: newer,
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "deploy-new" {
 			t.Errorf("expected deploy-new, got %s", replacesID)
 		}
@@ -2730,7 +2730,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			CreatedAt: time.Now(),
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "deploy-running" {
 			t.Errorf("expected deploy-running, got %s", replacesID)
 		}
@@ -2754,7 +2754,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 		store := &errorStore{MemoryStore: storage.NewMemoryStore(), listErr: true}
 		srv := &engineGRPCServer{store: store}
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty on error, got %s", replacesID)
 		}
@@ -2768,7 +2768,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 			ID: "other-app", Name: "other", Status: types.StatusRunning, CreatedAt: time.Now(),
 		})
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty for different app, got %s", replacesID)
 		}
@@ -2778,7 +2778,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		replacesID := srv.prepareForRedeploy(ctx, "nonexistent")
+		replacesID := srv.prepareForRedeploy(ctx, "nonexistent", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty, got %s", replacesID)
 		}
@@ -2803,7 +2803,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 		srv := &engineGRPCServer{store: store}
 
 		// Should not panic — just log the warning
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty (no running deployment), got %s", replacesID)
 		}
@@ -2818,7 +2818,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 		store := &errorStore{MemoryStore: memStore, getErr: true}
 		srv := &engineGRPCServer{store: store}
 
-		replacesID := srv.prepareForRedeploy(ctx, "app")
+		replacesID := srv.prepareForRedeploy(ctx, "app", nil)
 		if replacesID != "" {
 			t.Errorf("expected empty when Get fails, got %s", replacesID)
 		}
@@ -3080,7 +3080,7 @@ func TestFindRunningDeploymentByName(t *testing.T) {
 			ID: "new", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
 		})
 
-		deploy, _, err := srv.findRunningDeploymentByName(ctx, "app")
+		deploy, _, err := srv.findRunningDeploymentByName(ctx, "app", nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3097,7 +3097,7 @@ func TestFindRunningDeploymentByName(t *testing.T) {
 			ID: "stopped", Name: "app", Status: types.StatusStopped, CreatedAt: time.Now(),
 		})
 
-		_, _, err := srv.findRunningDeploymentByName(ctx, "app")
+		_, _, err := srv.findRunningDeploymentByName(ctx, "app", nil)
 		if err == nil {
 			t.Fatal("expected error when no running deployment exists")
 		}
@@ -3107,7 +3107,7 @@ func TestFindRunningDeploymentByName(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		_, _, err := srv.findRunningDeploymentByName(ctx, "nonexistent")
+		_, _, err := srv.findRunningDeploymentByName(ctx, "nonexistent", nil)
 		if err == nil {
 			t.Fatal("expected error for unknown name")
 		}
@@ -3245,7 +3245,7 @@ func TestTeardownNonRunningDeployments(t *testing.T) {
 			ID: "failed", Name: "app", Status: types.StatusFailed,
 		})
 
-		srv.teardownNonRunningDeployments(ctx, "app")
+		srv.teardownNonRunningDeployments(ctx, "app", nil)
 
 		// Running should remain
 		var running types.DeploymentRecord
@@ -3276,7 +3276,7 @@ func TestTeardownNonRunningDeployments(t *testing.T) {
 			ID: "other", Name: "other-app", Status: types.StatusPending,
 		})
 
-		srv.teardownNonRunningDeployments(ctx, "app")
+		srv.teardownNonRunningDeployments(ctx, "app", nil)
 
 		var other types.DeploymentRecord
 		store.Get(ctx, types.KeyDeployments+"other", &other)
@@ -3321,7 +3321,7 @@ func TestDeployServices(t *testing.T) {
 		}
 
 		// Deploy only "web" — its dep "api" is already running
-		resp, err := srv.deployServices(ctx, "app", allServices, []string{"web"})
+		resp, err := srv.deployServices(ctx, "app", allServices, []string{"web"}, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -3362,7 +3362,7 @@ func TestDeployServices(t *testing.T) {
 			"web": {Image: "nginx", Replicas: 1},
 		}
 
-		_, err := srv.deployServices(ctx, "app", allServices, []string{"nonexistent"})
+		_, err := srv.deployServices(ctx, "app", allServices, []string{"nonexistent"}, nil)
 		if err == nil {
 			t.Fatal("expected error for unknown service")
 		}
@@ -3376,7 +3376,7 @@ func TestDeployServices(t *testing.T) {
 			"web": {Image: "nginx", Replicas: 1},
 		}
 
-		_, err := srv.deployServices(ctx, "app", allServices, []string{"web"})
+		_, err := srv.deployServices(ctx, "app", allServices, []string{"web"}, nil)
 		if err == nil {
 			t.Fatal("expected error when no running deployment exists")
 		}
@@ -3403,7 +3403,7 @@ func TestDeployServices(t *testing.T) {
 		}
 
 		// Deploy "api" which depends on "db", but "db" is not running
-		_, err := srv.deployServices(ctx, "app", allServices, []string{"api"})
+		_, err := srv.deployServices(ctx, "app", allServices, []string{"api"}, nil)
 		if err == nil {
 			t.Fatal("expected error for unsatisfied dependency")
 		}

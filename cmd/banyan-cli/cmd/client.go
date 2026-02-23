@@ -43,18 +43,20 @@ func (c *EngineClient) Close() {
 
 // Deploy creates a new deployment via the engine gRPC API.
 // If services is non-empty, only those services will be redeployed.
-func (c *EngineClient) Deploy(ctx context.Context, manifest types.BanyanManifest, services []string) (*banyanpb.DeployRPCResponse, error) {
+func (c *EngineClient) Deploy(ctx context.Context, manifest types.BanyanManifest, services, tags []string) (*banyanpb.DeployRPCResponse, error) {
 	return c.client.Deploy(ctx, &banyanpb.DeployRPCRequest{
 		Manifest: manifestToProto(manifest),
 		Services: services,
+		Tags:     tags,
 	})
 }
 
 // Down stops services in a deployment via the engine gRPC API.
-func (c *EngineClient) Down(ctx context.Context, name string, services []string) (*banyanpb.DownRPCResponse, error) {
+func (c *EngineClient) Down(ctx context.Context, name string, services, tags []string) (*banyanpb.DownRPCResponse, error) {
 	return c.client.Down(ctx, &banyanpb.DownRPCRequest{
 		Name:     name,
 		Services: services,
+		Tags:     tags,
 	})
 }
 

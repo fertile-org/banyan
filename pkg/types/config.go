@@ -44,10 +44,11 @@ func (c *EngineConfig) GetStoreBackend() string {
 
 // AgentConfig holds agent-specific settings.
 type AgentConfig struct {
-	EngineHost string `yaml:"engine_host,omitempty"`
-	EnginePort string `yaml:"engine_port,omitempty"`
-	AuthToken  string `yaml:"auth_token,omitempty"`
-	NodeName   string `yaml:"node_name,omitempty"`
+	EngineHost string   `yaml:"engine_host,omitempty"`
+	EnginePort string   `yaml:"engine_port,omitempty"`
+	AuthToken  string   `yaml:"auth_token,omitempty"`
+	NodeName   string   `yaml:"node_name,omitempty"`
+	Tags       []string `yaml:"tags,omitempty"`
 }
 
 // CLIConfig holds CLI-specific settings.

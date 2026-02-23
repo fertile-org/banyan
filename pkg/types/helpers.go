@@ -7,6 +7,51 @@ import (
 	"time"
 )
 
+// TagsMatch returns true if an agent with agentTags can run a deployment with deploymentTags.
+// Both empty = match. One empty = no match. Both non-empty = match if any intersection.
+func TagsMatch(agentTags, deploymentTags []string) bool {
+	if len(agentTags) == 0 && len(deploymentTags) == 0 {
+		return true
+	}
+	if len(agentTags) == 0 || len(deploymentTags) == 0 {
+		return false
+	}
+	for _, dt := range deploymentTags {
+		for _, at := range agentTags {
+			if dt == at {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// TagsEqual returns true if two tag sets contain the same tags (order-independent).
+func TagsEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	sa := SortTags(a)
+	sb := SortTags(b)
+	for i := range sa {
+		if sa[i] != sb[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// SortTags returns a sorted copy of the given tags slice.
+func SortTags(tags []string) []string {
+	if len(tags) == 0 {
+		return nil
+	}
+	sorted := make([]string, len(tags))
+	copy(sorted, tags)
+	sort.Strings(sorted)
+	return sorted
+}
+
 // BuildServiceRecords converts manifest services to deployment service records.
 // Services with 0 replicas default to 1.
 func BuildServiceRecords(manifest map[string]ManifestService) map[string]ServiceRecord {

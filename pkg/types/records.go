@@ -73,6 +73,7 @@ type DeploymentRecord struct {
 	Error          string                   `json:"error,omitempty"`
 	UpdateStrategy string                   `json:"update_strategy,omitempty"`
 	ReplacesID     string                   `json:"replaces_id,omitempty"`
+	Tags           []string                 `json:"tags,omitempty"`
 }
 
 // ServiceRecord describes a service within a deployment.
@@ -119,6 +120,7 @@ type NodeRecord struct {
 	Name       string    `json:"name"`
 	Status     string    `json:"status"`
 	APIAddress string    `json:"api_address,omitempty"`
+	Tags       []string  `json:"tags,omitempty"`
 }
 
 // StateStore is a minimal interface for store operations used by helpers.

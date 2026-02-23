@@ -17,6 +17,7 @@ var (
 	downName   string
 	downFile   string
 	downNoWait bool
+	downTags   []string
 )
 
 var downCmd = &cobra.Command{
@@ -40,6 +41,7 @@ func init() {
 	downCmd.Flags().StringVar(&downName, "name", "", "Application name to stop")
 	downCmd.Flags().StringVarP(&downFile, "file", "f", "", "Path to banyan.yaml manifest (to read app name)")
 	downCmd.Flags().BoolVar(&downNoWait, "no-wait", false, "Don't wait for services to stop")
+	downCmd.Flags().StringSliceVar(&downTags, "tags", nil, "Deployment tags for matching")
 }
 
 // resolveAppName determines the application name from explicit name or manifest file.
@@ -90,7 +92,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	fmt.Printf("Connecting to Engine at %s...\n", engineAddr)
-	resp, err := client.Down(ctx, appName, args)
+	resp, err := client.Down(ctx, appName, args, downTags)
 	if err != nil {
 		return fmt.Errorf("failed to stop deployment: %w", err)
 	}
@@ -111,11 +113,15 @@ func runDown(cmd *cobra.Command, args []string) error {
 	return waitForDown(ctx, client, appName)
 }
 
-// findLatestDeployment returns the most recent deployment matching the given name.
-func findLatestDeployment(deployments []*banyanpb.DeploymentInfo, appName string) *banyanpb.DeploymentInfo {
+// findLatestDeployment returns the most recent deployment matching the given name+tags.
+// If tags is nil, it matches deployments with any tags (backwards-compatible for status polling).
+func findLatestDeployment(deployments []*banyanpb.DeploymentInfo, appName string, tags []string) *banyanpb.DeploymentInfo {
 	var latest *banyanpb.DeploymentInfo
 	for _, d := range deployments {
 		if d.Name != appName {
+			continue
+		}
+		if tags != nil && !types.TagsEqual(d.Tags, tags) {
 			continue
 		}
 		if latest == nil || d.CreatedAtUnix > latest.CreatedAtUnix {
@@ -141,7 +147,7 @@ func waitForDown(ctx context.Context, client *EngineClient, appName string) erro
 				continue
 			}
 
-			d := findLatestDeployment(status.Deployments, appName)
+			d := findLatestDeployment(status.Deployments, appName, downTags)
 			if d == nil {
 				continue
 			}

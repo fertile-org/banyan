@@ -18,6 +18,7 @@ var (
 	deployFile   string
 	deployDryRun bool
 	deployNoWait bool
+	deployTags   []string
 )
 
 // Function variables for external commands, enabling test mocking.
@@ -67,6 +68,7 @@ func init() {
 	deployCmd.Flags().StringVarP(&deployFile, "file", "f", "banyan.yaml", "Path to banyan.yaml manifest")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Validate manifest without deploying")
 	deployCmd.Flags().BoolVar(&deployNoWait, "no-wait", false, "Don't wait for deployment to complete")
+	deployCmd.Flags().StringSliceVar(&deployTags, "tags", nil, "Deployment tags for agent matching")
 }
 
 // validateServiceArgs checks that all requested service names exist in the manifest.
@@ -187,7 +189,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Deploy via engine gRPC
 	fmt.Printf("\nConnecting to Engine at %s...\n", engineAddr)
-	resp, err := client.Deploy(ctx, manifest, args)
+	resp, err := client.Deploy(ctx, manifest, args, deployTags)
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %w", err)
 	}
@@ -220,7 +222,7 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 				continue
 			}
 
-			d := findLatestDeployment(status.Deployments, appName)
+			d := findLatestDeployment(status.Deployments, appName, deployTags)
 			if d == nil {
 				continue
 			}

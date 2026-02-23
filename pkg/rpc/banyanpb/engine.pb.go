@@ -26,6 +26,7 @@ type RegisterRequest struct {
 	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
 	ApiAddress    string                 `protobuf:"bytes,2,opt,name=api_address,json=apiAddress,proto3" json:"api_address,omitempty"`
 	SessionToken  string                 `protobuf:"bytes,3,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
+	Tags          []string               `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -81,6 +82,13 @@ func (x *RegisterRequest) GetSessionToken() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
 type RegisterResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	RegistryUrl   string                 `protobuf:"bytes,1,opt,name=registry_url,json=registryUrl,proto3" json:"registry_url,omitempty"`
@@ -129,6 +137,7 @@ type HeartbeatRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentName     string                 `protobuf:"bytes,1,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
 	SessionToken  string                 `protobuf:"bytes,2,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
+	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -175,6 +184,13 @@ func (x *HeartbeatRequest) GetSessionToken() string {
 		return x.SessionToken
 	}
 	return ""
+}
+
+func (x *HeartbeatRequest) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
 }
 
 type HeartbeatResponse struct {
@@ -741,6 +757,7 @@ type DeployRPCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Manifest      *Manifest              `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
 	Services      []string               `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"` // optional: deploy only these services
+	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`         // optional: deployment tags for agent matching
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -785,6 +802,13 @@ func (x *DeployRPCRequest) GetManifest() *Manifest {
 func (x *DeployRPCRequest) GetServices() []string {
 	if x != nil {
 		return x.Services
+	}
+	return nil
+}
+
+func (x *DeployRPCRequest) GetTags() []string {
+	if x != nil {
+		return x.Tags
 	}
 	return nil
 }
@@ -1093,6 +1117,7 @@ type DownRPCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Services      []string               `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"`
+	Tags          []string               `protobuf:"bytes,3,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1137,6 +1162,13 @@ func (x *DownRPCRequest) GetName() string {
 func (x *DownRPCRequest) GetServices() []string {
 	if x != nil {
 		return x.Services
+	}
+	return nil
+}
+
+func (x *DownRPCRequest) GetTags() []string {
+	if x != nil {
+		return x.Tags
 	}
 	return nil
 }
@@ -1280,6 +1312,7 @@ type AgentInfo struct {
 	ApiAddress    string                 `protobuf:"bytes,3,opt,name=api_address,json=apiAddress,proto3" json:"api_address,omitempty"`
 	LastSeenUnix  int64                  `protobuf:"varint,4,opt,name=last_seen_unix,json=lastSeenUnix,proto3" json:"last_seen_unix,omitempty"`
 	CreatedAtUnix int64                  `protobuf:"varint,5,opt,name=created_at_unix,json=createdAtUnix,proto3" json:"created_at_unix,omitempty"`
+	Tags          []string               `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1349,6 +1382,13 @@ func (x *AgentInfo) GetCreatedAtUnix() int64 {
 	return 0
 }
 
+func (x *AgentInfo) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
 type DeploymentInfo struct {
 	state         protoimpl.MessageState  `protogen:"open.v1"`
 	Id            string                  `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1361,6 +1401,7 @@ type DeploymentInfo struct {
 	Tasks         []*TaskInfo             `protobuf:"bytes,8,rep,name=tasks,proto3" json:"tasks,omitempty"`
 	Healthy       int32                   `protobuf:"varint,9,opt,name=healthy,proto3" json:"healthy,omitempty"`
 	Total         int32                   `protobuf:"varint,10,opt,name=total,proto3" json:"total,omitempty"`
+	Tags          []string                `protobuf:"bytes,11,rep,name=tags,proto3" json:"tags,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1463,6 +1504,13 @@ func (x *DeploymentInfo) GetTotal() int32 {
 		return x.Total
 	}
 	return 0
+}
+
+func (x *DeploymentInfo) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
 }
 
 type ServiceInfo struct {
@@ -2085,19 +2133,21 @@ var File_engine_proto protoreflect.FileDescriptor
 
 const file_engine_proto_rawDesc = "" +
 	"\n" +
-	"\fengine.proto\x12\tbanyan.v1\"v\n" +
+	"\fengine.proto\x12\tbanyan.v1\"\x8a\x01\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x1f\n" +
 	"\vapi_address\x18\x02 \x01(\tR\n" +
 	"apiAddress\x12#\n" +
-	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\"5\n" +
+	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\x12\x12\n" +
+	"\x04tags\x18\x04 \x03(\tR\x04tags\"5\n" +
 	"\x10RegisterResponse\x12!\n" +
-	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\"V\n" +
+	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\"j\n" +
 	"\x10HeartbeatRequest\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12#\n" +
-	"\rsession_token\x18\x02 \x01(\tR\fsessionToken\"\x13\n" +
+	"\rsession_token\x18\x02 \x01(\tR\fsessionToken\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\"\x13\n" +
 	"\x11HeartbeatResponse\"1\n" +
 	"\x10PollTasksRequest\x12\x1d\n" +
 	"\n" +
@@ -2139,10 +2189,11 @@ const file_engine_proto_rawDesc = "" +
 	"\x05ports\x18\n" +
 	" \x03(\tR\x05ports\x12 \n" +
 	"\venvironment\x18\v \x03(\tR\venvironment\x12\x18\n" +
-	"\acommand\x18\f \x03(\tR\acommand\"_\n" +
+	"\acommand\x18\f \x03(\tR\acommand\"s\n" +
 	"\x10DeployRPCRequest\x12/\n" +
 	"\bmanifest\x18\x01 \x01(\v2\x13.banyan.v1.ManifestR\bmanifest\x12\x1a\n" +
-	"\bservices\x18\x02 \x03(\tR\bservices\"P\n" +
+	"\bservices\x18\x02 \x03(\tR\bservices\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\"P\n" +
 	"\x11DeployRPCResponse\x12#\n" +
 	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\"\xd0\x01\n" +
@@ -2168,24 +2219,26 @@ const file_engine_proto_rawDesc = "" +
 	"dockerfile\x18\x02 \x01(\tR\n" +
 	"dockerfile\",\n" +
 	"\x0eManifestDeploy\x12\x1a\n" +
-	"\breplicas\x18\x01 \x01(\x05R\breplicas\"@\n" +
+	"\breplicas\x18\x01 \x01(\x05R\breplicas\"T\n" +
 	"\x0eDownRPCRequest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1a\n" +
-	"\bservices\x18\x02 \x03(\tR\bservices\"0\n" +
+	"\bservices\x18\x02 \x03(\tR\bservices\x12\x12\n" +
+	"\x04tags\x18\x03 \x03(\tR\x04tags\"0\n" +
 	"\x0fDownRPCResponse\x12\x1d\n" +
 	"\n" +
 	"task_count\x18\x01 \x01(\x05R\ttaskCount\"\x12\n" +
 	"\x10GetStatusRequest\"~\n" +
 	"\x11GetStatusResponse\x12,\n" +
 	"\x06agents\x18\x01 \x03(\v2\x14.banyan.v1.AgentInfoR\x06agents\x12;\n" +
-	"\vdeployments\x18\x02 \x03(\v2\x19.banyan.v1.DeploymentInfoR\vdeployments\"\xa6\x01\n" +
+	"\vdeployments\x18\x02 \x03(\v2\x19.banyan.v1.DeploymentInfoR\vdeployments\"\xba\x01\n" +
 	"\tAgentInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1f\n" +
 	"\vapi_address\x18\x03 \x01(\tR\n" +
 	"apiAddress\x12$\n" +
 	"\x0elast_seen_unix\x18\x04 \x01(\x03R\flastSeenUnix\x12&\n" +
-	"\x0fcreated_at_unix\x18\x05 \x01(\x03R\rcreatedAtUnix\"\xa7\x03\n" +
+	"\x0fcreated_at_unix\x18\x05 \x01(\x03R\rcreatedAtUnix\x12\x12\n" +
+	"\x04tags\x18\x06 \x03(\tR\x04tags\"\xbb\x03\n" +
 	"\x0eDeploymentInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -2197,7 +2250,8 @@ const file_engine_proto_rawDesc = "" +
 	"\x05tasks\x18\b \x03(\v2\x13.banyan.v1.TaskInfoR\x05tasks\x12\x18\n" +
 	"\ahealthy\x18\t \x01(\x05R\ahealthy\x12\x14\n" +
 	"\x05total\x18\n" +
-	" \x01(\x05R\x05total\x1aS\n" +
+	" \x01(\x05R\x05total\x12\x12\n" +
+	"\x04tags\x18\v \x03(\tR\x04tags\x1aS\n" +
 	"\rServicesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12,\n" +
 	"\x05value\x18\x02 \x01(\v2\x16.banyan.v1.ServiceInfoR\x05value:\x028\x01\"\xb0\x01\n" +

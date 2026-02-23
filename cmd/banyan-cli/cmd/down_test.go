@@ -113,7 +113,7 @@ func TestFindLatestDeployment(t *testing.T) {
 			{Id: "old", Name: "my-app", Status: "failed", CreatedAtUnix: 1000},
 			{Id: "new", Name: "my-app", Status: "stopping", CreatedAtUnix: 2000},
 		}
-		d := findLatestDeployment(deployments, "my-app")
+		d := findLatestDeployment(deployments, "my-app", nil)
 		if d == nil {
 			t.Fatal("expected non-nil deployment")
 		}
@@ -127,7 +127,7 @@ func TestFindLatestDeployment(t *testing.T) {
 			{Id: "other", Name: "other-app", Status: "failed", CreatedAtUnix: 3000},
 			{Id: "mine", Name: "my-app", Status: "stopping", CreatedAtUnix: 1000},
 		}
-		d := findLatestDeployment(deployments, "my-app")
+		d := findLatestDeployment(deployments, "my-app", nil)
 		if d == nil {
 			t.Fatal("expected non-nil deployment")
 		}
@@ -140,14 +140,14 @@ func TestFindLatestDeployment(t *testing.T) {
 		deployments := []*banyanpb.DeploymentInfo{
 			{Id: "other", Name: "other-app", Status: "running", CreatedAtUnix: 1000},
 		}
-		d := findLatestDeployment(deployments, "my-app")
+		d := findLatestDeployment(deployments, "my-app", nil)
 		if d != nil {
 			t.Errorf("expected nil, got %v", d)
 		}
 	})
 
 	t.Run("returns nil for empty list", func(t *testing.T) {
-		d := findLatestDeployment(nil, "my-app")
+		d := findLatestDeployment(nil, "my-app", nil)
 		if d != nil {
 			t.Errorf("expected nil, got %v", d)
 		}
@@ -184,5 +184,58 @@ func TestRunDown_FromManifestFile(t *testing.T) {
 	if err != nil {
 		t.Errorf("expected nil error, got %v", err)
 	}
+}
+
+func TestFindLatestDeployment_WithTags(t *testing.T) {
+	t.Run("matches deployment with matching tags", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "d1", Name: "my-app", Tags: []string{"staging"}, CreatedAtUnix: 1000},
+		}
+		d := findLatestDeployment(deployments, "my-app", []string{"staging"})
+		if d == nil {
+			t.Fatal("expected non-nil deployment")
+		}
+		if d.Id != "d1" {
+			t.Errorf("expected d1, got %s", d.Id)
+		}
+	})
+
+	t.Run("excludes deployment with different tags", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "d1", Name: "my-app", Tags: []string{"staging"}, CreatedAtUnix: 1000},
+		}
+		d := findLatestDeployment(deployments, "my-app", []string{"production"})
+		if d != nil {
+			t.Errorf("expected nil, got %v", d)
+		}
+	})
+
+	t.Run("nil tags matches all", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "d1", Name: "my-app", Tags: []string{"staging"}, CreatedAtUnix: 1000},
+			{Id: "d2", Name: "my-app", Tags: []string{"production"}, CreatedAtUnix: 2000},
+		}
+		d := findLatestDeployment(deployments, "my-app", nil)
+		if d == nil {
+			t.Fatal("expected non-nil deployment")
+		}
+		if d.Id != "d2" {
+			t.Errorf("expected most recent deployment d2, got %s", d.Id)
+		}
+	})
+
+	t.Run("same name different tags returns correct one", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "d1", Name: "my-app", Tags: []string{"staging"}, CreatedAtUnix: 1000},
+			{Id: "d2", Name: "my-app", Tags: []string{"production"}, CreatedAtUnix: 2000},
+		}
+		d := findLatestDeployment(deployments, "my-app", []string{"staging"})
+		if d == nil {
+			t.Fatal("expected non-nil deployment")
+		}
+		if d.Id != "d1" {
+			t.Errorf("expected staging deployment d1, got %s", d.Id)
+		}
+	})
 }
 

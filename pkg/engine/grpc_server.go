@@ -87,6 +87,7 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 		Name:       req.AgentName,
 		Status:     "ready",
 		APIAddress: req.ApiAddress,
+		Tags:       req.Tags,
 		LastSeen:   time.Now(),
 		CreatedAt:  time.Now(),
 	}
@@ -122,6 +123,7 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 	}
 	node.LastSeen = time.Now()
 	node.Status = "ready"
+	node.Tags = req.Tags
 	if err := s.store.Save(ctx, types.KeyNodes+req.AgentName, &node); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update heartbeat: %v", err)
 	}
@@ -256,13 +258,15 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 	manifest := protoToManifest(req.Manifest)
 	allServices := types.BuildServiceRecords(manifest.Services)
 
+	tags := types.SortTags(req.Tags)
+
 	// Per-service deploy path
 	if len(req.Services) > 0 {
-		return s.deployServices(ctx, manifest.Name, allServices, req.Services)
+		return s.deployServices(ctx, manifest.Name, allServices, req.Services, tags)
 	}
 
 	// Full deploy path (blue-green)
-	replacesID := s.prepareForRedeploy(ctx, manifest.Name)
+	replacesID := s.prepareForRedeploy(ctx, manifest.Name, tags)
 
 	deploymentID := fmt.Sprintf("%s-%d", manifest.Name, time.Now().Unix())
 	record := &types.DeploymentRecord{
@@ -270,6 +274,7 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 		Name:      manifest.Name,
 		Status:    types.StatusPending,
 		Services:  allServices,
+		Tags:      tags,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -294,7 +299,7 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 		return nil, status.Error(codes.InvalidArgument, "name is required")
 	}
 
-	deployment, deploymentKey, err := s.findDeploymentByName(ctx, req.Name)
+	deployment, deploymentKey, err := s.findDeploymentByName(ctx, req.Name, types.SortTags(req.Tags))
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "%v", err)
 	}
@@ -379,6 +384,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 			ApiAddress:    node.APIAddress,
 			LastSeenUnix:  node.LastSeen.Unix(),
 			CreatedAtUnix: node.CreatedAt.Unix(),
+			Tags:          node.Tags,
 		})
 	}
 
@@ -454,6 +460,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 			Tasks:         taskInfos,
 			Healthy:       int32(healthy),          //nolint:gosec // count is always small
 			Total:         int32(len(createTasks)), //nolint:gosec // count is always small
+			Tags:          record.Tags,
 		})
 	}
 
@@ -621,10 +628,10 @@ func teardownDeployment(ctx context.Context, store storage.StateStore, deploymen
 	return len(targetTasks), nil
 }
 
-// prepareForRedeploy scans active deployments with the given name and prepares for a new deploy.
+// prepareForRedeploy scans active deployments with the given name+tags and prepares for a new deploy.
 // Non-running active deployments (pending/deploying/failed) are torn down immediately.
 // Returns the ID of the most recent running deployment for blue-green replacement.
-func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string) string {
+func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string, tags []string) string {
 	keys, err := s.store.List(ctx, types.KeyDeployments)
 	if err != nil {
 		return ""
@@ -638,7 +645,10 @@ func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string) 
 		if err := s.store.Get(ctx, key, &record); err != nil {
 			continue
 		}
-		if record.Name != name || record.Status == types.StatusStopped || record.Status == types.StatusStopping {
+		if record.Name != name || !types.TagsEqual(record.Tags, tags) {
+			continue
+		}
+		if record.Status == types.StatusStopped || record.Status == types.StatusStopping {
 			continue
 		}
 
@@ -662,7 +672,7 @@ func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string) 
 // --- Per-service deploy ---
 
 // deployServices handles per-service redeployment using the recreate strategy.
-func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, allServices map[string]types.ServiceRecord, serviceNames []string) (*banyanpb.DeployRPCResponse, error) {
+func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, allServices map[string]types.ServiceRecord, serviceNames []string, tags []string) (*banyanpb.DeployRPCResponse, error) {
 	// Validate service names exist
 	for _, name := range serviceNames {
 		if _, ok := allServices[name]; !ok {
@@ -671,7 +681,7 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 	}
 
 	// Find running deployment for this app
-	runningDeploy, _, err := s.findRunningDeploymentByName(ctx, appName)
+	runningDeploy, _, err := s.findRunningDeploymentByName(ctx, appName, tags)
 	if err != nil {
 		return nil, status.Errorf(codes.FailedPrecondition, "no running deployment found for %q: %v", appName, err)
 	}
@@ -685,7 +695,7 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 	}
 
 	// Clean up non-running deployments (pending/deploying/failed)
-	s.teardownNonRunningDeployments(ctx, appName)
+	s.teardownNonRunningDeployments(ctx, appName, tags)
 
 	// Create stop tasks for target services in the running deployment
 	s.teardownDeploymentServices(ctx, runningDeploy.ID, serviceNames)
@@ -703,6 +713,7 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 		Name:           appName,
 		Status:         types.StatusPending,
 		Services:       filteredServices,
+		Tags:           tags,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
 		UpdateStrategy: types.UpdateStrategyRecreate,
@@ -719,8 +730,8 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 	}, nil
 }
 
-// findRunningDeploymentByName returns the most recent Running deployment by name.
-func (s *engineGRPCServer) findRunningDeploymentByName(ctx context.Context, name string) (*types.DeploymentRecord, string, error) {
+// findRunningDeploymentByName returns the most recent Running deployment by name+tags.
+func (s *engineGRPCServer) findRunningDeploymentByName(ctx context.Context, name string, tags []string) (*types.DeploymentRecord, string, error) {
 	keys, err := s.store.List(ctx, types.KeyDeployments)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to list deployments: %w", err)
@@ -734,6 +745,9 @@ func (s *engineGRPCServer) findRunningDeploymentByName(ctx context.Context, name
 			continue
 		}
 		if record.Name != name || record.Status != types.StatusRunning {
+			continue
+		}
+		if !types.TagsEqual(record.Tags, tags) {
 			continue
 		}
 		if best == nil || record.CreatedAt.After(best.CreatedAt) {
@@ -806,8 +820,8 @@ func (s *engineGRPCServer) teardownDeploymentServices(ctx context.Context, deplo
 }
 
 // teardownNonRunningDeployments tears down all non-running active deployments (pending/deploying/failed)
-// with the given name.
-func (s *engineGRPCServer) teardownNonRunningDeployments(ctx context.Context, name string) {
+// with the given name+tags.
+func (s *engineGRPCServer) teardownNonRunningDeployments(ctx context.Context, name string, tags []string) {
 	keys, err := s.store.List(ctx, types.KeyDeployments)
 	if err != nil {
 		return
@@ -818,7 +832,7 @@ func (s *engineGRPCServer) teardownNonRunningDeployments(ctx context.Context, na
 		if err := s.store.Get(ctx, key, &record); err != nil {
 			continue
 		}
-		if record.Name != name {
+		if record.Name != name || !types.TagsEqual(record.Tags, tags) {
 			continue
 		}
 		if record.Status == types.StatusRunning || record.Status == types.StatusStopped || record.Status == types.StatusStopping {
@@ -834,8 +848,8 @@ func (s *engineGRPCServer) teardownNonRunningDeployments(ctx context.Context, na
 
 // --- Helper functions ---
 
-// findDeploymentByName scans all deployments and returns the most recent one matching the given name.
-func (s *engineGRPCServer) findDeploymentByName(ctx context.Context, name string) (*types.DeploymentRecord, string, error) {
+// findDeploymentByName scans all deployments and returns the most recent one matching the given name+tags.
+func (s *engineGRPCServer) findDeploymentByName(ctx context.Context, name string, tags []string) (*types.DeploymentRecord, string, error) {
 	keys, err := s.store.List(ctx, types.KeyDeployments)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to list deployments: %w", err)
@@ -848,7 +862,7 @@ func (s *engineGRPCServer) findDeploymentByName(ctx context.Context, name string
 		if err := s.store.Get(ctx, key, &record); err != nil {
 			continue
 		}
-		if record.Name != name {
+		if record.Name != name || !types.TagsEqual(record.Tags, tags) {
 			continue
 		}
 		if best == nil || record.CreatedAt.After(best.CreatedAt) {

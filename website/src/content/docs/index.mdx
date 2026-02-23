@@ -1,0 +1,178 @@
+---
+title: Docker Compose syntax that scales
+description: Deploy containers across multiple servers with a YAML file you already know how to write. No Helm charts, no new syntax, no steep learning curve.
+template: splash
+hero:
+  tagline: Bring your docker-compose.yml to production — same syntax, distributed across your servers.
+  image:
+    file: ../../assets/logo.png
+  actions:
+    - text: Get Started in 5 Minutes
+      link: /getting-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/fertile-org/banyan
+      icon: external
+---
+
+import { Card, CardGrid, Aside } from "@astrojs/starlight/components";
+
+<Aside type="caution" title="Under experiment">
+  Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
+</Aside>
+
+## From one server to many
+
+You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and it works — on one machine.
+
+Then you need more. More servers, more replicas, more availability. The usual next step involves weeks of learning, dozens of new concepts, and infrastructure that's heavier than your application.
+
+**Banyan takes a different approach.** Same YAML syntax you already write, distributed across your servers. No new language to learn. No templating. No 50-page getting started guide.
+
+## Two lines of diff
+
+**docker-compose.yml** — everything on one machine:
+
+```yaml
+services:
+  web:
+    build: ./web
+    ports:
+      - "80:80"
+
+  api:
+    build: ./api
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=db
+
+  db:
+    image: postgres:15-alpine
+```
+
+**banyan.yaml** — distributed across your cluster:
+
+```yaml
+name: my-app                  # ← add a name
+
+services:
+  web:
+    build: ./web
+    ports:
+      - "80:80"
+
+  api:
+    build: ./api
+    deploy:
+      replicas: 3             # ← scale what you need
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=db
+
+  db:
+    image: postgres:15-alpine
+```
+
+Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and optionally `deploy.replicas`, and Banyan spreads your containers across your servers.
+
+<CardGrid>
+  <Card title="The YAML you already know" icon="document">
+    `services`, `build`, `image`, `ports`, `environment`, `depends_on` — same fields, same structure. If you've written a docker-compose.yml, you can write a banyan.yaml.
+  </Card>
+  <Card title="Three binaries, nothing else" icon="setting">
+    `banyan-engine`, `banyan-agent`, `banyan-cli`. No package managers, no plugins, no Helm charts, no YAML templating. Download, run, deploy.
+  </Card>
+  <Card title="Built-in image registry" icon="star">
+    Use `build:` in your manifest and Banyan builds, stores, and distributes images across your cluster. No Docker Hub account needed. No private registry to configure.
+  </Card>
+  <Card title="Containers talk across servers" icon="rocket">
+    Services on different machines communicate as if they were on the same network. Banyan sets up the overlay network and DNS automatically.
+  </Card>
+  <Card title="Monitor from your terminal" icon="shield">
+    `banyan-cli status` shows every container, which server it's on, and whether it's healthy. `banyan-cli logs` streams from any container, any node. A live terminal dashboard (`banyan-cli monitor`) is [coming soon](/roadmap/).
+  </Card>
+  <Card title="Open source, self-hosted" icon="approve-check">
+    Apache 2.0. Inspect the code, modify it, run it on your own servers. No vendor lock-in, no usage-based pricing.
+  </Card>
+</CardGrid>
+
+## Who is Banyan for?
+
+**Teams who've outgrown a single server but don't need — or don't want — Kubernetes.**
+
+- A team of 5 who needs their API running on 3 servers
+- A team of 50 who wants a lighter option for staging and internal tools
+- Anyone who wants to write a YAML file and deploy — not operate a platform
+
+Banyan handles the orchestration so you can focus on the software you're building.
+
+## Get a running cluster in under an hour
+
+One-time setup on each machine:
+
+```bash
+# Control plane
+sudo banyan-engine init && sudo banyan-engine start
+
+# Each worker
+sudo banyan-agent init && sudo banyan-agent start
+
+# Your deploy machine
+sudo banyan-cli init
+```
+
+Then deploy — every time, one command:
+
+```bash
+banyan-cli deploy -f banyan.yaml
+```
+
+Three focused binaries — engine, agent, and CLI. No package managers. No plugins.
+
+## Architecture
+
+```mermaid
+graph TD
+    CLI[fa:fa-terminal banyan-cli] -->|gRPC| Engine
+
+    subgraph Engine[fa:fa-server banyan-engine]
+        Store[(fa:fa-database etcd)]
+        Registry[fa:fa-box-open Image Registry]
+    end
+
+    Engine -->|gRPC| Agent1
+    Engine -->|gRPC| Agent2
+    Engine -->|gRPC| AgentN
+
+    subgraph VPC[fa:fa-network-wired Banyan VPC]
+        subgraph A1[Worker 1]
+            Agent1[fa:fa-cube banyan-agent]
+            C1{{fa:fa-box container: web-0}}
+            C2{{fa:fa-box container: api-0}}
+            Agent1 ~~~ C1
+            Agent1 ~~~ C2
+        end
+
+        subgraph A2[Worker 2]
+            Agent2[fa:fa-cube banyan-agent]
+            C3{{fa:fa-box container: api-1}}
+            C4{{fa:fa-box container: db-0}}
+            Agent2 ~~~ C3
+            Agent2 ~~~ C4
+        end
+
+        subgraph AN[Worker N]
+            AgentN[fa:fa-cube banyan-agent]
+            C5{{fa:fa-box container: api-2}}
+            AgentN ~~~ C5
+        end
+    end
+
+    CLI ~~~ Prom(fa:fa-chart-line Prometheus-compatible)
+    Engine -.-|/metrics| Prom
+```
+
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is authenticated over gRPC.

@@ -529,6 +529,159 @@ func TestCollectDeploymentTasks_TaskGetError(t *testing.T) {
 	}
 }
 
+func TestTagsMatch(t *testing.T) {
+	tests := []struct {
+		name           string
+		agentTags      []string
+		deploymentTags []string
+		want           bool
+	}{
+		{
+			name:           "both empty matches",
+			agentTags:      nil,
+			deploymentTags: nil,
+			want:           true,
+		},
+		{
+			name:           "both empty slices matches",
+			agentTags:      []string{},
+			deploymentTags: []string{},
+			want:           true,
+		},
+		{
+			name:           "agent empty deployment non-empty does not match",
+			agentTags:      nil,
+			deploymentTags: []string{"gpu"},
+			want:           false,
+		},
+		{
+			name:           "agent non-empty deployment empty does not match",
+			agentTags:      []string{"gpu"},
+			deploymentTags: nil,
+			want:           false,
+		},
+		{
+			name:           "both non-empty with intersection matches",
+			agentTags:      []string{"gpu", "ssd"},
+			deploymentTags: []string{"ssd", "large"},
+			want:           true,
+		},
+		{
+			name:           "both non-empty without intersection does not match",
+			agentTags:      []string{"gpu", "ssd"},
+			deploymentTags: []string{"arm", "large"},
+			want:           false,
+		},
+		{
+			name:           "exact same tags matches",
+			agentTags:      []string{"gpu"},
+			deploymentTags: []string{"gpu"},
+			want:           true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TagsMatch(tt.agentTags, tt.deploymentTags)
+			if got != tt.want {
+				t.Errorf("TagsMatch(%v, %v) = %v, want %v", tt.agentTags, tt.deploymentTags, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTagsEqual(t *testing.T) {
+	tests := []struct {
+		name string
+		a    []string
+		b    []string
+		want bool
+	}{
+		{
+			name: "both empty",
+			a:    nil,
+			b:    nil,
+			want: true,
+		},
+		{
+			name: "same set different order",
+			a:    []string{"gpu", "ssd", "arm"},
+			b:    []string{"arm", "gpu", "ssd"},
+			want: true,
+		},
+		{
+			name: "different sets same length",
+			a:    []string{"gpu", "ssd"},
+			b:    []string{"gpu", "arm"},
+			want: false,
+		},
+		{
+			name: "different lengths",
+			a:    []string{"gpu"},
+			b:    []string{"gpu", "ssd"},
+			want: false,
+		},
+		{
+			name: "identical single element",
+			a:    []string{"gpu"},
+			b:    []string{"gpu"},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := TagsEqual(tt.a, tt.b)
+			if got != tt.want {
+				t.Errorf("TagsEqual(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSortTags(t *testing.T) {
+	t.Run("returns sorted copy", func(t *testing.T) {
+		original := []string{"cherry", "apple", "banana"}
+		sorted := SortTags(original)
+
+		expected := []string{"apple", "banana", "cherry"}
+		assertSliceEqual(t, expected, sorted)
+	})
+
+	t.Run("does not mutate original", func(t *testing.T) {
+		original := []string{"cherry", "apple", "banana"}
+		_ = SortTags(original)
+
+		// original must remain unchanged
+		expectedOriginal := []string{"cherry", "apple", "banana"}
+		assertSliceEqual(t, expectedOriginal, original)
+	})
+
+	t.Run("returns nil for empty input", func(t *testing.T) {
+		sorted := SortTags(nil)
+		if sorted != nil {
+			t.Errorf("expected nil for empty input, got %v", sorted)
+		}
+	})
+
+	t.Run("returns nil for zero-length slice", func(t *testing.T) {
+		sorted := SortTags([]string{})
+		if sorted != nil {
+			t.Errorf("expected nil for zero-length slice, got %v", sorted)
+		}
+	})
+
+	t.Run("single element", func(t *testing.T) {
+		sorted := SortTags([]string{"only"})
+		assertSliceEqual(t, []string{"only"}, sorted)
+	})
+
+	t.Run("already sorted input", func(t *testing.T) {
+		sorted := SortTags([]string{"a", "b", "c"})
+		assertSliceEqual(t, []string{"a", "b", "c"}, sorted)
+	})
+}
+
 func assertSliceEqual(t *testing.T, expected, got []string) {
 	t.Helper()
 	if len(expected) != len(got) {

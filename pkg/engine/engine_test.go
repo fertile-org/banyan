@@ -153,7 +153,7 @@ func TestListAvailableAgents(t *testing.T) {
 		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
 		store.Save(ctx, types.KeyNodes+"agent-2", &types.NodeRecord{Name: "agent-2", Status: "ready"})
 
-		agents, err := ListAvailableAgents(ctx, store)
+		agents, err := ListAvailableAgents(ctx, store, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -167,7 +167,7 @@ func TestListAvailableAgents(t *testing.T) {
 		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
 		store.Save(ctx, types.KeyNodes+"agent-2", &types.NodeRecord{Name: "agent-2", Status: "offline"})
 
-		agents, err := ListAvailableAgents(ctx, store)
+		agents, err := ListAvailableAgents(ctx, store, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -181,7 +181,7 @@ func TestListAvailableAgents(t *testing.T) {
 
 	t.Run("empty store returns nil", func(t *testing.T) {
 		store := storage.NewMemoryStore()
-		agents, err := ListAvailableAgents(ctx, store)
+		agents, err := ListAvailableAgents(ctx, store, nil)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -990,7 +990,7 @@ func TestListAvailableAgents_ListError(t *testing.T) {
 	ctx := context.Background()
 	store := &errorStore{MemoryStore: storage.NewMemoryStore(), listErr: true}
 
-	_, err := ListAvailableAgents(ctx, store)
+	_, err := ListAvailableAgents(ctx, store, nil)
 	if err == nil {
 		t.Fatal("expected error when store.List fails")
 	}
@@ -1003,7 +1003,7 @@ func TestListAvailableAgents_GetError(t *testing.T) {
 
 	store := &errorStore{MemoryStore: memStore, getErr: true}
 
-	agents, err := ListAvailableAgents(ctx, store)
+	agents, err := ListAvailableAgents(ctx, store, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1642,6 +1642,134 @@ func TestAreReplacedServicesStopped(t *testing.T) {
 		}
 		if !eng.areReplacedServicesStopped(ctx, deployment) {
 			t.Error("expected true when pending stop tasks are for other services")
+		}
+	})
+}
+
+func TestListAvailableAgents_WithTags(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("both untagged matches", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+
+		agents, err := ListAvailableAgents(ctx, store, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(agents) != 1 {
+			t.Errorf("expected 1 agent, got %d", len(agents))
+		}
+	})
+
+	t.Run("agent tagged deployment untagged no match", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
+			Name: "agent-1", Status: "ready", Tags: []string{"staging"},
+		})
+
+		agents, err := ListAvailableAgents(ctx, store, nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(agents) != 0 {
+			t.Errorf("expected 0 agents (agent tagged, deployment untagged), got %d", len(agents))
+		}
+	})
+
+	t.Run("agent untagged deployment tagged no match", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+
+		agents, err := ListAvailableAgents(ctx, store, []string{"staging"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(agents) != 0 {
+			t.Errorf("expected 0 agents (agent untagged, deployment tagged), got %d", len(agents))
+		}
+	})
+
+	t.Run("same tags matches", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
+			Name: "agent-1", Status: "ready", Tags: []string{"staging"},
+		})
+
+		agents, err := ListAvailableAgents(ctx, store, []string{"staging"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(agents) != 1 {
+			t.Errorf("expected 1 agent (same tags), got %d", len(agents))
+		}
+	})
+
+	t.Run("agent superset matches via intersection", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
+			Name: "agent-1", Status: "ready", Tags: []string{"staging", "production"},
+		})
+
+		agents, err := ListAvailableAgents(ctx, store, []string{"staging"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(agents) != 1 {
+			t.Errorf("expected 1 agent (intersection match), got %d", len(agents))
+		}
+	})
+
+	t.Run("disjoint tags no match", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
+			Name: "agent-1", Status: "ready", Tags: []string{"staging"},
+		})
+
+		agents, err := ListAvailableAgents(ctx, store, []string{"production"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(agents) != 0 {
+			t.Errorf("expected 0 agents (disjoint tags), got %d", len(agents))
+		}
+	})
+}
+
+func TestHasConflictingDeployment_WithTags(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("same name same tags deploying is conflict", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID: "deploy-old", Name: "app", Status: types.StatusDeploying,
+			Tags: []string{"staging"},
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-new", Name: "app", Tags: []string{"staging"},
+		}
+		if !eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected conflict with same name and same tags")
+		}
+	})
+
+	t.Run("same name different tags deploying is not conflict", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID: "deploy-old", Name: "app", Status: types.StatusDeploying,
+			Tags: []string{"staging"},
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-new", Name: "app", Tags: []string{"production"},
+		}
+		if eng.hasConflictingDeployment(ctx, deployment) {
+			t.Error("expected no conflict with same name but different tags")
 		}
 	})
 }

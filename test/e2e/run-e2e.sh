@@ -78,7 +78,7 @@ docker exec banyan-engine banyan-engine status || log_warn "Engine status check 
 
 # Step 7: Deploy test application
 log_info "Deploying test application..."
-docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml
+docker exec banyan-engine banyan-cli up --file /examples/banyan.yaml
 # Step 8: Verify deployment
 log_info "Verifying deployment status..."
 sleep 5
@@ -97,7 +97,7 @@ echo "========================================="
 echo ""
 echo "Cluster is running. You can interact with it:"
 echo "  docker exec banyan-engine banyan-engine status"
-echo "  docker exec banyan-engine banyan-cli deploy --file /examples/banyan.yaml"
+echo "  docker exec banyan-engine banyan-cli up --file /examples/banyan.yaml"
 echo "  docker exec banyan-engine banyan-cli status"
 echo "  docker exec banyan-worker-1 nerdctl ps"
 echo ""

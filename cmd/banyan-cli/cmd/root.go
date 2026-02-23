@@ -17,7 +17,7 @@ var rootCmd = &cobra.Command{
 
 Commands:
   init      Initialize CLI configuration (engine host, port, password)
-  deploy    Deploy applications from banyan.yaml
+  up        Deploy applications from banyan.yaml (alias: deploy)
   down      Stop and remove deployed services
   status    Show cluster status
   logs      Stream container logs
@@ -27,7 +27,7 @@ Quick Start:
   banyan-cli init
 
   # Deploy an application
-  banyan-cli deploy --file banyan.yaml
+  banyan-cli up --file banyan.yaml
 
   # Check status
   banyan-cli status

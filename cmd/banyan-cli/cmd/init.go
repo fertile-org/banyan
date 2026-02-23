@@ -38,7 +38,7 @@ configuration to /etc/banyan/banyan.yaml.
 The engine must be running for this command to succeed.
 
 Run this once on any machine where you want to use banyan-cli commands
-(deploy, down, status, logs).
+(up, down, status, logs).
 
 Example:
   sudo banyan-cli init
@@ -175,6 +175,6 @@ func runInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("========================================"))
 	fmt.Println(styleOK.Render("Initialization complete!"))
 	fmt.Println()
-	fmt.Println(styleInfo.Render("You can now use: banyan-cli deploy, status, down, logs"))
+	fmt.Println(styleInfo.Render("You can now use: banyan-cli up, status, down, logs"))
 	return nil
 }

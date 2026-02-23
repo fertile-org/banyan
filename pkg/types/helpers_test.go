@@ -153,6 +153,42 @@ func TestBuildTasksForDeployment(t *testing.T) {
 			t.Errorf("expected 3 tasks, got %d", len(tasks))
 		}
 	})
+
+	t.Run("uses deployment ID as container prefix when ReplacesID is set", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			ID:         "myapp-1234567890",
+			Name:       "myapp",
+			ReplacesID: "myapp-old",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx:latest", Replicas: 1},
+			},
+		}
+		tasks := BuildTasksForDeployment(deployment, agents)
+		task := tasks[0]
+
+		// Container name should use deployment ID as prefix (for blue-green uniqueness)
+		expected := "myapp-1234567890-web-0"
+		if task.ContainerName != expected {
+			t.Errorf("expected container_name %q, got %q", expected, task.ContainerName)
+		}
+	})
+
+	t.Run("uses deployment Name as container prefix when no ReplacesID", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			ID:   "myapp-1234567890",
+			Name: "myapp",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx:latest", Replicas: 1},
+			},
+		}
+		tasks := BuildTasksForDeployment(deployment, agents)
+		task := tasks[0]
+
+		expected := "myapp-web-0"
+		if task.ContainerName != expected {
+			t.Errorf("expected container_name %q, got %q", expected, task.ContainerName)
+		}
+	})
 }
 
 func TestDetermineDeploymentStatus(t *testing.T) {

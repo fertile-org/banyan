@@ -102,8 +102,8 @@ Scale services based on metrics and support zero-downtime updates.
 - **Auto-scaling**: Define scaling rules in the manifest (min/max replicas, target thresholds)
 - **Auto-scaling**: Engine evaluates metrics against rules and adjusts replica count
 - **Auto-scaling**: Graceful scale-down (drain before stopping)
-- **Redeployment**: Rolling update when service image or config changes
-- **Redeployment**: Health check between rollout steps
+- ~~**Redeployment**: Rolling update when service image or config changes~~ → **Done**: Blue-green redeployment via `banyan-cli up`
+- ~~**Redeployment**: Health check between rollout steps~~ → **Done**: New deployment must reach `running` before old is torn down
 - **Redeployment**: Automatic rollback on failure
 
 ---

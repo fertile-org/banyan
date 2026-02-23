@@ -30,7 +30,14 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 
 // BuildTasksForDeployment creates task records for a deployment, distributing
 // replicas round-robin across the given agents.
+// When ReplacesID is set (blue-green deployment), container names use the deployment ID
+// as prefix to avoid naming conflicts with the still-running old deployment.
 func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) []*TaskRecord {
+	containerPrefix := deployment.Name
+	if deployment.ReplacesID != "" {
+		containerPrefix = deployment.ID
+	}
+
 	var tasks []*TaskRecord
 	agentIdx := 0
 	for svcName, svc := range deployment.Services {
@@ -48,7 +55,7 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 				Type:          TaskTypeCreateAndStart,
 				Status:        StatusPending,
 				Image:         svc.Image,
-				ContainerName: fmt.Sprintf("%s-%s-%d", deployment.Name, svcName, i),
+				ContainerName: fmt.Sprintf("%s-%s-%d", containerPrefix, svcName, i),
 				Ports:         svc.Ports,
 				Environment:   svc.Environment,
 				Command:       svc.Command,

@@ -28,9 +28,13 @@ var (
 )
 
 var deployCmd = &cobra.Command{
-	Use:   "deploy",
-	Short: "Deploy applications from banyan.yaml",
+	Use:     "up",
+	Aliases: []string{"deploy"},
+	Short:   "Deploy applications from banyan.yaml",
 	Long: `Deploy applications to Banyan using a banyan.yaml manifest.
+
+If the application is already running, it will be stopped and redeployed
+automatically (idempotent). Old containers are removed before new ones start.
 
 Example banyan.yaml:
   name: my-app
@@ -47,8 +51,8 @@ Example banyan.yaml:
         - "8080:8080"
 
 Usage:
-  banyan-cli deploy --file banyan.yaml
-  banyan-cli deploy --file banyan.yaml --dry-run`,
+  banyan-cli up --file banyan.yaml
+  banyan-cli up --file banyan.yaml --dry-run`,
 	RunE: runDeploy,
 }
 
@@ -87,7 +91,7 @@ func buildImageArgs(imageName, contextPath, dockerfile string) []string {
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Deploy")
+	fmt.Println("Banyan Up")
 	fmt.Println("========================================")
 
 	// Read and parse manifest

@@ -96,11 +96,11 @@ Want to deploy your own code? Use `build: ./your-app` instead of `image:` — Ba
 ## 5. Deploy (~1 minute)
 
 ```bash
-banyan-cli deploy -f banyan.yaml
+banyan-cli up -f banyan.yaml
 ```
 
 ```
-Banyan Deploy
+Banyan Up
 ========================================
 Application: my-app
 Services: 2
@@ -116,6 +116,10 @@ Waiting for deployment to complete...
 ========================================
 Deployment 'my-app' is RUNNING!
 ```
+
+:::tip
+Run `banyan-cli up` again after changing your manifest or images — Banyan replaces the running containers automatically with zero downtime.
+:::
 
 ## 6. Verify
 

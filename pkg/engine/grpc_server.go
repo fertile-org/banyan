@@ -256,6 +256,9 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 	manifest := protoToManifest(req.Manifest)
 	services := types.BuildServiceRecords(manifest.Services)
 
+	// Blue-green: teardown non-running deployments, get running deployment ID for replacement
+	replacesID := s.prepareForRedeploy(ctx, manifest.Name)
+
 	deploymentID := fmt.Sprintf("%s-%d", manifest.Name, time.Now().Unix())
 	record := &types.DeploymentRecord{
 		ID:        deploymentID,
@@ -264,6 +267,11 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 		Services:  services,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+	}
+
+	if replacesID != "" {
+		record.UpdateStrategy = types.UpdateStrategyBlueGreen
+		record.ReplacesID = replacesID
 	}
 
 	if err := s.store.Save(ctx, types.KeyDeployments+deploymentID, record); err != nil {
@@ -293,7 +301,16 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 		}
 	}
 
-	// Collect completed create_and_start tasks
+	// Stop all services → delegate to teardownDeployment
+	if len(req.Services) == 0 {
+		count, teardownErr := teardownDeployment(ctx, s.store, deployment, deploymentKey)
+		if teardownErr != nil {
+			return nil, status.Errorf(codes.Internal, "%v", teardownErr)
+		}
+		return &banyanpb.DownRPCResponse{TaskCount: int32(count)}, nil //nolint:gosec // task count is always small
+	}
+
+	// Selective service stop — filter by service names
 	allTasks := types.CollectDeploymentTasks(ctx, s.store, deployment.ID)
 
 	var targetTasks []types.TaskRecord
@@ -303,20 +320,17 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 		}
 	}
 
-	// Filter by service names if specified
-	if len(req.Services) > 0 {
-		serviceSet := make(map[string]bool, len(req.Services))
-		for _, name := range req.Services {
-			serviceSet[name] = true
-		}
-		var filtered []types.TaskRecord
-		for i := range targetTasks {
-			if serviceSet[targetTasks[i].ServiceName] {
-				filtered = append(filtered, targetTasks[i])
-			}
-		}
-		targetTasks = filtered
+	serviceSet := make(map[string]bool, len(req.Services))
+	for _, name := range req.Services {
+		serviceSet[name] = true
 	}
+	var filtered []types.TaskRecord
+	for i := range targetTasks {
+		if serviceSet[targetTasks[i].ServiceName] {
+			filtered = append(filtered, targetTasks[i])
+		}
+	}
+	targetTasks = filtered
 
 	if len(targetTasks) == 0 {
 		return &banyanpb.DownRPCResponse{TaskCount: 0}, nil
@@ -339,16 +353,6 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 		taskKey := types.KeyTasks + targetTasks[i].AgentID + "/" + stopTask.ID
 		if err := s.store.Save(ctx, taskKey, stopTask); err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to create stop task: %v", err)
-		}
-	}
-
-	// Update deployment status if stopping all services
-	if len(req.Services) == 0 {
-		deployment.Status = types.StatusStopping
-		deployment.Error = ""
-		deployment.UpdatedAt = time.Now()
-		if err := s.store.Save(ctx, deploymentKey, deployment); err != nil {
-			log.Printf("WARNING: failed to update deployment status: %v", err)
 		}
 	}
 
@@ -557,6 +561,97 @@ func (s *engineGRPCServer) ValidateToken(ctx context.Context, tokenHash string) 
 		return status.Error(codes.Unauthenticated, "token expired, run 'auth' to re-authenticate")
 	}
 	return nil
+}
+
+// teardownDeployment creates stop_and_remove tasks for running containers and sets
+// the deployment to StatusStopping. If there are no running containers (e.g. deployment
+// is still pending), it marks the deployment StatusStopped directly.
+// Returns the number of stop tasks created.
+func teardownDeployment(ctx context.Context, store storage.StateStore, deployment *types.DeploymentRecord, deploymentKey string) (int, error) {
+	allTasks := types.CollectDeploymentTasks(ctx, store, deployment.ID)
+
+	var targetTasks []types.TaskRecord
+	for i := range allTasks {
+		if allTasks[i].Type == types.TaskTypeCreateAndStart && allTasks[i].Status == types.StatusCompleted {
+			targetTasks = append(targetTasks, allTasks[i])
+		}
+	}
+
+	if len(targetTasks) == 0 {
+		deployment.Status = types.StatusStopped
+		deployment.Error = ""
+		deployment.UpdatedAt = time.Now()
+		if err := store.Save(ctx, deploymentKey, deployment); err != nil {
+			log.Printf("WARNING: failed to update deployment status: %v", err)
+		}
+		return 0, nil
+	}
+
+	now := time.Now()
+	for i := range targetTasks {
+		stopTask := &types.TaskRecord{
+			ID:            targetTasks[i].ID + "-stop",
+			DeploymentID:  targetTasks[i].DeploymentID,
+			ServiceName:   targetTasks[i].ServiceName,
+			AgentID:       targetTasks[i].AgentID,
+			Type:          types.TaskTypeStopAndRemove,
+			Status:        types.StatusPending,
+			ContainerName: targetTasks[i].ContainerName,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		taskKey := types.KeyTasks + targetTasks[i].AgentID + "/" + stopTask.ID
+		if err := store.Save(ctx, taskKey, stopTask); err != nil {
+			return 0, fmt.Errorf("failed to create stop task: %w", err)
+		}
+	}
+
+	deployment.Status = types.StatusStopping
+	deployment.Error = ""
+	deployment.UpdatedAt = time.Now()
+	if err := store.Save(ctx, deploymentKey, deployment); err != nil {
+		log.Printf("WARNING: failed to update deployment status: %v", err)
+	}
+
+	return len(targetTasks), nil
+}
+
+// prepareForRedeploy scans active deployments with the given name and prepares for a new deploy.
+// Non-running active deployments (pending/deploying/failed) are torn down immediately.
+// Returns the ID of the most recent running deployment for blue-green replacement.
+func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string) string {
+	keys, err := s.store.List(ctx, types.KeyDeployments)
+	if err != nil {
+		return ""
+	}
+
+	var replacesID string
+	var latestRunningCreatedAt time.Time
+
+	for _, key := range keys {
+		var record types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		if record.Name != name || record.Status == types.StatusStopped || record.Status == types.StatusStopping {
+			continue
+		}
+
+		if record.Status == types.StatusRunning {
+			if replacesID == "" || record.CreatedAt.After(latestRunningCreatedAt) {
+				replacesID = record.ID
+				latestRunningCreatedAt = record.CreatedAt
+			}
+		} else {
+			// Pending/deploying/failed: teardown immediately (recreate behavior)
+			r := record
+			if _, teardownErr := teardownDeployment(ctx, s.store, &r, key); teardownErr != nil {
+				log.Printf("WARNING: failed to teardown deployment %s: %v", record.ID, teardownErr)
+			}
+		}
+	}
+
+	return replacesID
 }
 
 // --- Helper functions ---

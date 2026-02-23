@@ -194,26 +194,25 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 				continue
 			}
 
-			for _, d := range status.Deployments {
-				if d.Name != appName {
-					continue
-				}
+			d := findLatestDeployment(status.Deployments, appName)
+			if d == nil {
+				continue
+			}
 
-				if d.Status != lastStatus {
-					lastStatus = d.Status
-					switch d.Status {
-					case types.StatusDeploying:
-						fmt.Println("  Status: deploying (tasks dispatched to agents)")
-					case types.StatusRunning:
-						fmt.Println("  Status: running")
-						fmt.Println("\n========================================")
-						fmt.Printf("Deployment '%s' is RUNNING!\n", d.Name)
-						return nil
-					case types.StatusFailed:
-						fmt.Printf("  Status: FAILED (%s)\n", d.Error)
-						fmt.Println("\n========================================")
-						return fmt.Errorf("deployment failed: %s", d.Error)
-					}
+			if d.Status != lastStatus {
+				lastStatus = d.Status
+				switch d.Status {
+				case types.StatusDeploying:
+					fmt.Println("  Status: deploying (tasks dispatched to agents)")
+				case types.StatusRunning:
+					fmt.Println("  Status: running")
+					fmt.Println("\n========================================")
+					fmt.Printf("Deployment '%s' is RUNNING!\n", d.Name)
+					return nil
+				case types.StatusFailed:
+					fmt.Printf("  Status: FAILED (%s)\n", d.Error)
+					fmt.Println("\n========================================")
+					return fmt.Errorf("deployment failed: %s", d.Error)
 				}
 			}
 		}

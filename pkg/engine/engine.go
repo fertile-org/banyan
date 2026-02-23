@@ -303,6 +303,7 @@ func (e *Engine) checkStoppingDeployment(ctx context.Context, deployment *types.
 
 	if completedTasks == totalTasks {
 		deployment.Status = types.StatusStopped
+		deployment.Error = ""
 		deployment.UpdatedAt = time.Now()
 		if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err == nil {
 			fmt.Printf("[Engine] Deployment '%s' is STOPPED (%d containers removed)\n", deployment.Name, completedTasks)

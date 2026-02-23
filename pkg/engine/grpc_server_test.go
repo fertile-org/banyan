@@ -714,6 +714,43 @@ func TestDown(t *testing.T) {
 			t.Errorf("expected 0 stop tasks, got %d", resp.TaskCount)
 		}
 	})
+
+	t.Run("clears stale deployment error", func(t *testing.T) {
+		client5, srv5, cleanup5 := setupTestServer(t, "test-password")
+		defer cleanup5()
+
+		// Deployment failed during deploy (1 task failed) but has completed tasks
+		srv5.store.Save(ctx, types.KeyDeployments+"deploy-err", &types.DeploymentRecord{
+			ID: "deploy-err", Name: "err-app", Status: types.StatusFailed,
+			Error: "1/5 tasks failed: failed to start container: name-store error",
+			Services: map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
+			CreatedAt: time.Now(),
+		})
+		srv5.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		srv5.store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+			ID: "task-web", DeploymentID: "deploy-err", ServiceName: "web",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "err-app-web-0",
+		})
+
+		resp, err := client5.Down(ctx, &banyanpb.DownRPCRequest{Name: "err-app"})
+		if err != nil {
+			t.Fatalf("Down failed: %v", err)
+		}
+		if resp.TaskCount != 1 {
+			t.Errorf("expected 1 stop task, got %d", resp.TaskCount)
+		}
+
+		// Verify deployment error was cleared when status set to stopping
+		var updated types.DeploymentRecord
+		srv5.store.Get(ctx, types.KeyDeployments+"deploy-err", &updated)
+		if updated.Error != "" {
+			t.Errorf("expected deployment error to be cleared, got %q", updated.Error)
+		}
+		if updated.Status != types.StatusStopping {
+			t.Errorf("expected status stopping, got %s", updated.Status)
+		}
+	})
 }
 
 func TestGetStatus(t *testing.T) {

@@ -345,6 +345,7 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 	// Update deployment status if stopping all services
 	if len(req.Services) == 0 {
 		deployment.Status = types.StatusStopping
+		deployment.Error = ""
 		deployment.UpdatedAt = time.Now()
 		if err := s.store.Save(ctx, deploymentKey, deployment); err != nil {
 			log.Printf("WARNING: failed to update deployment status: %v", err)

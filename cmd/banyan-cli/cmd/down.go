@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
 )
 
@@ -110,6 +111,20 @@ func runDown(cmd *cobra.Command, args []string) error {
 	return waitForDown(ctx, client, appName)
 }
 
+// findLatestDeployment returns the most recent deployment matching the given name.
+func findLatestDeployment(deployments []*banyanpb.DeploymentInfo, appName string) *banyanpb.DeploymentInfo {
+	var latest *banyanpb.DeploymentInfo
+	for _, d := range deployments {
+		if d.Name != appName {
+			continue
+		}
+		if latest == nil || d.CreatedAtUnix > latest.CreatedAtUnix {
+			latest = d
+		}
+	}
+	return latest
+}
+
 func waitForDown(ctx context.Context, client *EngineClient, appName string) error {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
@@ -126,23 +141,22 @@ func waitForDown(ctx context.Context, client *EngineClient, appName string) erro
 				continue
 			}
 
-			for _, d := range status.Deployments {
-				if d.Name != appName {
-					continue
-				}
+			d := findLatestDeployment(status.Deployments, appName)
+			if d == nil {
+				continue
+			}
 
-				if d.Status != lastStatus {
-					lastStatus = d.Status
-					switch d.Status {
-					case types.StatusStopped:
-						fmt.Println("\n========================================")
-						fmt.Printf("All services stopped for '%s'.\n", appName)
-						return nil
-					case types.StatusFailed:
-						fmt.Printf("\n========================================\n")
-						fmt.Printf("Down FAILED: %s\n", d.Error)
-						return fmt.Errorf("down failed: %s", d.Error)
-					}
+			if d.Status != lastStatus {
+				lastStatus = d.Status
+				switch d.Status {
+				case types.StatusStopped:
+					fmt.Println("\n========================================")
+					fmt.Printf("All services stopped for '%s'.\n", appName)
+					return nil
+				case types.StatusFailed:
+					fmt.Printf("\n========================================\n")
+					fmt.Printf("Down FAILED: %s\n", d.Error)
+					return fmt.Errorf("down failed: %s", d.Error)
 				}
 			}
 		}

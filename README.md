@@ -82,6 +82,36 @@ services:
 
 Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and `deploy.replicas`, and Banyan spreads them across your servers automatically.
 
+## Features
+
+- **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
+- **Single-binary components** — Three small, focused binaries. Download, run, done. No complex setup or configuration management required.
+- **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
+- **Automatic distribution** — Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
+- **Built-in VPC** — Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
+- **Proven foundations** — Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
+
+## Is Banyan right for you?
+
+Banyan is built for teams who:
+
+- **Know Docker Compose** and want the same simplicity across multiple servers
+- **Need to scale beyond one machine** without learning Kubernetes
+- **Value shipping software** over operating infrastructure
+
+Banyan bridges the gap between "docker compose up" and production orchestration — same syntax, distributed execution.
+
+## Documentation
+
+Full documentation is available at **[getbanyan.dev](https://getbanyan.dev/)**.
+
+- [Installation](https://getbanyan.dev/getting-started/installation/)
+- [Quickstart](https://getbanyan.dev/getting-started/quickstart/)
+- [Manifest Reference](https://getbanyan.dev/guides/manifest-reference/)
+- [Multi-Node Setup](https://getbanyan.dev/guides/multi-node/)
+- [CLI Reference](https://getbanyan.dev/reference/cli/)
+- [Troubleshooting](https://getbanyan.dev/reference/troubleshooting/)
+
 ## Install
 
 ```bash
@@ -153,36 +183,6 @@ graph TD
 ```
 
 **CLI** sends commands to the **Engine** (control plane), which stores state in **etcd** and schedules work across **Agents** (workers). All communication over gRPC with password auth. Metrics are exposed in Prometheus format for monitoring.
-
-## Features
-
-- **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
-- **Single-binary components** — Three small, focused binaries. Download, run, done. No complex setup or configuration management required.
-- **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
-- **Automatic distribution** — Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
-- **Built-in VPC** — Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
-- **Proven foundations** — Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
-
-## Is Banyan right for you?
-
-Banyan is built for teams who:
-
-- **Know Docker Compose** and want the same simplicity across multiple servers
-- **Need to scale beyond one machine** without learning Kubernetes
-- **Value shipping software** over operating infrastructure
-
-Banyan bridges the gap between "docker compose up" and production orchestration — same syntax, distributed execution.
-
-## Documentation
-
-Full documentation is available at **[getbanyan.dev](https://getbanyan.dev/)**.
-
-- [Installation](https://getbanyan.dev/getting-started/installation/)
-- [Quickstart](https://getbanyan.dev/getting-started/quickstart/)
-- [Manifest Reference](https://getbanyan.dev/guides/manifest-reference/)
-- [Multi-Node Setup](https://getbanyan.dev/guides/multi-node/)
-- [CLI Reference](https://getbanyan.dev/reference/cli/)
-- [Troubleshooting](https://getbanyan.dev/reference/troubleshooting/)
 
 ## Roadmap
 

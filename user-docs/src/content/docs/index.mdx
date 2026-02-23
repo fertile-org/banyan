@@ -78,6 +78,38 @@ services:
 
 Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and `deploy.replicas`, and Banyan spreads them across your servers automatically.
 
+
+<CardGrid>
+  <Card title="Familiar syntax" icon="document">
+    If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
+  </Card>
+  <Card title="Single-binary components" icon="setting">
+    Three small, focused binaries. Download, run, done. No complex setup or configuration management required.
+  </Card>
+  <Card title="Built-in image registry" icon="star">
+    No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
+  </Card>
+  <Card title="Automatic distribution" icon="rocket">
+    Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
+  </Card>
+  <Card title="Built-in VPC" icon="shield">
+    Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
+  </Card>
+  <Card title="Proven foundations" icon="approve-check">
+    Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
+  </Card>
+</CardGrid>
+
+## Is Banyan right for you?
+
+**Banyan is built for teams who:**
+
+- **Know Docker Compose** and want the same simplicity across multiple servers
+- **Need to scale beyond one machine** without learning Kubernetes
+- **Value shipping software** over operating infrastructure
+
+Banyan bridges the gap between "docker compose up" and production orchestration — same syntax, distributed execution.
+
 ## Three commands to a running cluster
 
 ```bash
@@ -137,34 +169,3 @@ graph TD
 ```
 
 **CLI** sends commands to the **Engine** (control plane), which stores state in **etcd** and schedules work across **Agents** (workers). All communication over gRPC with password auth. Metrics are exposed in Prometheus format for monitoring.
-
-<CardGrid>
-  <Card title="Familiar syntax" icon="document">
-    If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
-  </Card>
-  <Card title="Single-binary components" icon="setting">
-    Three small, focused binaries. Download, run, done. No complex setup or configuration management required.
-  </Card>
-  <Card title="Built-in image registry" icon="star">
-    No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
-  </Card>
-  <Card title="Automatic distribution" icon="rocket">
-    Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
-  </Card>
-  <Card title="Built-in VPC" icon="shield">
-    Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
-  </Card>
-  <Card title="Proven foundations" icon="approve-check">
-    Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
-  </Card>
-</CardGrid>
-
-## Is Banyan right for you?
-
-**Banyan is built for teams who:**
-
-- **Know Docker Compose** and want the same simplicity across multiple servers
-- **Need to scale beyond one machine** without learning Kubernetes
-- **Value shipping software** over operating infrastructure
-
-Banyan bridges the gap between "docker compose up" and production orchestration — same syntax, distributed execution.

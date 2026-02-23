@@ -107,6 +107,53 @@ func TestRunDown_NoServicesFound(t *testing.T) {
 	}
 }
 
+func TestFindLatestDeployment(t *testing.T) {
+	t.Run("returns most recent by CreatedAtUnix", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "old", Name: "my-app", Status: "failed", CreatedAtUnix: 1000},
+			{Id: "new", Name: "my-app", Status: "stopping", CreatedAtUnix: 2000},
+		}
+		d := findLatestDeployment(deployments, "my-app")
+		if d == nil {
+			t.Fatal("expected non-nil deployment")
+		}
+		if d.Id != "new" {
+			t.Errorf("expected newest deployment, got %s", d.Id)
+		}
+	})
+
+	t.Run("filters by name", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "other", Name: "other-app", Status: "failed", CreatedAtUnix: 3000},
+			{Id: "mine", Name: "my-app", Status: "stopping", CreatedAtUnix: 1000},
+		}
+		d := findLatestDeployment(deployments, "my-app")
+		if d == nil {
+			t.Fatal("expected non-nil deployment")
+		}
+		if d.Id != "mine" {
+			t.Errorf("expected my-app deployment, got %s", d.Id)
+		}
+	})
+
+	t.Run("returns nil when no match", func(t *testing.T) {
+		deployments := []*banyanpb.DeploymentInfo{
+			{Id: "other", Name: "other-app", Status: "running", CreatedAtUnix: 1000},
+		}
+		d := findLatestDeployment(deployments, "my-app")
+		if d != nil {
+			t.Errorf("expected nil, got %v", d)
+		}
+	})
+
+	t.Run("returns nil for empty list", func(t *testing.T) {
+		d := findLatestDeployment(nil, "my-app")
+		if d != nil {
+			t.Errorf("expected nil, got %v", d)
+		}
+	})
+}
+
 func TestRunDown_FromManifestFile(t *testing.T) {
 	addr, cleanup := setupCLITestTCPServer(t)
 	defer cleanup()

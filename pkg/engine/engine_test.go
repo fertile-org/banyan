@@ -375,6 +375,35 @@ func TestCheckStoppingDeployment(t *testing.T) {
 		}
 	})
 
+	t.Run("clears stale error on success", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1-stop", &types.TaskRecord{
+			ID: "task-1-stop", DeploymentID: "deploy-1", AgentID: "agent-1",
+			Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		})
+
+		// Deployment has a stale error from a prior deploy phase
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "myapp", Status: types.StatusStopping,
+			Error: "1/5 tasks failed: failed to start container: name-store error",
+		}
+		store.Save(ctx, types.KeyDeployments+"deploy-1", deployment)
+
+		eng.checkStoppingDeployment(ctx, deployment)
+
+		var updated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"deploy-1", &updated)
+		if updated.Status != types.StatusStopped {
+			t.Errorf("expected stopped, got %s", updated.Status)
+		}
+		if updated.Error != "" {
+			t.Errorf("expected error to be cleared, got %q", updated.Error)
+		}
+	})
+
 	t.Run("any stop task failed sets failed", func(t *testing.T) {
 		store := storage.NewMemoryStore()
 		eng := &Engine{store: store}

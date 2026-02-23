@@ -206,4 +206,4 @@ Apache License 2.0. See [LICENSE](./LICENSE) for details.
 
 ---
 
-<img src="website/public/shipping-banner.png" alt="Banyan — containers distributed across servers" width="100%">
+<img src="website/public/shipping-banner-transparent.png" alt="Banyan — containers distributed across servers" width="100%">

@@ -101,6 +101,33 @@ func SortedServiceNames(grouped map[string][]TaskRecord) []string {
 	return names
 }
 
+// ValidateServiceDependencies checks that every target service has its depends_on
+// entries satisfied — either already running or being deployed in this batch.
+func ValidateServiceDependencies(targetServices []string, allServices map[string]ServiceRecord, runningServiceNames []string) error {
+	targetSet := make(map[string]bool, len(targetServices))
+	for _, name := range targetServices {
+		targetSet[name] = true
+	}
+
+	runningSet := make(map[string]bool, len(runningServiceNames))
+	for _, name := range runningServiceNames {
+		runningSet[name] = true
+	}
+
+	for _, svcName := range targetServices {
+		svc, ok := allServices[svcName]
+		if !ok {
+			continue
+		}
+		for _, dep := range svc.DependsOn {
+			if !targetSet[dep] && !runningSet[dep] {
+				return fmt.Errorf("service %q depends on %q which is not running and not being deployed", svcName, dep)
+			}
+		}
+	}
+	return nil
+}
+
 // CollectDeploymentTasks gathers all tasks for a given deployment across all agents.
 func CollectDeploymentTasks(ctx context.Context, store StateStore, deploymentID string) []TaskRecord {
 	nodeKeys, err := store.List(ctx, KeyNodes)

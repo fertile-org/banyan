@@ -28,13 +28,16 @@ var (
 )
 
 var deployCmd = &cobra.Command{
-	Use:     "up",
+	Use:     "up [services...]",
 	Aliases: []string{"deploy"},
 	Short:   "Deploy applications from banyan.yaml",
 	Long: `Deploy applications to Banyan using a banyan.yaml manifest.
 
 If the application is already running, it will be stopped and redeployed
 automatically (idempotent). Old containers are removed before new ones start.
+
+Optionally specify service names to deploy only those services:
+  banyan-cli up -f banyan.yaml web api
 
 Example banyan.yaml:
   name: my-app
@@ -52,7 +55,9 @@ Example banyan.yaml:
 
 Usage:
   banyan-cli up --file banyan.yaml
+  banyan-cli up --file banyan.yaml web
   banyan-cli up --file banyan.yaml --dry-run`,
+	Args: cobra.ArbitraryArgs,
 	RunE: runDeploy,
 }
 
@@ -62,6 +67,16 @@ func init() {
 	deployCmd.Flags().StringVarP(&deployFile, "file", "f", "banyan.yaml", "Path to banyan.yaml manifest")
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Validate manifest without deploying")
 	deployCmd.Flags().BoolVar(&deployNoWait, "no-wait", false, "Don't wait for deployment to complete")
+}
+
+// validateServiceArgs checks that all requested service names exist in the manifest.
+func validateServiceArgs(args []string, services map[string]types.ManifestService) error {
+	for _, name := range args {
+		if _, ok := services[name]; !ok {
+			return fmt.Errorf("service %q not found in manifest", name)
+		}
+	}
+	return nil
 }
 
 // validateManifest checks that a manifest has a name, services, and each service has an image or build config.
@@ -109,6 +124,13 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	err = validateManifest(manifest)
 	if err != nil {
 		return err
+	}
+
+	// Validate per-service args if provided
+	if len(args) > 0 {
+		if validateErr := validateServiceArgs(args, manifest.Services); validateErr != nil {
+			return validateErr
+		}
 	}
 
 	// Build images for services with build config
@@ -165,7 +187,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 
 	// Deploy via engine gRPC
 	fmt.Printf("\nConnecting to Engine at %s...\n", engineAddr)
-	resp, err := client.Deploy(ctx, manifest)
+	resp, err := client.Deploy(ctx, manifest, args)
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %w", err)
 	}

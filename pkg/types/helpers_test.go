@@ -320,6 +320,60 @@ func (m *helperStateStore) List(_ context.Context, prefix string) ([]string, err
 	return keys, nil
 }
 
+func TestValidateServiceDependencies(t *testing.T) {
+	allServices := map[string]ServiceRecord{
+		"web": {Image: "nginx", DependsOn: []string{"api", "db"}},
+		"api": {Image: "myapi", DependsOn: []string{"db"}},
+		"db":  {Image: "postgres"},
+	}
+
+	t.Run("deps satisfied by running services", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web"}, allServices, []string{"api", "db"})
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("deps satisfied by target set", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web", "api", "db"}, allServices, nil)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("deps satisfied by mix of running and target", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web", "api"}, allServices, []string{"db"})
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("unsatisfied dependency returns error", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"web"}, allServices, []string{"api"})
+		if err == nil {
+			t.Fatal("expected error for unsatisfied dependency")
+		}
+		expected := `service "web" depends on "db" which is not running and not being deployed`
+		if err.Error() != expected {
+			t.Errorf("expected error %q, got %q", expected, err.Error())
+		}
+	})
+
+	t.Run("service with no deps always passes", func(t *testing.T) {
+		err := ValidateServiceDependencies([]string{"db"}, allServices, nil)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("empty target list passes", func(t *testing.T) {
+		err := ValidateServiceDependencies(nil, allServices, nil)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+}
+
 func TestCollectDeploymentTasks(t *testing.T) {
 	t.Run("collects tasks across multiple agents", func(t *testing.T) {
 		store := &helperStateStore{data: map[string]any{}}

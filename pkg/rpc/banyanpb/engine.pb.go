@@ -740,6 +740,7 @@ func (x *TaskRecord) GetCommand() []string {
 type DeployRPCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Manifest      *Manifest              `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
+	Services      []string               `protobuf:"bytes,2,rep,name=services,proto3" json:"services,omitempty"` // optional: deploy only these services
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -777,6 +778,13 @@ func (*DeployRPCRequest) Descriptor() ([]byte, []int) {
 func (x *DeployRPCRequest) GetManifest() *Manifest {
 	if x != nil {
 		return x.Manifest
+	}
+	return nil
+}
+
+func (x *DeployRPCRequest) GetServices() []string {
+	if x != nil {
+		return x.Services
 	}
 	return nil
 }
@@ -2131,9 +2139,10 @@ const file_engine_proto_rawDesc = "" +
 	"\x05ports\x18\n" +
 	" \x03(\tR\x05ports\x12 \n" +
 	"\venvironment\x18\v \x03(\tR\venvironment\x12\x18\n" +
-	"\acommand\x18\f \x03(\tR\acommand\"C\n" +
+	"\acommand\x18\f \x03(\tR\acommand\"_\n" +
 	"\x10DeployRPCRequest\x12/\n" +
-	"\bmanifest\x18\x01 \x01(\v2\x13.banyan.v1.ManifestR\bmanifest\"P\n" +
+	"\bmanifest\x18\x01 \x01(\v2\x13.banyan.v1.ManifestR\bmanifest\x12\x1a\n" +
+	"\bservices\x18\x02 \x03(\tR\bservices\"P\n" +
 	"\x11DeployRPCResponse\x12#\n" +
 	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\"\xd0\x01\n" +

@@ -3063,3 +3063,349 @@ func TestGetLogs_SuccessProxyWithFollow(t *testing.T) {
 		t.Errorf("expected log data %q, got %q", expected, string(received))
 	}
 }
+
+// --- Per-service deploy helper tests ---
+
+func TestFindRunningDeploymentByName(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns most recent running deployment", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"old", &types.DeploymentRecord{
+			ID: "old", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now().Add(-1 * time.Hour),
+		})
+		store.Save(ctx, types.KeyDeployments+"new", &types.DeploymentRecord{
+			ID: "new", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
+		})
+
+		deploy, _, err := srv.findRunningDeploymentByName(ctx, "app")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deploy.ID != "new" {
+			t.Errorf("expected 'new', got %q", deploy.ID)
+		}
+	})
+
+	t.Run("skips non-running deployments", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"stopped", &types.DeploymentRecord{
+			ID: "stopped", Name: "app", Status: types.StatusStopped, CreatedAt: time.Now(),
+		})
+
+		_, _, err := srv.findRunningDeploymentByName(ctx, "app")
+		if err == nil {
+			t.Fatal("expected error when no running deployment exists")
+		}
+	})
+
+	t.Run("returns error for unknown name", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		_, _, err := srv.findRunningDeploymentByName(ctx, "nonexistent")
+		if err == nil {
+			t.Fatal("expected error for unknown name")
+		}
+	})
+}
+
+func TestGetRunningServiceNames(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("collects running service names", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-2", &types.TaskRecord{
+			ID: "task-2", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "api", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+		// Pending task should not be included
+		store.Save(ctx, types.KeyTasks+"agent-1/task-3", &types.TaskRecord{
+			ID: "task-3", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "db", Type: types.TaskTypeCreateAndStart, Status: types.StatusPending,
+		})
+
+		names := srv.getRunningServiceNames(ctx, "deploy-1")
+		nameSet := make(map[string]bool)
+		for _, n := range names {
+			nameSet[n] = true
+		}
+		if !nameSet["web"] || !nameSet["api"] {
+			t.Errorf("expected web and api, got %v", names)
+		}
+		if nameSet["db"] {
+			t.Errorf("db should not be included (pending), got %v", names)
+		}
+	})
+
+	t.Run("returns empty for no tasks", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		names := srv.getRunningServiceNames(ctx, "deploy-1")
+		if len(names) != 0 {
+			t.Errorf("expected 0 names, got %d", len(names))
+		}
+	})
+}
+
+func TestTeardownDeploymentServices(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("creates stop tasks for target services only", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+			ID: "task-web", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-web-0",
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-api", &types.TaskRecord{
+			ID: "task-api", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "api", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-api-0",
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-db", &types.TaskRecord{
+			ID: "task-db", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "db", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-db-0",
+		})
+
+		srv.teardownDeploymentServices(ctx, "deploy-1", []string{"web", "api"})
+
+		// Stop tasks should exist for web and api only
+		var webStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &webStop); err != nil {
+			t.Fatalf("expected web stop task: %v", err)
+		}
+		if webStop.Type != types.TaskTypeStopAndRemove {
+			t.Errorf("expected stop_and_remove, got %s", webStop.Type)
+		}
+
+		var apiStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-api-stop", &apiStop); err != nil {
+			t.Fatalf("expected api stop task: %v", err)
+		}
+
+		// No stop task for db
+		var dbStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-db-stop", &dbStop); err == nil {
+			t.Error("expected no stop task for db")
+		}
+	})
+
+	t.Run("skips non-completed tasks", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+			ID: "task-web", DeploymentID: "deploy-1", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusPending,
+			ContainerName: "app-web-0",
+		})
+
+		srv.teardownDeploymentServices(ctx, "deploy-1", []string{"web"})
+
+		// No stop task should be created for a pending task
+		var stopTask types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &stopTask); err == nil {
+			t.Error("expected no stop task for pending create task")
+		}
+	})
+}
+
+func TestTeardownNonRunningDeployments(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("tears down pending and failed, leaves running", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"running", &types.DeploymentRecord{
+			ID: "running", Name: "app", Status: types.StatusRunning,
+		})
+		store.Save(ctx, types.KeyDeployments+"pending", &types.DeploymentRecord{
+			ID: "pending", Name: "app", Status: types.StatusPending,
+		})
+		store.Save(ctx, types.KeyDeployments+"failed", &types.DeploymentRecord{
+			ID: "failed", Name: "app", Status: types.StatusFailed,
+		})
+
+		srv.teardownNonRunningDeployments(ctx, "app")
+
+		// Running should remain
+		var running types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"running", &running)
+		if running.Status != types.StatusRunning {
+			t.Errorf("expected running unchanged, got %s", running.Status)
+		}
+
+		// Pending and failed should be stopped
+		var pending types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"pending", &pending)
+		if pending.Status != types.StatusStopped {
+			t.Errorf("expected pending -> stopped, got %s", pending.Status)
+		}
+
+		var failed types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"failed", &failed)
+		if failed.Status != types.StatusStopped {
+			t.Errorf("expected failed -> stopped, got %s", failed.Status)
+		}
+	})
+
+	t.Run("ignores other app names", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"other", &types.DeploymentRecord{
+			ID: "other", Name: "other-app", Status: types.StatusPending,
+		})
+
+		srv.teardownNonRunningDeployments(ctx, "app")
+
+		var other types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"other", &other)
+		if other.Status != types.StatusPending {
+			t.Errorf("expected pending unchanged, got %s", other.Status)
+		}
+	})
+}
+
+func TestDeployServices(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("creates recreate deployment for target services", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		// Existing running deployment with web, api, db
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+			ID: "task-web", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-web-0",
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-api", &types.TaskRecord{
+			ID: "task-api", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "api", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-api-0",
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-db", &types.TaskRecord{
+			ID: "task-db", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "db", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-db-0",
+		})
+
+		allServices := map[string]types.ServiceRecord{
+			"web": {Image: "nginx:v2", Replicas: 1, DependsOn: []string{"api"}},
+			"api": {Image: "myapi:v2", Replicas: 1, DependsOn: []string{"db"}},
+			"db":  {Image: "postgres:15", Replicas: 1},
+		}
+
+		// Deploy only "web" — its dep "api" is already running
+		resp, err := srv.deployServices(ctx, "app", allServices, []string{"web"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if resp.Status != types.StatusPending {
+			t.Errorf("expected pending, got %s", resp.Status)
+		}
+
+		// Verify new deployment has recreate strategy
+		var newDeploy types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+resp.DeploymentId, &newDeploy)
+		if newDeploy.UpdateStrategy != types.UpdateStrategyRecreate {
+			t.Errorf("expected recreate strategy, got %s", newDeploy.UpdateStrategy)
+		}
+		if newDeploy.ReplacesID != "old-deploy" {
+			t.Errorf("expected replaces_id 'old-deploy', got %s", newDeploy.ReplacesID)
+		}
+
+		// Only "web" service in new deployment
+		if len(newDeploy.Services) != 1 {
+			t.Errorf("expected 1 service, got %d", len(newDeploy.Services))
+		}
+		if _, ok := newDeploy.Services["web"]; !ok {
+			t.Error("expected 'web' service in new deployment")
+		}
+
+		// Stop task should exist for web in old deployment
+		var webStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &webStop); err != nil {
+			t.Fatalf("expected web stop task: %v", err)
+		}
+	})
+
+	t.Run("rejects unknown service name", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		allServices := map[string]types.ServiceRecord{
+			"web": {Image: "nginx", Replicas: 1},
+		}
+
+		_, err := srv.deployServices(ctx, "app", allServices, []string{"nonexistent"})
+		if err == nil {
+			t.Fatal("expected error for unknown service")
+		}
+	})
+
+	t.Run("rejects when no running deployment exists", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		allServices := map[string]types.ServiceRecord{
+			"web": {Image: "nginx", Replicas: 1},
+		}
+
+		_, err := srv.deployServices(ctx, "app", allServices, []string{"web"})
+		if err == nil {
+			t.Fatal("expected error when no running deployment exists")
+		}
+	})
+
+	t.Run("rejects unsatisfied dependencies", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		// Running deployment with only web (no db)
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+			ID: "task-web", DeploymentID: "old-deploy", AgentID: "agent-1",
+			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+
+		allServices := map[string]types.ServiceRecord{
+			"api": {Image: "myapi", Replicas: 1, DependsOn: []string{"db"}},
+			"web": {Image: "nginx", Replicas: 1},
+			"db":  {Image: "postgres", Replicas: 1},
+		}
+
+		// Deploy "api" which depends on "db", but "db" is not running
+		_, err := srv.deployServices(ctx, "app", allServices, []string{"api"})
+		if err == nil {
+			t.Fatal("expected error for unsatisfied dependency")
+		}
+	})
+}

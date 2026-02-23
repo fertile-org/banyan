@@ -337,7 +337,7 @@ func TestEngineClient_Deploy(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Deploy(context.Background(), manifest)
+	resp, err := client.Deploy(context.Background(), manifest, nil)
 	if err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}

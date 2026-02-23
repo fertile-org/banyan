@@ -65,6 +65,39 @@ func TestValidateManifest(t *testing.T) {
 	})
 }
 
+func TestValidateServiceArgs(t *testing.T) {
+	services := map[string]types.ManifestService{
+		"web": {Image: "nginx"},
+		"api": {Image: "node"},
+		"db":  {Image: "postgres"},
+	}
+
+	t.Run("valid service names", func(t *testing.T) {
+		err := validateServiceArgs([]string{"web", "api"}, services)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("unknown service name", func(t *testing.T) {
+		err := validateServiceArgs([]string{"web", "redis"}, services)
+		if err == nil {
+			t.Fatal("expected error for unknown service")
+		}
+		expected := `service "redis" not found in manifest`
+		if err.Error() != expected {
+			t.Errorf("expected %q, got %q", expected, err.Error())
+		}
+	})
+
+	t.Run("empty args passes", func(t *testing.T) {
+		err := validateServiceArgs(nil, services)
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+}
+
 func TestBuildImageArgs(t *testing.T) {
 	t.Run("without dockerfile", func(t *testing.T) {
 		args := buildImageArgs("my-app:latest", "./web", "")

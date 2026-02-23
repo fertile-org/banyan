@@ -254,9 +254,14 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 
 	// Convert proto manifest to types
 	manifest := protoToManifest(req.Manifest)
-	services := types.BuildServiceRecords(manifest.Services)
+	allServices := types.BuildServiceRecords(manifest.Services)
 
-	// Blue-green: teardown non-running deployments, get running deployment ID for replacement
+	// Per-service deploy path
+	if len(req.Services) > 0 {
+		return s.deployServices(ctx, manifest.Name, allServices, req.Services)
+	}
+
+	// Full deploy path (blue-green)
 	replacesID := s.prepareForRedeploy(ctx, manifest.Name)
 
 	deploymentID := fmt.Sprintf("%s-%d", manifest.Name, time.Now().Unix())
@@ -264,7 +269,7 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 		ID:        deploymentID,
 		Name:      manifest.Name,
 		Status:    types.StatusPending,
-		Services:  services,
+		Services:  allServices,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
@@ -652,6 +657,179 @@ func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string) 
 	}
 
 	return replacesID
+}
+
+// --- Per-service deploy ---
+
+// deployServices handles per-service redeployment using the recreate strategy.
+func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, allServices map[string]types.ServiceRecord, serviceNames []string) (*banyanpb.DeployRPCResponse, error) {
+	// Validate service names exist
+	for _, name := range serviceNames {
+		if _, ok := allServices[name]; !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q not found in manifest", name)
+		}
+	}
+
+	// Find running deployment for this app
+	runningDeploy, _, err := s.findRunningDeploymentByName(ctx, appName)
+	if err != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "no running deployment found for %q: %v", appName, err)
+	}
+
+	// Get running service names from existing deployment
+	runningNames := s.getRunningServiceNames(ctx, runningDeploy.ID)
+
+	// Validate depends_on: target services' deps must be running or being deployed
+	if depErr := types.ValidateServiceDependencies(serviceNames, allServices, runningNames); depErr != nil {
+		return nil, status.Errorf(codes.FailedPrecondition, "%v", depErr)
+	}
+
+	// Clean up non-running deployments (pending/deploying/failed)
+	s.teardownNonRunningDeployments(ctx, appName)
+
+	// Create stop tasks for target services in the running deployment
+	s.teardownDeploymentServices(ctx, runningDeploy.ID, serviceNames)
+
+	// Filter services to only the target ones
+	filteredServices := make(map[string]types.ServiceRecord, len(serviceNames))
+	for _, name := range serviceNames {
+		filteredServices[name] = allServices[name]
+	}
+
+	// Create new deployment with recreate strategy
+	deploymentID := fmt.Sprintf("%s-%d", appName, time.Now().Unix())
+	record := &types.DeploymentRecord{
+		ID:             deploymentID,
+		Name:           appName,
+		Status:         types.StatusPending,
+		Services:       filteredServices,
+		CreatedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+		UpdateStrategy: types.UpdateStrategyRecreate,
+		ReplacesID:     runningDeploy.ID,
+	}
+
+	if err := s.store.Save(ctx, types.KeyDeployments+deploymentID, record); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create deployment: %v", err)
+	}
+
+	return &banyanpb.DeployRPCResponse{
+		DeploymentId: deploymentID,
+		Status:       types.StatusPending,
+	}, nil
+}
+
+// findRunningDeploymentByName returns the most recent Running deployment by name.
+func (s *engineGRPCServer) findRunningDeploymentByName(ctx context.Context, name string) (*types.DeploymentRecord, string, error) {
+	keys, err := s.store.List(ctx, types.KeyDeployments)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to list deployments: %w", err)
+	}
+
+	var best *types.DeploymentRecord
+	var bestKey string
+	for _, key := range keys {
+		var record types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		if record.Name != name || record.Status != types.StatusRunning {
+			continue
+		}
+		if best == nil || record.CreatedAt.After(best.CreatedAt) {
+			r := record
+			best = &r
+			bestKey = key
+		}
+	}
+
+	if best == nil {
+		return nil, "", fmt.Errorf("no running deployment found with name %q", name)
+	}
+	return best, bestKey, nil
+}
+
+// getRunningServiceNames returns the names of services that have completed create_and_start tasks
+// for the given deployment.
+func (s *engineGRPCServer) getRunningServiceNames(ctx context.Context, deploymentID string) []string {
+	tasks := types.CollectDeploymentTasks(ctx, s.store, deploymentID)
+
+	nameSet := make(map[string]bool)
+	for i := range tasks {
+		if tasks[i].Type == types.TaskTypeCreateAndStart && tasks[i].Status == types.StatusCompleted {
+			nameSet[tasks[i].ServiceName] = true
+		}
+	}
+
+	names := make([]string, 0, len(nameSet))
+	for name := range nameSet {
+		names = append(names, name)
+	}
+	return names
+}
+
+// teardownDeploymentServices creates stop_and_remove tasks for specific services
+// within a deployment. It does NOT change the deployment status.
+func (s *engineGRPCServer) teardownDeploymentServices(ctx context.Context, deploymentID string, serviceNames []string) {
+	serviceSet := make(map[string]bool, len(serviceNames))
+	for _, name := range serviceNames {
+		serviceSet[name] = true
+	}
+
+	tasks := types.CollectDeploymentTasks(ctx, s.store, deploymentID)
+
+	now := time.Now()
+	for i := range tasks {
+		if tasks[i].Type != types.TaskTypeCreateAndStart || tasks[i].Status != types.StatusCompleted {
+			continue
+		}
+		if !serviceSet[tasks[i].ServiceName] {
+			continue
+		}
+
+		stopTask := &types.TaskRecord{
+			ID:            tasks[i].ID + "-stop",
+			DeploymentID:  tasks[i].DeploymentID,
+			ServiceName:   tasks[i].ServiceName,
+			AgentID:       tasks[i].AgentID,
+			Type:          types.TaskTypeStopAndRemove,
+			Status:        types.StatusPending,
+			ContainerName: tasks[i].ContainerName,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		taskKey := types.KeyTasks + tasks[i].AgentID + "/" + stopTask.ID
+		if err := s.store.Save(ctx, taskKey, stopTask); err != nil {
+			log.Printf("WARNING: failed to create stop task for service %s: %v", tasks[i].ServiceName, err)
+		}
+	}
+}
+
+// teardownNonRunningDeployments tears down all non-running active deployments (pending/deploying/failed)
+// with the given name.
+func (s *engineGRPCServer) teardownNonRunningDeployments(ctx context.Context, name string) {
+	keys, err := s.store.List(ctx, types.KeyDeployments)
+	if err != nil {
+		return
+	}
+
+	for _, key := range keys {
+		var record types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		if record.Name != name {
+			continue
+		}
+		if record.Status == types.StatusRunning || record.Status == types.StatusStopped || record.Status == types.StatusStopping {
+			continue
+		}
+		// Pending/deploying/failed: teardown immediately
+		r := record
+		if _, teardownErr := teardownDeployment(ctx, s.store, &r, key); teardownErr != nil {
+			log.Printf("WARNING: failed to teardown deployment %s: %v", record.ID, teardownErr)
+		}
+	}
 }
 
 // --- Helper functions ---

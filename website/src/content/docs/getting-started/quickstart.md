@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Deploy containers across a Banyan cluster in under 5 minutes.
+description: Deploy containers across a Banyan cluster.
 sidebar:
   order: 2
 ---
@@ -9,7 +9,7 @@ Deploy your first application on Banyan. This guide runs everything on a single 
 
 Haven't installed yet? Start with [Installation](/getting-started/installation/).
 
-## 1. Start the Engine (~1 minute)
+## 1. Start the Engine
 
 ```bash
 sudo banyan-engine init
@@ -22,7 +22,7 @@ The init wizard asks for:
 
 The Engine runs in the foreground. Open a new terminal for the next steps.
 
-## 2. Start an Agent (~1 minute)
+## 2. Start an Agent
 
 In a second terminal:
 
@@ -39,7 +39,7 @@ The init wizard asks for:
 
 The agent connects to the engine, exchanges the password for an auth token, and registers itself. The password is never stored on the agent.
 
-## 3. Configure the CLI (~30 seconds)
+## 3. Configure the CLI
 
 In a third terminal:
 
@@ -68,7 +68,7 @@ Deployments: 0
 
 One engine, one agent, ready to deploy.
 
-## 4. Write a manifest (~1 minute)
+## 4. Write a manifest
 
 Create a file called `banyan.yaml`:
 
@@ -93,7 +93,7 @@ If you've written a `docker-compose.yml`, this looks familiar. Same `services`, 
 Want to deploy your own code? Use `build: ./your-app` instead of `image:` — Banyan builds the Dockerfile, pushes to its built-in registry, and distributes the image to all workers. See [Manifest Reference](/reference/manifest/#build-from-source).
 :::
 
-## 5. Deploy (~1 minute)
+## 5. Deploy
 
 ```bash
 banyan-cli up -f banyan.yaml

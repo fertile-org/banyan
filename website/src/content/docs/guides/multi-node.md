@@ -35,7 +35,7 @@ Install the appropriate binaries on each server. See [Installation](/getting-sta
 - **Worker nodes**: `banyan-agent`, containerd, nerdctl
 - **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 
-## 1. Start the Engine (~2 minutes)
+## 1. Start the Engine
 
 On your Engine server (e.g., `192.168.1.10`):
 
@@ -77,7 +77,7 @@ Deployments: 0
 ========================================
 ```
 
-## 2. Add Workers (~1 minute per worker)
+## 2. Add Workers
 
 On Worker 1 (`192.168.1.11`):
 
@@ -103,7 +103,7 @@ sudo banyan-agent start --node-name worker-2
 
 Each Agent connects to the Engine via gRPC, registers, and starts a heartbeat.
 
-## 3. Verify the cluster (~30 seconds)
+## 3. Verify the cluster
 
 ```bash
 banyan-cli status

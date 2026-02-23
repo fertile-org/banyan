@@ -1,11 +1,11 @@
 ---
-title: Multi-Node Setup
-description: Deploy containers across multiple servers.
+title: Deploy Across Multiple Servers
+description: Scale from one server to many — your manifest doesn't change.
 sidebar:
   order: 2
 ---
 
-This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you just have more servers running Agents.
+This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you add more servers, and Banyan distributes your containers across them.
 
 ## Architecture
 
@@ -35,7 +35,7 @@ Install the appropriate binaries on each server. See [Installation](/getting-sta
 - **Worker nodes**: `banyan-agent`, containerd, nerdctl
 - **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 
-## 1. Start the Engine
+## 1. Start the Engine (~2 minutes)
 
 On your Engine server (e.g., `192.168.1.10`):
 
@@ -48,18 +48,36 @@ The init wizard asks for:
 - **Cluster password** — used to authenticate agents and CLI clients. Stored as a bcrypt hash (never in plain text).
 - **Etcd setup** — choose **Managed** (recommended) or **External** if you have your own etcd cluster.
 
-The Engine starts a gRPC server on port 50051 by default. Verify from another machine:
+The Engine starts a gRPC server on port 50051 by default.
+
+Configure the CLI to connect to the engine (run this on your deploy machine):
 
 ```bash
-# On the deploy machine, configure the CLI to point at the engine
 sudo banyan-cli init
-# The wizard asks for: engine host, gRPC port, and cluster password
-# It connects to the engine, exchanges the password for a token, and saves the token locally
+# Enter: engine host, gRPC port, and cluster password
+# The CLI exchanges the password for an auth token — the password is never saved
+```
 
+Verify the connection:
+
+```bash
 banyan-cli status
 ```
 
-## 2. Start the Agents
+```
+Banyan Cluster - Status
+========================================
+Engine: RUNNING
+Connection: 192.168.1.10:50051
+
+Agents: 0
+
+Deployments: 0
+
+========================================
+```
+
+## 2. Add Workers (~1 minute per worker)
 
 On Worker 1 (`192.168.1.11`):
 
@@ -69,7 +87,7 @@ sudo banyan-agent start --node-name worker-1
 ```
 
 The init wizard asks for:
-- **Engine host** — IP or hostname of the engine server (e.g. `192.168.1.10`).
+- **Engine host** — IP or hostname of the engine server (e.g., `192.168.1.10`).
 - **Engine gRPC port** — default `50051`.
 - **Node name** — unique name for this worker (default: hostname).
 - **Cluster password** — must match the engine password.
@@ -85,7 +103,7 @@ sudo banyan-agent start --node-name worker-2
 
 Each Agent connects to the Engine via gRPC, registers, and starts a heartbeat.
 
-## 3. Verify the cluster
+## 3. Verify the cluster (~30 seconds)
 
 ```bash
 banyan-cli status
@@ -147,7 +165,7 @@ services:
 banyan-cli up -f banyan.yaml
 ```
 
-The CLI connects to the Engine using the host and port configured during `banyan-cli init`. Banyan distributes 5 containers across 2 workers using round-robin:
+Banyan distributes 5 containers across 2 workers using round-robin:
 
 | Worker 1 | Worker 2 |
 |----------|----------|
@@ -155,9 +173,17 @@ The CLI connects to the Engine using the host and port configured during `banyan
 | my-app-api-1 | my-app-api-2 |
 | my-app-db-0 | |
 
+**The manifest didn't change.** You went from one server to two — same YAML, more capacity.
+
 ## 5. Check containers on workers
 
-SSH into each worker and list running containers:
+From the CLI:
+
+```bash
+banyan-cli status
+```
+
+Or SSH into a worker and list running containers directly:
 
 ```bash
 sudo nerdctl ps
@@ -168,21 +194,23 @@ sudo nerdctl ps
 You don't need to run `up` from the Engine node. Any machine with `banyan-cli` can deploy as long as it can reach the Engine's gRPC port:
 
 ```bash
-# First configure the CLI (run once — the engine must be running)
+# Configure once (the engine must be running)
 sudo banyan-cli init
 # Enter the engine host, port, and password — receives an auth token
 
-# Then deploy
+# Deploy from anywhere
 banyan-cli up -f banyan.yaml
 ```
 
 ## Adding more workers
 
 1. Install `banyan-agent`, containerd, and nerdctl on the new server.
-2. Run `sudo banyan-agent init` (enter engine host, port, node name, and password — the engine must be running)
-3. Run `sudo banyan-agent start`
+2. Run `sudo banyan-agent init` (enter engine host, port, node name, and password — the engine must be running).
+3. Run `sudo banyan-agent start`.
 
 The new worker appears in `banyan-cli status` within seconds. Future deployments include it automatically.
+
+That's the point — **scaling is adding a server, not editing a manifest.**
 
 ## Firewall requirements
 

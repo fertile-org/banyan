@@ -353,11 +353,13 @@ Before documenting any feature, verify its implementation status:
 | Authentication (password + token) | Done | Document fully |
 | Built-in image registry | Done | Document fully |
 | VPC networking | Done | Document fully |
-| Prometheus metrics | Planned (M4) | Mention on roadmap only |
-| CLI terminal dashboard | Planned (M4) | Mention on roadmap only |
-| Resource-aware scheduling | Planned (M5) | Mention on roadmap only |
-| Multi-engine HA | Planned (M6) | Don't document |
-| Auto-scaling | Planned (M7) | Don't document |
+| Blue-green redeployment | Done | Document fully |
+| Per-service deployment | Done | Document fully |
+| Prometheus metrics | Planned (M5) | Mention on roadmap only |
+| CLI terminal dashboard | Planned (M5) | Mention on roadmap only |
+| Resource-aware scheduling | Planned (M6) | Mention on roadmap only |
+| Multi-engine HA | Planned (M7) | Don't document |
+| Auto-scaling | Planned (M8) | Don't document |
 | Volumes | Not planned yet | Note as limitation |
 | mTLS | Planned | Mention as upcoming |
 
@@ -373,8 +375,9 @@ getting-started/
   quickstart.md       — First deployment in 5 minutes
 
 guides/                       — Task-oriented: "How do I do X?"
-  multi-node.md       — Deploy across multiple servers
   authentication.md   — Secure cluster communication
+  multi-node.md       — Deploy across multiple servers
+  redeployment.md     — Update running apps with zero downtime
 
 reference/                    — Lookup-oriented: "What's the syntax for X?"
   manifest.md         — All banyan.yaml fields

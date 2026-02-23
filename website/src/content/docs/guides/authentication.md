@@ -1,13 +1,13 @@
 ---
-title: Authentication
-description: How Banyan secures communication between engine, agents, and CLI.
+title: Secure Your Cluster
+description: How Banyan authenticates engines, agents, and CLI clients.
 sidebar:
   order: 1
 ---
 
-Banyan authenticates all gRPC communication between components. Every RPC call carries credentials that the engine validates before processing the request.
+Banyan authenticates all communication between components. You set a cluster password once during setup — Banyan handles the rest. The password is exchanged for a token, and the token is used for all subsequent calls. The plain-text password is never stored on disk.
 
-## Auth methods
+## How authentication works
 
 | Method | Status | How it works |
 |--------|--------|--------------|
@@ -19,15 +19,11 @@ Banyan authenticates all gRPC communication between components. Every RPC call c
 
 ## Password + Token Exchange
 
-This is Banyan's default authentication method. The cluster password is used **once** during initialization to obtain an auth token. The token is used for all subsequent communication. The plain-text password is never stored on disk.
+This is Banyan's default and only current authentication method. Here's the full picture.
 
-### How it works
+### Init time — one-time setup
 
-There are two distinct phases: **init time** (one-time setup) and **runtime** (ongoing operation).
-
-#### Init-time flow
-
-During `init`, each component exchanges the cluster password for an auth token. The password can be provided interactively (default) or via the `--password` flag for automation:
+During `init`, each component exchanges the cluster password for an auth token:
 
 ```mermaid
 sequenceDiagram
@@ -66,9 +62,11 @@ sequenceDiagram
     CLI->>CLI: Save token to config (NOT password)
 ```
 
-#### Runtime flow
+After init, each component has an auth token. The password isn't needed again until you add a new agent or CLI client.
 
-After init, all communication uses the auth token:
+### Runtime — ongoing operation
+
+Every gRPC call carries the auth token. The engine validates it against the token store:
 
 ```mermaid
 sequenceDiagram
@@ -88,7 +86,7 @@ sequenceDiagram
     end
 ```
 
-### Config files
+### What gets stored where
 
 After initialization, each component stores only what it needs:
 
@@ -119,8 +117,6 @@ cli:
 
 ### Token lifecycle
 
-Tokens are managed through the `ExchangeToken` RPC:
-
 ```mermaid
 stateDiagram-v2
     [*] --> NoToken: Fresh install
@@ -134,14 +130,14 @@ stateDiagram-v2
     Expired --> Active: banyan-cli auth
 ```
 
-- **Issue**: Running `init` on an agent or CLI calls `ExchangeToken`, which generates a new random token and stores it in etcd with a dual index (`sha256(token) → record` and `name → sha256(token)`).
-- **Re-issue**: Running `init` again for the same name revokes the old token (deletes it from etcd) and issues a new one. The old token stops working immediately.
-- **CLI token TTL**: CLI tokens expire after **30 days**. When a CLI token expires, run `banyan-cli auth` to re-authenticate. Agent tokens do not expire because agents run on controlled infrastructure.
+- **Issue**: Running `init` on an agent or CLI generates a new random token and stores it in etcd.
+- **Re-issue**: Running `init` again for the same name revokes the old token and issues a new one. The old token stops working immediately.
+- **CLI token TTL**: CLI tokens expire after **30 days**. Run `banyan-cli auth` to re-authenticate. Agent tokens don't expire because agents run on controlled infrastructure.
 - **Revoke all**: Re-initializing the engine (or wiping etcd) invalidates all tokens. All agents and CLI clients must re-authenticate.
 
 ### Re-authentication
 
-If a token is revoked or the engine is re-initialized, you don't need to re-run the full `init` wizard. The `auth` command reads the existing config (engine host, port, node name) and only prompts for the cluster password:
+If a token is revoked or the engine is re-initialized, you don't need to re-run the full `init` wizard. The `auth` command reads the existing config and only prompts for the cluster password:
 
 ```bash
 # Agent
@@ -151,21 +147,34 @@ sudo banyan-agent auth
 sudo banyan-cli auth
 ```
 
-This is faster than `init` because it skips directory creation, dependency checks, and connection prompts. The `auth` command requires an existing config from a previous `init` run — if no config exists, it tells you to run `init` first.
+This is faster than `init` — it skips directory creation, dependency checks, and connection prompts. Requires an existing config from a previous `init`.
 
-### Non-interactive init
+### Automation and CI/CD
 
-All `init` commands accept a `--password` flag to skip the interactive password prompt. This is useful for automation, CI/CD pipelines, and containerized deployments:
+All `init` commands accept `--password` to skip interactive prompts:
 
 ```bash
-# Engine: hash the password and save it
+# Engine
 sudo banyan-engine init --password "my-cluster-secret"
 
-# Agent: exchange the password for a token (requires engine connection in config)
+# Agent (write connection details first, then init exchanges for a token)
+cat > /etc/banyan/banyan.yaml <<EOF
+agent:
+    engine_host: 192.168.1.10
+    engine_port: "50051"
+EOF
 sudo banyan-agent init --password "my-cluster-secret"
+
+# CLI (same pattern)
+cat > /etc/banyan/banyan.yaml <<EOF
+cli:
+    engine_host: 192.168.1.10
+    engine_port: "50051"
+EOF
+sudo banyan-cli init --password "my-cluster-secret"
 ```
 
-For the agent, write a config file with `agent.engine_host` and `agent.engine_port` before running `init --password`. The agent uses these to connect to the engine and exchange the password for a token. The password is never written to disk.
+The password is used once for the token exchange and never written to disk.
 
 ### Security properties
 
@@ -173,10 +182,10 @@ For the agent, write a config file with `agent.engine_host` and `agent.engine_po
 |----------|-----|
 | Password never stored in plain text | Engine stores bcrypt hash; agents/CLI never store the password |
 | Tokens are random and unique | 256-bit cryptographically random, hex-encoded |
-| Token hashing in etcd | Tokens stored as SHA-256 hashes — etcd compromise doesn't leak usable tokens |
+| Token hashing in etcd | Stored as SHA-256 hashes — etcd compromise doesn't leak usable tokens |
 | Per-name revocation | Re-running init for a name revokes only that name's token |
-| No replay across names | Each token is bound to a specific name via the dual index |
-| CLI token TTL | CLI tokens expire after 30 days, limiting blast radius of compromised workstations |
+| No replay across names | Each token is bound to a specific name via dual index |
+| CLI token TTL | CLI tokens expire after 30 days, limiting exposure from compromised workstations |
 
 ---
 
@@ -200,7 +209,7 @@ sequenceDiagram
     Engine-->>Agent: Authenticated connection
 ```
 
-This method will be suitable for environments with existing PKI infrastructure or stricter security requirements. Configuration details will be documented when this feature is implemented.
+This will be suitable for environments with existing PKI infrastructure or stricter security requirements. See the [roadmap](/roadmap/) for status.
 
 ---
 
@@ -225,4 +234,4 @@ sequenceDiagram
     CLI->>CLI: Save token to config
 ```
 
-This method will be suitable for teams that want centralized identity management. Configuration details will be documented when this feature is implemented.
+This will be suitable for teams with centralized identity management. See the [roadmap](/roadmap/) for status.

@@ -5,11 +5,11 @@ sidebar:
   order: 1
 ---
 
-Banyan uses three binaries:
+Banyan uses three binaries. Install only what each machine needs.
 
 | Binary | Role | Install on |
 |--------|------|------------|
-| `banyan-engine` | Control plane (store backend, gRPC server, scheduling) | Engine node |
+| `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes |
 | `banyan-cli` | Client (up, status, logs, down) | Any machine |
 
@@ -21,7 +21,7 @@ Run on your control plane node.
 
 ### init
 
-Prepare the Engine node: creates data directories and walks you through an interactive setup wizard.
+Set up the Engine node: creates data directories and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-engine init
@@ -36,11 +36,11 @@ The wizard asks:
 
 1. **Cluster password** — used to authenticate agents and CLI clients. The password is hashed with bcrypt and stored in `/etc/banyan/banyan.yaml` — the plain-text password is never saved.
 2. **Etcd setup** — choose **Managed** (Banyan runs etcd for you) or **External** (connect to your own cluster).
-3. For **External etcd**: endpoints (e.g. `http://10.0.0.1:2379`) and connection security (None, Username & Password, TLS, or mTLS).
+3. For **External etcd**: endpoints (e.g., `http://10.0.0.1:2379`) and connection security (None, Username & Password, TLS, or mTLS).
 
-If a password hash is already configured, the wizard skips that step and shows the current setting.
+If a password hash is already configured, the wizard skips that step.
 
-Pass `--password` to set the cluster password non-interactively (useful for automation and CI/CD):
+Pass `--password` for non-interactive setup (useful for automation):
 
 ```bash
 sudo banyan-engine init --password "my-cluster-secret"
@@ -48,7 +48,7 @@ sudo banyan-engine init --password "my-cluster-secret"
 
 ### start
 
-Start the Engine. Starts managed etcd (or connects to external etcd), initializes networking, starts the gRPC server, and watches for deployments.
+Start the Engine. Launches managed etcd (or connects to external etcd), initializes networking, starts the gRPC server, and watches for deployments.
 
 ```bash
 sudo banyan-engine start
@@ -94,7 +94,7 @@ Run on each worker node.
 
 ### auth
 
-Re-authenticate with the engine. Reads engine connection details from the existing config and prompts only for the cluster password to obtain a new token.
+Re-authenticate with the engine. Reads the existing config and prompts only for the cluster password to get a new token — no need to re-enter connection details.
 
 ```bash
 sudo banyan-agent auth
@@ -104,11 +104,11 @@ sudo banyan-agent auth
 |------|---------|-------------|
 | `--password` | | Cluster password (skips interactive prompt) |
 
-Use this when a token has been revoked or the engine has been re-initialized — it avoids re-running the full `init` wizard. Requires an existing config (from a previous `init`).
+Use when a token has been revoked or the engine was re-initialized. Requires an existing config from a previous `init`.
 
 ### init
 
-Prepare the worker node: creates data directories, verifies containerd and nerdctl are installed, and walks you through an interactive setup wizard.
+Set up the worker node: creates data directories, verifies containerd and nerdctl are installed, and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-agent init
@@ -121,32 +121,32 @@ sudo banyan-agent init
 
 The wizard asks:
 
-1. **Engine host** — hostname or IP of the Banyan engine (e.g. `192.168.1.10`).
+1. **Engine host** — hostname or IP of the Banyan engine (e.g., `192.168.1.10`).
 2. **Engine gRPC port** — default `50051`.
 3. **Node name** — unique name for this worker (default: hostname).
 4. **Cluster password** — must match the engine password.
 
-The wizard connects to the running engine and exchanges the password for an auth token. Only the token and node name are stored in the config — the password is never saved. The engine must be running during agent init.
+The wizard connects to the running engine and exchanges the password for an auth token. Only the token and node name are stored — the password is never saved. The engine must be running during `init`.
 
-If an auth token is already configured, the wizard skips and shows the current setting.
+If an auth token is already configured, the wizard skips that step.
 
-Pass `--password` with a pre-written config file to skip the interactive wizard entirely (useful for automation):
+Pass `--password` with a pre-written config file for non-interactive setup:
 
 ```bash
-# Write config with engine connection details first
+# Write connection details first
 cat > /etc/banyan/banyan.yaml <<EOF
 agent:
     engine_host: 192.168.1.10
     engine_port: "50051"
 EOF
 
-# Init exchanges the password for a token non-interactively
+# Exchange the password for a token
 sudo banyan-agent init --password "my-cluster-secret"
 ```
 
 ### start
 
-Start the Agent. Connects to the Engine via gRPC, registers the node, and begins executing tasks.
+Start the Agent. Connects to the Engine, registers the node, and begins executing tasks.
 
 ```bash
 sudo banyan-agent start --node-name worker-1
@@ -157,11 +157,11 @@ The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `init`). 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--engine` | (from config) | Engine gRPC endpoint override (e.g. `192.168.1.10:50051`) |
+| `--engine` | (from config) | Engine gRPC endpoint override (e.g., `192.168.1.10:50051`) |
 | `--node-name` | hostname | Name for this node. Must be unique in the cluster. |
 | `--pid-file` | `/var/run/banyan-agent.pid` | Agent PID file |
 | `--api-port` | `50052` | Agent gRPC server port (used for log streaming from engine) |
-| `--api-address` | | Agent API address override (e.g. `192.168.1.10:50052`) |
+| `--api-address` | | Agent API address override (e.g., `192.168.1.10:50052`) |
 
 ### stop
 
@@ -187,11 +187,11 @@ banyan-agent status
 
 ## banyan-cli
 
-Run on any machine to manage deployments. Before using up/status/down/logs commands, run `banyan-cli init` once to configure the engine connection.
+Run on any machine to manage deployments. Run `banyan-cli init` once to configure the engine connection, then use `up`, `status`, `down`, and `logs` freely.
 
 ### auth
 
-Re-authenticate with the engine. Reads engine connection details from the existing config and prompts only for the cluster password to obtain a new token.
+Re-authenticate with the engine. Reads the existing config and prompts only for the cluster password to get a new token.
 
 ```bash
 sudo banyan-cli auth
@@ -201,7 +201,7 @@ sudo banyan-cli auth
 |------|---------|-------------|
 | `--password` | | Cluster password (skips interactive prompt) |
 
-Use this when a token has been revoked or the engine has been re-initialized — it avoids re-running the full `init` wizard. Requires an existing config (from a previous `init`).
+Use when a token has been revoked or the engine was re-initialized. Requires an existing config from a previous `init`.
 
 ### init
 
@@ -222,41 +222,41 @@ The wizard asks:
 3. **CLI name** — unique name for this CLI client (default: `cli-<hostname>`).
 4. **Cluster password** — must match the engine password.
 
-The wizard connects to the running engine and exchanges the password for an auth token. Only the token is stored in `/etc/banyan/banyan.yaml` — the password is never saved. The engine must be running during CLI init.
+The wizard connects to the running engine and exchanges the password for an auth token. Only the token is stored in `/etc/banyan/banyan.yaml` — the password is never saved.
 
-Run this once on any machine where you want to use `banyan-cli` commands. If an auth token already exists in the config, you'll be asked whether to overwrite it.
+Run this once per machine. If an auth token already exists in the config, you'll be asked whether to overwrite it.
 
-Pass `--password` with a pre-written config file to skip the interactive wizard entirely (useful for automation):
+Pass `--password` with a pre-written config file for non-interactive setup:
 
 ```bash
-# Write config with engine connection details first
+# Write connection details first
 cat > /etc/banyan/banyan.yaml <<EOF
 cli:
     engine_host: 192.168.1.10
     engine_port: "50051"
 EOF
 
-# Init exchanges the password for a token non-interactively
+# Exchange the password for a token
 sudo banyan-cli init --password "my-cluster-secret"
 ```
 
 ### up
 
-Deploy an application from a `banyan.yaml` manifest.
+Deploy or redeploy an application from a manifest.
 
 ```bash
 banyan-cli up -f banyan.yaml
 ```
 
-Sends the deployment to the Engine via gRPC, then waits for agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
+Sends the deployment to the Engine, then waits for agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
 
-**Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: it starts the new containers alongside the old ones, waits for the new deployment to reach `running` status, then tears down the old containers. If the new deployment fails, the old containers keep running — no downtime.
+**Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: new containers start alongside old ones, and old containers are torn down only after the new deployment is healthy. If the new deployment fails, old containers keep running. See [Redeployment](/guides/redeployment/) for details.
 
-**Per-service deployment.** Pass service names as arguments to redeploy only those services. The full manifest is still sent to the Engine for validation, but only the specified services are redeployed. Per-service deploys use a recreate strategy (stop old containers, then start new ones) to avoid port conflicts. Services not listed are untouched.
+**Per-service deployment.** Pass service names as arguments to redeploy only specific services. The full manifest is still validated, but only the listed services are redeployed. Per-service deploys use a recreate strategy (stop old, then start new) to avoid port conflicts. Other services are untouched.
 
-`depends_on` is validated: if a target service depends on another service, that dependency must already be running or be included in the same deploy command. Otherwise the deploy is rejected.
+`depends_on` is validated: if a service being deployed depends on another service, that dependency must already be running or be included in the same deploy command.
 
-Services with a `build:` directive are built locally with `nerdctl build`, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
+Services with `build:` are built locally, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
 
 :::tip
 `banyan-cli deploy` still works as an alias for `up`. If you're coming from an older version, your scripts don't need to change.
@@ -298,7 +298,7 @@ Stop and remove services from a deployment.
 banyan-cli down --name my-app
 ```
 
-Creates `stop_and_remove` tasks for each running container and waits for agents to complete them. By default, stops all services. Pass service names as arguments to stop only specific ones.
+Creates `stop_and_remove` tasks for each running container and waits for agents to complete them. By default, stops all services. Pass service names as arguments to stop specific ones.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -326,8 +326,6 @@ Show cluster status: connected agents, active deployments, and container health.
 ```bash
 banyan-cli status
 ```
-
-Example output:
 
 ```
 Banyan Cluster - Status

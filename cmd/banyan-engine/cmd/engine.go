@@ -557,11 +557,19 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Store (%s): RUNNING\n", storeBackend)
 	fmt.Println("Connection: OK")
 
-	agents, _ := engine.ListAvailableAgents(ctx, store)
-	fmt.Printf("\nAgents: %d\n", len(agents))
-	for _, a := range agents {
-		age := time.Since(a.LastSeen).Truncate(time.Second)
-		fmt.Printf("  - %s (status: %s, last seen: %s ago)\n", a.Name, a.Status, age)
+	nodeKeys, _ := store.List(ctx, types.KeyNodes)
+	fmt.Printf("\nAgents: %d\n", len(nodeKeys))
+	for _, key := range nodeKeys {
+		var node types.NodeRecord
+		if err := store.Get(ctx, key, &node); err != nil {
+			continue
+		}
+		age := time.Since(node.LastSeen).Truncate(time.Second)
+		tagsStr := ""
+		if len(node.Tags) > 0 {
+			tagsStr = fmt.Sprintf(", tags: %v", node.Tags)
+		}
+		fmt.Printf("  - %s (status: %s, last seen: %s ago%s)\n", node.Name, node.Status, age, tagsStr)
 	}
 
 	deployKeys, _ := store.List(ctx, types.KeyDeployments)

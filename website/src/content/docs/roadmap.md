@@ -52,6 +52,20 @@ Secure gRPC communication between CLI, Engine, and Agents.
 
 ---
 
+## Milestone 3.5 — Agent Tags for Environment Isolation
+
+Status: **Done**
+
+Optional tags on agents and deployments for environment isolation (e.g. staging vs production on shared infrastructure).
+
+- Agent tags configured in `/etc/banyan/banyan.yaml` and sent via Register/Heartbeat RPCs
+- `--tags` flag on `banyan-cli up` and `banyan-cli down` for deployment tag matching
+- Tag matching rules: both untagged = match, one side tagged = no match, intersection = match
+- Same app name with different tags can coexist as independent deployments
+- Engine scheduling filters agents by tag match before assigning tasks
+
+---
+
 ## Milestone 4 — Metrics Collection
 
 Collect and expose resource metrics from every node and container in Prometheus-compatible format.

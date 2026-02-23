@@ -165,7 +165,7 @@ func (e *Engine) processDeployments(ctx context.Context) {
 	}
 }
 
-// hasConflictingDeployment checks if another deployment with the same name (different ID)
+// hasConflictingDeployment checks if another deployment with the same name+tags (different ID)
 // is currently stopping or deploying, which would cause port/container-name conflicts.
 func (e *Engine) hasConflictingDeployment(ctx context.Context, deployment *types.DeploymentRecord) bool {
 	keys, err := e.store.List(ctx, types.KeyDeployments)
@@ -182,6 +182,9 @@ func (e *Engine) hasConflictingDeployment(ctx context.Context, deployment *types
 			continue
 		}
 		if record.Name != deployment.Name {
+			continue
+		}
+		if !types.TagsEqual(record.Tags, deployment.Tags) {
 			continue
 		}
 		if record.Status == types.StatusStopping || record.Status == types.StatusDeploying {
@@ -206,7 +209,7 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 		}
 	}
 
-	agents, err := ListAvailableAgents(ctx, e.store)
+	agents, err := ListAvailableAgents(ctx, e.store, deployment.Tags)
 	if err != nil || len(agents) == 0 {
 		return
 	}
@@ -406,8 +409,8 @@ func (e *Engine) checkStoppingDeployment(ctx context.Context, deployment *types.
 	}
 }
 
-// ListAvailableAgents returns all registered agents with status "ready".
-func ListAvailableAgents(ctx context.Context, store storage.StateStore) ([]types.NodeRecord, error) {
+// ListAvailableAgents returns all registered agents with status "ready" that match the given deployment tags.
+func ListAvailableAgents(ctx context.Context, store storage.StateStore, deploymentTags []string) ([]types.NodeRecord, error) {
 	keys, err := store.List(ctx, types.KeyNodes)
 	if err != nil {
 		return nil, err
@@ -419,7 +422,7 @@ func ListAvailableAgents(ctx context.Context, store storage.StateStore) ([]types
 		if err := store.Get(ctx, key, &node); err != nil {
 			continue
 		}
-		if node.Status == "ready" {
+		if node.Status == "ready" && types.TagsMatch(node.Tags, deploymentTags) {
 			agents = append(agents, node)
 		}
 	}

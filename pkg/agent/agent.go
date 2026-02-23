@@ -24,6 +24,7 @@ type Options struct {
 	APIPort        string
 	APIAddress     string
 	PidFile        string
+	Tags           []string
 }
 
 // Agent is the Banyan data-plane worker.
@@ -83,7 +84,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// Register node
-	registryURL, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken)
+	registryURL, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags)
 	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
@@ -307,7 +308,7 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken); err != nil {
+			if err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags); err != nil {
 				fmt.Printf("[Agent] WARNING: heartbeat failed: %v\n", err)
 			}
 		}

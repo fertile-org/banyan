@@ -62,11 +62,12 @@ func (c *EngineClient) ExchangeToken(ctx context.Context, name, role string) (st
 	return resp.Token, nil
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string) (string, error) {
+func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string) (string, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:    name,
 		ApiAddress:   apiAddr,
 		SessionToken: sessionToken,
+		Tags:         tags,
 	})
 	if err != nil {
 		return "", fmt.Errorf("register failed: %w", err)
@@ -74,10 +75,11 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 	return resp.RegistryUrl, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string) error {
+func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) error {
 	_, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    name,
 		SessionToken: sessionToken,
+		Tags:         tags,
 	})
 	if err != nil {
 		return fmt.Errorf("heartbeat failed: %w", err)

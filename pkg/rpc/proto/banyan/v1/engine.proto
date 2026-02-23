@@ -29,6 +29,7 @@ message RegisterRequest {
   string agent_name = 1;
   string api_address = 2;
   string session_token = 3;
+  repeated string tags = 4;
 }
 
 message RegisterResponse {
@@ -38,6 +39,7 @@ message RegisterResponse {
 message HeartbeatRequest {
   string agent_name = 1;
   string session_token = 2;
+  repeated string tags = 3;
 }
 
 message HeartbeatResponse {}
@@ -97,6 +99,7 @@ message TaskRecord {
 message DeployRPCRequest {
   Manifest manifest = 1;
   repeated string services = 2;  // optional: deploy only these services
+  repeated string tags = 3;      // optional: deployment tags for agent matching
 }
 
 message DeployRPCResponse {
@@ -132,6 +135,7 @@ message ManifestDeploy {
 message DownRPCRequest {
   string name = 1;
   repeated string services = 2;
+  repeated string tags = 3;
 }
 
 message DownRPCResponse {
@@ -151,6 +155,7 @@ message AgentInfo {
   string api_address = 3;
   int64 last_seen_unix = 4;
   int64 created_at_unix = 5;
+  repeated string tags = 6;
 }
 
 message DeploymentInfo {
@@ -164,6 +169,7 @@ message DeploymentInfo {
   repeated TaskInfo tasks = 8;
   int32 healthy = 9;
   int32 total = 10;
+  repeated string tags = 11;
 }
 
 message ServiceInfo {

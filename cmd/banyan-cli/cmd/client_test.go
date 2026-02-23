@@ -337,7 +337,7 @@ func TestEngineClient_Deploy(t *testing.T) {
 		},
 	}
 
-	resp, err := client.Deploy(context.Background(), manifest, nil)
+	resp, err := client.Deploy(context.Background(), manifest, nil, nil)
 	if err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestEngineClient_Down(t *testing.T) {
 	client, cleanup := setupCLITestServer(t)
 	defer cleanup()
 
-	resp, err := client.Down(context.Background(), "my-app", []string{"web"})
+	resp, err := client.Down(context.Background(), "my-app", []string{"web"}, nil)
 	if err != nil {
 		t.Fatalf("Down failed: %v", err)
 	}

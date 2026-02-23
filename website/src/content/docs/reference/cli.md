@@ -138,6 +138,8 @@ cat > /etc/banyan/banyan.yaml <<EOF
 agent:
     engine_host: 192.168.1.10
     engine_port: "50051"
+    tags:
+        - staging
 EOF
 
 # Init exchanges the password for a token non-interactively
@@ -267,6 +269,7 @@ Services with a `build:` directive are built locally with `nerdctl build`, pushe
 | `--file` | `-f` | `banyan.yaml` | Path to the manifest file |
 | `--dry-run` | | `false` | Validate the manifest without deploying |
 | `--no-wait` | | `false` | Submit and exit immediately |
+| `--tags` | | | Deployment tags for agent matching (comma-separated) |
 
 Examples:
 
@@ -282,6 +285,9 @@ banyan-cli up -f banyan.yaml web
 
 # Redeploy web and api together
 banyan-cli up -f banyan.yaml web api
+
+# Deploy to staging agents only
+banyan-cli up -f banyan.yaml --tags staging
 
 # Validate without deploying
 banyan-cli up -f banyan.yaml --dry-run
@@ -305,6 +311,7 @@ Creates `stop_and_remove` tasks for each running container and waits for agents 
 | `--name` | | | Application name to stop |
 | `--file` | `-f` | | Path to manifest (reads app name from file) |
 | `--no-wait` | | `false` | Submit stop tasks and exit immediately |
+| `--tags` | | | Deployment tags for matching (comma-separated) |
 
 Examples:
 
@@ -317,6 +324,9 @@ banyan-cli down -f banyan.yaml
 
 # Stop specific services only
 banyan-cli down --name my-app web db
+
+# Stop a tagged deployment
+banyan-cli down --name my-app --tags staging
 ```
 
 ### status

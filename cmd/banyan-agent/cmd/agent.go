@@ -202,6 +202,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		enginePort := "50051"
 		nodeName := hostname
 		var password string
+		var tagsInput string
 
 		form := huh.NewForm(
 			huh.NewGroup(
@@ -216,6 +217,10 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 					Title("Node name").
 					Description("Unique name for this agent node").
 					Value(&nodeName),
+				huh.NewInput().
+					Title("Tags").
+					Description("Comma-separated tags for environment isolation (optional)").
+					Value(&tagsInput),
 				huh.NewInput().
 					Title("Banyan cluster password").
 					Description("Used once to obtain an auth token from the engine").
@@ -264,6 +269,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 			EnginePort: enginePort,
 			AuthToken:  token,
 			NodeName:   nodeName,
+			Tags:       parseTags(tagsInput),
 		}
 
 		if err := types.SaveConfig(configPath, &cfg); err != nil {
@@ -355,6 +361,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		APIPort:        agentAPIPort,
 		APIAddress:     agentAPIAddress,
 		PidFile:        agentPidFile,
+		Tags:           cfg.Agent.Tags,
 	})
 	if err != nil {
 		return err
@@ -462,4 +469,22 @@ func isAgentRunning() bool {
 		return false
 	}
 	return process.Signal(syscall.Signal(0)) == nil
+}
+
+// parseTags splits a comma-separated string into a trimmed tag slice.
+// Returns nil for empty input.
+func parseTags(input string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+	parts := strings.Split(input, ",")
+	var tags []string
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			tags = append(tags, p)
+		}
+	}
+	return tags
 }

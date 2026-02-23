@@ -273,7 +273,7 @@ func TestEngineClient_Register(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
-	registryURL, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc")
+	registryURL, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil)
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestEngineClient_Heartbeat(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
-	err := client.Heartbeat(context.Background(), "worker-1", "token-abc")
+	err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
@@ -391,14 +391,14 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Register error", func(t *testing.T) {
-		_, err := client.Register(ctx, "worker-1", "addr", "token")
+		_, err := client.Register(ctx, "worker-1", "addr", "token", nil)
 		if err == nil {
 			t.Error("expected error from Register on stopped server")
 		}
 	})
 
 	t.Run("Heartbeat error", func(t *testing.T) {
-		err := client.Heartbeat(ctx, "worker-1", "token")
+		err := client.Heartbeat(ctx, "worker-1", "token", nil)
 		if err == nil {
 			t.Error("expected error from Heartbeat on stopped server")
 		}

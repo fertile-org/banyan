@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="website/src/assets/logo.png" alt="Banyan" width="240">
+  <img src="website/public/shipping-banner-transparent.png" alt="Banyan — containers distributed across servers" width="100%">
 </div>
 
 <h1 align="center">Banyan</h1>
@@ -21,8 +21,6 @@
   <a href="https://getbanyan.dev/roadmap/">Roadmap</a> &middot;
   <a href="./DEVELOPMENT.md">Development</a>
 </p>
-
----
 
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
@@ -203,3 +201,4 @@ See the [Development Guide](./DEVELOPMENT.md) for project structure, build comma
 ## License
 
 Apache License 2.0. See [LICENSE](./LICENSE) for details.
+

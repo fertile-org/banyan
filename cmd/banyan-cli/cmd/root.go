@@ -10,8 +10,9 @@ import (
 var configPath = types.DefaultConfigPath
 
 var rootCmd = &cobra.Command{
-	Use:   "banyan-cli",
-	Short: "Banyan - Simple container orchestration",
+	Use:          "banyan-cli",
+	Short:        "Banyan - Simple container orchestration",
+	SilenceUsage: true,
 	Long: `banyan-cli is the command-line client for Banyan container orchestration.
 
 Commands:

@@ -3,8 +3,9 @@ package cmd
 import "github.com/spf13/cobra"
 
 var rootCmd = &cobra.Command{
-	Use:   "banyan-engine",
-	Short: "Banyan Engine - Container orchestration control plane",
+	Use:          "banyan-engine",
+	Short:        "Banyan Engine - Container orchestration control plane",
+	SilenceUsage: true,
 	Long: `banyan-engine is the control plane for Banyan container orchestration.
 
 Commands:

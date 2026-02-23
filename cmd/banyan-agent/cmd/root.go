@@ -3,8 +3,9 @@ package cmd
 import "github.com/spf13/cobra"
 
 var rootCmd = &cobra.Command{
-	Use:   "banyan-agent",
-	Short: "Banyan Agent - Container orchestration worker node",
+	Use:          "banyan-agent",
+	Short:        "Banyan Agent - Container orchestration worker node",
+	SilenceUsage: true,
 	Long: `banyan-agent runs on worker nodes and manages containers.
 
 Commands:

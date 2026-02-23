@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="user-docs/src/assets/logo.png" alt="Banyan" width="240">
+  <img src="website/src/assets/logo.png" alt="Banyan" width="240">
 </div>
 
 <h1 align="center">Banyan</h1>
@@ -28,13 +28,13 @@
 
 ## From one server to many
 
-You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and everything works on one machine.
+You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and it works — on one machine.
 
-Then your app grows. You want your services spread across separate servers, or running multiple replicas to handle load. Either way, you need more than one machine.
+Then you need more. More servers, more replicas, more availability. The usual next step involves weeks of learning, dozens of new concepts, and infrastructure that's heavier than your application.
 
-**Banyan makes that step simple.** Use the same YAML syntax you already know, and Banyan distributes your services across your servers.
+**Banyan takes a different approach.** Same YAML syntax you already write, distributed across your servers. No new language to learn. No templating. No 50-page getting started guide.
 
-## Same syntax, more servers
+## Two lines of diff
 
 **docker-compose.yml** — everything on one machine:
 
@@ -59,7 +59,7 @@ services:
 **banyan.yaml** — distributed across your cluster:
 
 ```yaml
-name: my-app
+name: my-app                  # ← add a name
 
 services:
   web:
@@ -70,7 +70,7 @@ services:
   api:
     build: ./api
     deploy:
-      replicas: 3
+      replicas: 3             # ← scale what you need
     ports:
       - "8080:8080"
     environment:
@@ -80,37 +80,24 @@ services:
     image: postgres:15-alpine
 ```
 
-Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and `deploy.replicas`, and Banyan spreads them across your servers automatically.
+Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and optionally `deploy.replicas`, and Banyan spreads your containers across your servers.
 
-## Features
+## What you get
 
-- **Familiar syntax** — If you can write a docker-compose.yml, you can write a banyan.yaml. Same fields, same structure.
-- **Single-binary components** — Three small, focused binaries. Download, run, done. No complex setup or configuration management required.
-- **Built-in image registry** — No Docker Hub, no private registry setup. Use `build:` in your manifest and Banyan builds, stores, and distributes your images automatically. Deploy to a cluster as easily as running locally.
-- **Automatic distribution** — Services are automatically distributed across your servers. Add a node, it picks up work on the next deployment.
-- **Built-in VPC** — Secure cross-node networking using Flannel with VXLAN overlay and built-in DNS service discovery. Services on different servers communicate as if they were on the same network.
-- **Proven foundations** — Built on battle-tested technologies: etcd, containerd, gRPC, and Prometheus metrics (coming soon).
+- **The YAML you already know** — `services`, `build`, `image`, `ports`, `environment`, `depends_on`. Same fields, same structure, same muscle memory.
+- **Three binaries, nothing else** — No package managers, no plugins, no Helm charts. Download `banyan-engine`, `banyan-agent`, and `banyan-cli`. That's the entire stack.
+- **Built-in image registry** — Use `build:` in your manifest and Banyan builds, stores, and distributes images across your cluster. No Docker Hub account, no Harbor, no ECR setup.
+- **Containers talk across servers** — Services on different machines communicate as if they were on the same network. Banyan handles the overlay network and DNS.
+- **Monitor from your terminal** — `banyan-cli status` shows every container, which server it's on, and whether it's healthy. `banyan-cli logs` streams from any container, any node. A live terminal dashboard (`banyan-cli monitor`) is coming soon.
+- **Open source, self-hosted** — Apache 2.0. No vendor lock-in, no usage-based pricing. Run it on your own servers.
 
-## Is Banyan right for you?
+## Who is Banyan for?
 
-Banyan is built for teams who:
+**Teams who've outgrown a single server but don't need — or don't want — Kubernetes.**
 
-- **Know Docker Compose** and want the same simplicity across multiple servers
-- **Need to scale beyond one machine** without learning Kubernetes
-- **Value shipping software** over operating infrastructure
+You might be a team of 5 who needs your API on 3 servers. Or a team of 50 who wants a lighter option for staging environments and internal tools. Either way, you want to write a YAML file and deploy, not operate a platform.
 
-Banyan bridges the gap between "docker compose up" and production orchestration — same syntax, distributed execution.
-
-## Documentation
-
-Full documentation is available at **[getbanyan.dev](https://getbanyan.dev/)**.
-
-- [Installation](https://getbanyan.dev/getting-started/installation/)
-- [Quickstart](https://getbanyan.dev/getting-started/quickstart/)
-- [Manifest Reference](https://getbanyan.dev/guides/manifest-reference/)
-- [Multi-Node Setup](https://getbanyan.dev/guides/multi-node/)
-- [CLI Reference](https://getbanyan.dev/reference/cli/)
-- [Troubleshooting](https://getbanyan.dev/reference/troubleshooting/)
+Banyan handles the orchestration so you can focus on the software you're building.
 
 ## Install
 
@@ -124,20 +111,30 @@ curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh |
 
 Or [build from source](https://getbanyan.dev/getting-started/installation/).
 
-## Three commands to a running cluster
+## Getting started
+
+One-time setup (run once per machine):
 
 ```bash
-# On your control plane server
-sudo banyan-engine start
+# Control plane
+sudo banyan-engine init        # Set a cluster password
+sudo banyan-engine start       # Starts the engine, etcd, and image registry
 
-# On each worker server
-sudo banyan-agent start --node-name agent-1
+# Each worker
+sudo banyan-agent init         # Connect to the engine
+sudo banyan-agent start        # Register and start accepting containers
 
-# From anywhere
+# Your machine
+sudo banyan-cli init           # Authenticate with the engine
+```
+
+Then deploy — every time, one command:
+
+```bash
 banyan-cli deploy -f banyan.yaml
 ```
 
-Three focused binaries: `banyan-engine` for the control plane, `banyan-agent` for workers, `banyan-cli` for deployments.
+After the initial setup, deploying is always one command. See the [Quickstart](https://getbanyan.dev/getting-started/quickstart/) for a complete walkthrough.
 
 ## Architecture
 
@@ -182,11 +179,22 @@ graph TD
     Engine -.-|/metrics| Prom
 ```
 
-**CLI** sends commands to the **Engine** (control plane), which stores state in **etcd** and schedules work across **Agents** (workers). All communication over gRPC with password auth. Metrics are exposed in Prometheus format for monitoring.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is authenticated over gRPC.
+
+## Documentation
+
+Full documentation at **[getbanyan.dev](https://getbanyan.dev/)**.
+
+- [Installation](https://getbanyan.dev/getting-started/installation/)
+- [Quickstart](https://getbanyan.dev/getting-started/quickstart/)
+- [Manifest Reference](https://getbanyan.dev/reference/manifest/)
+- [Multi-Node Setup](https://getbanyan.dev/guides/multi-node/)
+- [CLI Reference](https://getbanyan.dev/reference/cli/)
+- [Troubleshooting](https://getbanyan.dev/reference/troubleshooting/)
 
 ## Roadmap
 
-See the [Roadmap](https://getbanyan.dev/roadmap/) for what's next — metrics, auto-scaling, monitoring, and more.
+See the [Roadmap](https://getbanyan.dev/roadmap/) — Prometheus metrics, terminal UI monitoring, resource-aware scheduling, auto-scaling, and more.
 
 ## Contributing
 

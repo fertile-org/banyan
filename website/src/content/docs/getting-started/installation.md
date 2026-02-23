@@ -1,27 +1,29 @@
 ---
 title: Installation
-description: Install Banyan and its dependencies.
+description: Install Banyan on your servers. One command per machine, under 2 minutes.
 sidebar:
   order: 1
 ---
 
-## Quick install
+Banyan runs as three binaries — install only what each machine needs.
 
-The install script detects your OS, downloads the Banyan binaries, and installs all dependencies for the role you choose.
+## Quick install (~1 minute)
 
-**Engine node** (control plane):
+The install script detects your OS, downloads the Banyan binaries, and installs all runtime dependencies.
+
+**Engine node** (control plane — runs the scheduler, data store, and image registry):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role engine
 ```
 
-**Worker node** (runs containers):
+**Worker node** (runs your containers):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role agent
 ```
 
-**Both** (single-machine setup):
+**Both** (single-machine setup — engine + agent + CLI on one server):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash
@@ -44,7 +46,7 @@ curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh |
 
 ## Build from source
 
-If you prefer to build yourself, you need Go 1.24+ on the build machine only.
+If you prefer to build yourself, you need Go 1.24+ on the build machine only. The compiled binaries have no Go dependency.
 
 ```bash
 git clone https://github.com/fertile-org/banyan.git
@@ -73,23 +75,23 @@ scp banyan-engine banyan-cli user@engine-server:/usr/local/bin/
 scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 ```
 
-When building from source, you still need to install runtime dependencies on each node manually:
+When building from source, you still need runtime dependencies on each node:
 
-- **Engine node**: etcd is required. By default, Banyan manages etcd for you automatically (see [Etcd](#etcd-state-store)).
-- **Worker nodes**: containerd, nerdctl, BuildKit (see the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands)
+- **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below).
+- **Worker nodes**: containerd, nerdctl, BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
 
 ### Etcd (state store)
 
-Banyan uses etcd to store cluster state (deployments, tasks, agent registrations). You choose how to run etcd during `banyan-engine init`:
+Banyan uses etcd to store cluster state (deployments, container status, agent registrations). You choose how to run etcd during `banyan-engine init`:
 
 | Mode | What happens | When to use |
 |------|-------------|-------------|
-| **Managed** (default) | Banyan starts and manages its own etcd process. Data stored in `<data-dir>/etcd/`. | Recommended for most setups. Zero setup. |
+| **Managed** (default) | Banyan starts and manages its own etcd process. Data stored in `/var/lib/banyan/etcd/`. | Recommended for most setups. Zero configuration. |
 | **External** | You run etcd yourself, Banyan connects to it. | If you already have an etcd cluster, or need custom HA/backup. |
 
 #### Managed etcd
 
-Nothing to configure. Banyan starts etcd on `127.0.0.1:2379` when the engine starts and stops it when the engine stops. Data persists in `/var/lib/banyan/etcd/` by default.
+Nothing to configure. Banyan starts etcd on `127.0.0.1:2379` when the engine starts and stops it when the engine stops. Data persists across restarts.
 
 #### External etcd
 
@@ -107,13 +109,15 @@ If you choose "External" during `banyan-engine init`, the wizard asks for:
 
 You must install, run, and manage external etcd yourself. See the [etcd documentation](https://etcd.io/docs/) for setup instructions.
 
-## Important: init order
+## Setup order
 
-The engine must be running before you run `banyan-agent init` or `banyan-cli init`. During init, agents and CLI clients connect to the engine to exchange the cluster password for an auth token (see [Authentication](/guides/authentication/) for details). This means the setup order is always:
+The engine must be running before you initialize agents or the CLI. During init, each component connects to the engine to exchange the cluster password for an auth token (see [Authentication](/guides/authentication/) for details).
 
-1. `banyan-engine init` + `banyan-engine start`
-2. `banyan-agent init` (on each worker)
-3. `banyan-cli init` (on any deploy machine)
+The order is always:
+
+1. **Engine**: `banyan-engine init` → `banyan-engine start`
+2. **Agents**: `banyan-agent init` → `banyan-agent start` (on each worker)
+3. **CLI**: `banyan-cli init` (on any machine where you want to deploy from)
 
 ## Verify
 

@@ -203,3 +203,7 @@ See the [Development Guide](./DEVELOPMENT.md) for project structure, build comma
 ## License
 
 Apache License 2.0. See [LICENSE](./LICENSE) for details.
+
+---
+
+<img src="website/public/shipping-banner.png" alt="Banyan — containers distributed across servers" width="100%">

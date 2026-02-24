@@ -91,11 +91,12 @@ func (p *Proxy) init() error {
 		table    string
 		chain    string
 		rulespec []string
+		insert   bool // insert at top instead of append (ensures priority over containerd/CNI rules)
 	}{
-		{"nat", "PREROUTING", []string{"-j", chainServices}},
-		{"nat", "OUTPUT", []string{"-j", chainServices}},
-		{"filter", "FORWARD", []string{"-j", chainForward}},
-		{"nat", "POSTROUTING", []string{"-j", chainPostrouting}},
+		{"nat", "PREROUTING", []string{"-j", chainServices}, false},
+		{"nat", "OUTPUT", []string{"-j", chainServices}, false},
+		{"filter", "FORWARD", []string{"-j", chainForward}, true},
+		{"nat", "POSTROUTING", []string{"-j", chainPostrouting}, false},
 	}
 	for _, h := range hooks {
 		exists, err := p.ipt.Exists(h.table, h.chain, h.rulespec...)
@@ -103,8 +104,14 @@ func (p *Proxy) init() error {
 			return fmt.Errorf("failed to check hook %s/%s: %w", h.table, h.chain, err)
 		}
 		if !exists {
-			if err := p.ipt.Append(h.table, h.chain, h.rulespec...); err != nil {
-				return fmt.Errorf("failed to add hook %s/%s: %w", h.table, h.chain, err)
+			if h.insert {
+				if err := p.ipt.Insert(h.table, h.chain, 1, h.rulespec...); err != nil {
+					return fmt.Errorf("failed to insert hook %s/%s: %w", h.table, h.chain, err)
+				}
+			} else {
+				if err := p.ipt.Append(h.table, h.chain, h.rulespec...); err != nil {
+					return fmt.Errorf("failed to add hook %s/%s: %w", h.table, h.chain, err)
+				}
 			}
 		}
 	}

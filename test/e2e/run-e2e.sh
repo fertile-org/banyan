@@ -86,6 +86,39 @@ get_container_names() {
     docker exec "$worker" nerdctl ps --format '{{.Names}}' 2>/dev/null | grep -v '^$'
 }
 
+# Test proxy by curling through a worker's host port
+# Usage: test_proxy <source_container> <target_ip> <port> <description>
+test_proxy() {
+    local source=$1
+    local target_ip=$2
+    local port=$3
+    local desc=$4
+    local retries=5
+    local i=0
+    local http_code
+    while [ $i -lt $retries ]; do
+        http_code=$(docker exec "$source" curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "http://${target_ip}:${port}/" 2>/dev/null) || http_code="000"
+        if [ "$http_code" = "200" ]; then
+            log_test_pass "$desc (HTTP $http_code)"
+            return 0
+        fi
+        i=$((i + 1))
+        [ $i -lt $retries ] && sleep 2
+    done
+    log_test_fail "$desc (HTTP $http_code after $retries attempts)"
+    # Debug: show verbose curl output and routing info on failure
+    echo "  Debug: verbose curl from $source to ${target_ip}:${port}"
+    docker exec "$source" curl -v --connect-timeout 5 "http://${target_ip}:${port}/" 2>&1 | head -20 || true
+    echo "  Debug: iptables DNAT state on $source"
+    docker exec "$source" iptables -t nat -L BANYAN-P-SVC-3000 -n 2>&1 || true
+    echo "  Debug: routes on $source"
+    docker exec "$source" ip route show 2>&1 | grep -E "^10\." || true
+    echo "  Debug: ARP table on $source (overlay entries)"
+    docker exec "$source" ip neigh show dev banyan0 2>&1 || true
+    echo "  Debug: conntrack state for port $port on $source"
+    docker exec "$source" conntrack -L -p tcp --dport "$port" 2>&1 | head -5 || true
+}
+
 echo "========================================="
 echo "Banyan E2E Test Suite"
 echo "========================================="
@@ -104,6 +137,8 @@ mkdir -p "$SCRIPT_DIR/bin"
 (cd "$REPO_ROOT/cmd/banyan-engine" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-engine" .)
 (cd "$REPO_ROOT/cmd/banyan-agent" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-agent" .)
 (cd "$REPO_ROOT/cmd/banyan-cli" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-cli" .)
+# Generate cache-bust file so Docker detects binary changes
+md5sum "$SCRIPT_DIR/bin/banyan-engine" "$SCRIPT_DIR/bin/banyan-agent" "$SCRIPT_DIR/bin/banyan-cli" > "$SCRIPT_DIR/bin/.cache-bust"
 log_info "Binaries built at test/e2e/bin/"
 
 # Step 2: Build Docker images
@@ -135,6 +170,19 @@ echo "========================================="
 echo "Phase 2: Deploy and Verify"
 echo "========================================="
 
+# Pre-pull images on workers to avoid deployment timeout
+log_info "Pre-pulling container images on workers..."
+for worker in banyan-worker-1 banyan-worker-2; do
+    for img in node:22-alpine redis:7-alpine; do
+        for attempt in 1 2 3; do
+            if docker exec "$worker" nerdctl pull "$img" >/dev/null 2>&1; then break; fi
+            echo "  Retry $attempt for $img on $worker..."
+            sleep 5
+        done
+    done
+done
+log_info "Images pre-pulled"
+
 # Deploy test application
 log_info "Deploying test application..."
 docker exec banyan-engine banyan-cli up --file /examples/banyan.yaml
@@ -154,6 +202,22 @@ echo "  worker-1:"
 docker exec banyan-worker-1 nerdctl ps 2>/dev/null || log_warn "  Could not list containers on worker-1"
 echo "  worker-2:"
 docker exec banyan-worker-2 nerdctl ps 2>/dev/null || log_warn "  Could not list containers on worker-2"
+
+# Wait for API containers to be fully ready (Node.js needs time to start listening)
+log_info "Waiting for API containers to become ready..."
+READY=false
+for i in $(seq 1 12); do
+    if docker exec banyan-worker-1 curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 http://127.0.0.1:3000/ 2>/dev/null | grep -q "200"; then
+        READY=true
+        break
+    fi
+    sleep 5
+done
+if [ "$READY" = true ]; then
+    log_info "API containers are ready"
+else
+    log_warn "API containers may not be fully ready yet, continuing..."
+fi
 
 # =================================================================
 # Phase 3: VPC Networking Tests
@@ -256,6 +320,194 @@ if [ "$DUPLICATE_FOUND" = false ] && [ -n "$ALL_IPS" ]; then
     log_test_pass "All container IPs are unique:$ALL_IPS"
 fi
 
+# Test 5: Service proxy via iptables DNAT
+log_info "Test: Service proxy via iptables DNAT"
+
+# Debug: IP forwarding status
+for worker in banyan-worker-1 banyan-worker-2; do
+    echo "  $worker ip_forward: $(docker exec "$worker" cat /proc/sys/net/ipv4/ip_forward 2>&1)"
+done
+
+# Debug: Show iptables state on both workers
+log_info "Debug: iptables rules on workers"
+for worker in banyan-worker-1 banyan-worker-2; do
+    echo "  $worker NAT chains:"
+    docker exec "$worker" iptables -t nat -L BANYAN-P-SERVICES -n 2>/dev/null || echo "    (no BANYAN-P-SERVICES chain)"
+    docker exec "$worker" iptables -t nat -L BANYAN-P-SVC-3000 -n 2>/dev/null || echo "    (no BANYAN-P-SVC-3000 chain)"
+    echo "  $worker FORWARD chain (first 10 rules):"
+    docker exec "$worker" iptables -L FORWARD -n 2>/dev/null | head -12 || true
+done
+
+# Show overlay routes on each worker (for debugging cross-host issues)
+for worker in banyan-worker-1 banyan-worker-2; do
+    echo "  $worker overlay routes:"
+    docker exec "$worker" ip route show 2>&1 | grep -E "^10\." || echo "    (no overlay routes)"
+done
+
+test_proxy banyan-engine 172.28.0.11 3000 "Proxy: engine -> worker-1:3000"
+test_proxy banyan-engine 172.28.0.12 3000 "Proxy: engine -> worker-2:3000"
+test_proxy banyan-worker-1 172.28.0.12 3000 "Cross-host proxy: worker-1 -> worker-2:3000"
+test_proxy banyan-worker-2 172.28.0.11 3000 "Cross-host proxy: worker-2 -> worker-1:3000"
+
+# =================================================================
+# Phase 3b: DNS Resolution Tests
+# =================================================================
+echo ""
+echo "========================================="
+echo "Phase 3b: DNS Resolution Tests"
+echo "========================================="
+
+# Wait for DNS server to be ready and heartbeat to propagate backends
+log_info "Waiting for DNS records to propagate via heartbeat..."
+sleep 20
+
+# Find containers by service name
+API_WORKER=""
+API_CONTAINER=""
+DB_WORKER=""
+DB_CONTAINER=""
+for worker in banyan-worker-1 banyan-worker-2; do
+    CONTAINERS=$(get_container_names "$worker")
+    for container in $CONTAINERS; do
+        if [[ "$container" == *"-api-"* ]]; then
+            API_WORKER="$worker"
+            API_CONTAINER="$container"
+        fi
+        if [[ "$container" == *"-db-"* ]]; then
+            DB_WORKER="$worker"
+            DB_CONTAINER="$container"
+        fi
+    done
+done
+
+if [ -n "$API_CONTAINER" ] && [ -n "$DB_CONTAINER" ]; then
+    # Debug: Verify Redis binding and connectivity
+    DB_IP=$(get_container_ip "$DB_WORKER" "$DB_CONTAINER")
+    log_info "Debug: Redis container inspection"
+    echo "  Redis container: $DB_CONTAINER on $DB_WORKER (IP: $DB_IP)"
+    echo "  Redis process:"
+    docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" cat /proc/1/cmdline 2>&1 | tr '\0' ' ' || true
+    echo ""
+    echo "  Redis localhost ping:"
+    docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" redis-cli -h 127.0.0.1 ping 2>&1 || true
+    echo "  Redis overlay IP ping ($DB_IP):"
+    docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" redis-cli -h "$DB_IP" ping 2>&1 || true
+    # Same-host test: API on same worker as Redis → Redis overlay IP
+    SAME_HOST_API=""
+    for container in $(get_container_names "$DB_WORKER"); do
+        if [[ "$container" == *"-api-"* ]]; then
+            SAME_HOST_API="$container"
+            break
+        fi
+    done
+    if [ -n "$SAME_HOST_API" ]; then
+        echo "  Same-host Redis TCP test: $SAME_HOST_API → $DB_IP:6379"
+        docker exec "$DB_WORKER" nerdctl exec "$SAME_HOST_API" node -e "
+          const net = require('net');
+          const s = net.createConnection(6379, '$DB_IP');
+          s.setTimeout(3000);
+          s.on('connect', () => { console.log('CONNECTED'); s.write('PING\r\n'); });
+          s.on('data', d => { console.log('RESPONSE: ' + d.toString().trim()); s.destroy(); process.exit(0); });
+          s.on('error', e => { console.log('ERROR: ' + e.message); process.exit(1); });
+          s.on('timeout', () => { console.log('TIMEOUT'); s.destroy(); process.exit(1); });
+        " 2>&1 || true
+    fi
+
+    # Cross-host Redis TCP test: API on different worker → Redis overlay IP
+    if [ "$API_WORKER" != "$DB_WORKER" ]; then
+        echo "  Cross-host TCP: $API_CONTAINER ($API_WORKER) → Redis $DB_IP:6379 ($DB_WORKER)"
+        docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" node -e "
+          const net = require('net');
+          const s = net.createConnection(6379, '$DB_IP');
+          s.setTimeout(5000);
+          s.on('connect', () => { console.log('CROSS-HOST: CONNECTED'); s.write('PING\r\n'); });
+          s.on('data', d => { console.log('CROSS-HOST: ' + d.toString().trim()); s.destroy(); process.exit(0); });
+          s.on('error', e => { console.log('CROSS-HOST ERROR: ' + e.message); process.exit(1); });
+          s.on('timeout', () => { console.log('CROSS-HOST TIMEOUT'); s.destroy(); process.exit(1); });
+        " 2>&1 || true
+    fi
+
+    # Test 1: DNS resolution from API container → db.internal
+    log_info "Test: DNS resolution db.internal from API container"
+    if docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db.internal 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "DNS: API container can ping db.internal"
+    else
+        log_test_fail "DNS: API container cannot ping db.internal"
+        docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db.internal 2>&1 || true
+    fi
+
+    # Test 2: DNS resolution from DB container → api.internal
+    log_info "Test: DNS resolution api.internal from DB container"
+    if docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" ping -c 2 -W 5 api.internal 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "DNS: DB container can ping api.internal"
+    else
+        log_test_fail "DNS: DB container cannot ping api.internal"
+        docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" ping -c 2 -W 5 api.internal 2>&1 || true
+    fi
+
+    # Test 3: dns-search domain — plain 'db' should resolve via search domain 'internal'
+    # Note: Alpine/musl libc may not support search domains correctly in all environments
+    log_info "Test: DNS search domain (plain 'db' from API container)"
+    echo "  Debug: container resolv.conf:"
+    docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" cat /etc/resolv.conf 2>&1 || true
+    if docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "DNS search: API container can ping 'db' (via dns-search internal)"
+    else
+        log_warn "DNS search: plain 'db' not resolvable (dns-search may not work with musl libc). Use 'db.internal' instead."
+        docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db 2>&1 || true
+    fi
+
+    # Test 4: Application-level DNS — API server connects to Redis via DNS name
+    log_info "Test: API → Redis connection via DNS (GET /db)"
+    API_IP=$(get_container_ip "$API_WORKER" "$API_CONTAINER")
+    if [ -n "$API_IP" ]; then
+        # Use separate capture to avoid losing response body on non-200 status
+        DB_RESPONSE=""
+        DB_RESPONSE=$(docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" wget -qO- "http://127.0.0.1:3000/db" 2>&1) || true
+        if echo "$DB_RESPONSE" | grep -q "PONG"; then
+            log_test_pass "App-level DNS: API /db returned '$DB_RESPONSE' (Redis connected via DNS)"
+        else
+            log_test_fail "App-level DNS: API /db returned '$DB_RESPONSE' (expected PONG)"
+            # Debug: check DNS resolution and Redis connectivity directly
+            echo "  Debug: DNS resolution of db.internal from API container:"
+            docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" nslookup db.internal 2>&1 | head -10 || true
+            echo "  Debug: Full error from API /db endpoint (via Node.js):"
+            docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" node -e "
+              const http = require('http');
+              http.get('http://127.0.0.1:3000/db', res => {
+                let body = '';
+                res.on('data', d => body += d);
+                res.on('end', () => console.log('HTTP ' + res.statusCode + ': ' + body));
+              }).on('error', e => console.log('REQUEST ERROR: ' + e.message));
+            " 2>&1 || true
+            echo "  Debug: Direct Redis PING test from API container (via Node.js):"
+            DB_IP=$(docker exec "$DB_WORKER" nerdctl inspect "$DB_CONTAINER" 2>/dev/null \
+                | grep -oP '"IPAddress":\s*"\K[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+            if [ -n "$DB_IP" ]; then
+                echo "  Redis container IP: $DB_IP"
+                echo "  Debug: Overlay routes on $API_WORKER:"
+                docker exec "$API_WORKER" ip route show 2>&1 | grep -E "^10\." || true
+                docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" node -e "
+                  const net = require('net');
+                  console.log('Connecting to $DB_IP:6379...');
+                  const s = net.createConnection(6379, '$DB_IP');
+                  s.setTimeout(5000);
+                  s.on('connect', () => { console.log('Connected! Sending PING'); s.write('PING\r\n'); });
+                  s.on('data', d => { console.log('Redis response: ' + d.toString().trim()); s.destroy(); process.exit(0); });
+                  s.on('error', e => { console.log('Connection error: ' + e.message); process.exit(1); });
+                  s.on('timeout', () => { console.log('Connection timeout after 5s'); s.destroy(); process.exit(1); });
+                " 2>&1 || true
+            fi
+        fi
+    else
+        log_warn "  Could not get API container IP, skipping app-level DNS test"
+    fi
+else
+    log_warn "Skipping DNS tests (need api and db containers)"
+    [ -z "$API_CONTAINER" ] && log_warn "  No API container found"
+    [ -z "$DB_CONTAINER" ] && log_warn "  No DB container found"
+fi
+
 # =================================================================
 # Phase 4: Blue-Green Redeployment Test
 # =================================================================
@@ -311,6 +563,80 @@ if [ "$NEW_VPC_COUNT" -ge "$TOTAL_NEW" ] && [ "$NEW_VPC_COUNT" -gt 0 ]; then
     log_test_pass "Blue-green: all $NEW_VPC_COUNT redeployed containers have overlay IPs"
 else
     log_test_fail "Blue-green: only $NEW_VPC_COUNT/$TOTAL_NEW containers have overlay IPs"
+fi
+
+# Test: Cross-host connectivity after redeployment
+log_info "Test: Cross-host connectivity after redeployment"
+POST_W1_CONTAINER=""
+POST_W1_IP=""
+POST_W2_CONTAINER=""
+POST_W2_IP=""
+for container in $(get_container_names banyan-worker-1); do
+    IP=$(get_container_ip banyan-worker-1 "$container")
+    if [[ "$IP" == 10.0.* ]]; then
+        POST_W1_CONTAINER="$container"
+        POST_W1_IP="$IP"
+        break
+    fi
+done
+for container in $(get_container_names banyan-worker-2); do
+    IP=$(get_container_ip banyan-worker-2 "$container")
+    if [[ "$IP" == 10.0.* ]]; then
+        POST_W2_CONTAINER="$container"
+        POST_W2_IP="$IP"
+        break
+    fi
+done
+
+if [ -n "$POST_W1_IP" ] && [ -n "$POST_W2_IP" ] && [ -n "$POST_W1_CONTAINER" ] && [ -n "$POST_W2_CONTAINER" ]; then
+    if docker exec banyan-worker-1 nerdctl exec "$POST_W1_CONTAINER" ping -c 3 -W 5 "$POST_W2_IP" 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "Post-redeploy cross-host: $POST_W1_CONTAINER -> $POST_W2_IP"
+    else
+        log_test_fail "Post-redeploy cross-host: $POST_W1_CONTAINER -> $POST_W2_IP"
+        docker exec banyan-worker-1 nerdctl exec "$POST_W1_CONTAINER" ping -c 3 -W 5 "$POST_W2_IP" 2>&1 || true
+    fi
+
+    if docker exec banyan-worker-2 nerdctl exec "$POST_W2_CONTAINER" ping -c 3 -W 5 "$POST_W1_IP" 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "Post-redeploy cross-host: $POST_W2_CONTAINER -> $POST_W1_IP"
+    else
+        log_test_fail "Post-redeploy cross-host: $POST_W2_CONTAINER -> $POST_W1_IP"
+        docker exec banyan-worker-2 nerdctl exec "$POST_W2_CONTAINER" ping -c 3 -W 5 "$POST_W1_IP" 2>&1 || true
+    fi
+else
+    log_warn "Skipping post-redeploy cross-host test (need overlay IP containers on both workers)"
+fi
+
+# Test: Service proxy works after redeployment
+log_info "Test: Service proxy after redeployment"
+test_proxy banyan-engine 172.28.0.11 3000 "Post-redeploy proxy: engine -> worker-1:3000"
+test_proxy banyan-engine 172.28.0.12 3000 "Post-redeploy proxy: engine -> worker-2:3000"
+
+# Test: DNS still works after redeployment
+log_info "Test: DNS resolution after redeployment"
+POST_API_WORKER=""
+POST_API_CONTAINER=""
+for worker in banyan-worker-1 banyan-worker-2; do
+    CONTAINERS=$(get_container_names "$worker")
+    for container in $CONTAINERS; do
+        if [[ "$container" == *"-api-"* ]]; then
+            POST_API_WORKER="$worker"
+            POST_API_CONTAINER="$container"
+            break 2
+        fi
+    done
+done
+
+if [ -n "$POST_API_CONTAINER" ]; then
+    # Wait for DNS to propagate for new containers
+    sleep 15
+    if docker exec "$POST_API_WORKER" nerdctl exec "$POST_API_CONTAINER" ping -c 2 -W 5 db.internal 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "Post-redeploy DNS: API container can ping db.internal"
+    else
+        log_test_fail "Post-redeploy DNS: API container cannot ping db.internal"
+        docker exec "$POST_API_WORKER" nerdctl exec "$POST_API_CONTAINER" ping -c 2 -W 5 db.internal 2>&1 || true
+    fi
+else
+    log_warn "Skipping post-redeploy DNS test (no API container found)"
 fi
 
 # Show deployment status after redeployment

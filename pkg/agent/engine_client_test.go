@@ -416,8 +416,8 @@ func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
 	engineSrv := &backendsTestEngineServer{
 		store: store,
 		backends: []*banyanpb.ServiceBackend{
-			{ContainerName: "app-web-0", ContainerIp: "10.0.1.5", Ports: []string{"8080:80"}, AgentName: "worker-1"},
-			{ContainerName: "app-web-1", ContainerIp: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
+			{ContainerName: "app-web-0", ContainerIp: "10.0.1.5", Ports: []string{"8080:80"}, AgentName: "worker-1", ServiceName: "web"},
+			{ContainerName: "app-web-1", ContainerIp: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2", ServiceName: "web"},
 		},
 	}
 	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
@@ -463,6 +463,12 @@ func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
 	}
 	if backends[1].AgentName != "worker-2" {
 		t.Errorf("expected agent worker-2, got %s", backends[1].AgentName)
+	}
+	if backends[0].ServiceName != "web" {
+		t.Errorf("expected ServiceName 'web', got %q", backends[0].ServiceName)
+	}
+	if backends[1].ServiceName != "web" {
+		t.Errorf("expected ServiceName 'web', got %q", backends[1].ServiceName)
 	}
 }
 

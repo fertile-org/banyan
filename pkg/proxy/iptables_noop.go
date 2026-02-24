@@ -10,8 +10,9 @@ func NewNoopIPTables() *NoopIPTables { return &NoopIPTables{} }
 func (n *NoopIPTables) NewChain(table, chain string) error                    { return nil }
 func (n *NoopIPTables) ClearChain(table, chain string) error                  { return nil }
 func (n *NoopIPTables) DeleteChain(table, chain string) error                 { return nil }
-func (n *NoopIPTables) Append(table, chain string, rulespec ...string) error  { return nil }
-func (n *NoopIPTables) Delete(table, chain string, rulespec ...string) error  { return nil }
+func (n *NoopIPTables) Append(table, chain string, rulespec ...string) error              { return nil }
+func (n *NoopIPTables) Insert(table, chain string, pos int, rulespec ...string) error    { return nil }
+func (n *NoopIPTables) Delete(table, chain string, rulespec ...string) error             { return nil }
 func (n *NoopIPTables) Exists(table, chain string, rulespec ...string) (bool, error) {
 	return false, nil
 }

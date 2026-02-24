@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"net"
 	"os/exec"
 	"strings"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
@@ -48,6 +50,10 @@ type Agent struct {
 	vpcEnabled     bool
 	overlayDriver  overlay.OverlayDriver
 	remoteBackends map[string]ServiceBackend // key: containerName
+	dnsManager     *dns.Manager
+	dnsServer      *dns.Server
+	gatewayIP      string          // bridge gateway IP (e.g., "10.0.45.1")
+	registeredDNS  map[string]bool // tracked DNS hostnames for stale cleanup
 }
 
 // Package-level function variables for testing.
@@ -58,7 +64,8 @@ var (
 	containerIDGetter   = getContainerID
 	containerRemover    = removeContainer
 	containerIPGetter   = getContainerIP
-	vpcNetworkEnabled   bool // set by Agent.Run() after VPC init
+	vpcNetworkEnabled   bool   // set by Agent.Run() after VPC init
+	dnsGatewayIPAddr    string // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
 )
 
 // New creates a new Agent with a random session token.
@@ -73,6 +80,7 @@ func New(opts *Options) (*Agent, error) {
 		containers:     &containerTracker{},
 		sessionToken:   hex.EncodeToString(tokenBytes),
 		remoteBackends: make(map[string]ServiceBackend),
+		registeredDNS:  make(map[string]bool),
 	}, nil
 }
 
@@ -125,6 +133,12 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.vpcEnabled = true
 		vpcNetworkEnabled = true
 		fmt.Println("VPC overlay networking ready")
+
+		// Start DNS server on the bridge gateway IP
+		if dnsErr := a.initializeDNS(ctx, vpcConfig.AllocatedSubnet); dnsErr != nil {
+			return fmt.Errorf("DNS server init failed: %w", dnsErr)
+		}
+		dnsGatewayIPAddr = a.gatewayIP
 	}
 
 	// Start the task execution loop
@@ -140,6 +154,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	go startAgentGRPC(ctx, &NerdctlLogProvider{}, a.opts.APIPort, a.sessionToken)
 
 	<-ctx.Done()
+
+	// Stop DNS server
+	if a.dnsServer != nil {
+		a.dnsServer.Stop()
+	}
+	dnsGatewayIPAddr = ""
 
 	// Clean up overlay networking
 	if a.overlayDriver != nil {
@@ -212,6 +232,12 @@ func (a *Agent) processTasks(ctx context.Context) {
 				fmt.Printf("[Agent] WARNING: proxy setup failed for %s: %v\n", task.ContainerName, proxyErr)
 			}
 			a.containers.Add(pbTask.ContainerName, pbTask.Id, containerIP)
+
+			// Register local container in DNS immediately (no wait for heartbeat)
+			if a.dnsManager != nil && task.ServiceName != "" && containerIP != "" {
+				hostname := task.ServiceName + ".internal"
+				a.dnsManager.RegisterHost(ctx, hostname, net.ParseIP(containerIP)) //nolint:errcheck // best-effort
+			}
 		}
 
 		fmt.Printf("[Agent] Task %s COMPLETED (container: %s)\n", pbTask.Id, pbTask.ContainerName)
@@ -344,6 +370,9 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 
 	if vpcEnabled {
 		args = append(args, "--net", "banyan")
+		if dnsGatewayIPAddr != "" {
+			args = append(args, "--dns", dnsGatewayIPAddr, "--dns-search", "internal")
+		}
 	}
 
 	for _, env := range task.Environment {
@@ -392,6 +421,9 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 			}
 			if a.vpcEnabled && a.proxy != nil {
 				a.reconcileRemoteBackends(backends)
+			}
+			if a.dnsManager != nil {
+				a.reconcileDNS(ctx, backends)
 			}
 		}
 	}
@@ -482,6 +514,7 @@ type ServiceBackend struct {
 	ContainerIP   string
 	Ports         []string
 	AgentName     string
+	ServiceName   string
 }
 
 // reconcileRemoteBackends adds/removes remote backends from the proxy

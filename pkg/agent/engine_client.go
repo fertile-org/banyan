@@ -123,6 +123,7 @@ func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string,
 			ContainerIP:   b.ContainerIp,
 			Ports:         b.Ports,
 			AgentName:     b.AgentName,
+			ServiceName:   b.ServiceName,
 		})
 	}
 

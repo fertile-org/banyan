@@ -7,14 +7,19 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // Package-level function variables for testing VPC networking.
 var (
-	prerequisiteChecker    = checkVPCPrerequisites
-	overlayDriverFactory   = defaultOverlayDriverFactory
-	hostIPDetector         = detectHostIP
+	prerequisiteChecker  = checkVPCPrerequisites
+	overlayDriverFactory = defaultOverlayDriverFactory
+	hostIPDetector       = detectHostIP
+	dnsManagerFactory    = func() *dns.Manager { return dns.NewManager() }
+	dnsServerFactory     = func(m *dns.Manager, c dns.ServerConfig) *dns.Server {
+		return dns.NewServer(m, c)
+	}
 )
 
 const (
@@ -45,13 +50,18 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 		return fmt.Errorf("failed to detect host IP: %w", err)
 	}
 
-	// 4. Create overlay driver and call Init()
+	// 4. Enable IP forwarding (required for routing between bridge and VXLAN)
+	if writeErr := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0o644); writeErr != nil {
+		fmt.Printf("  WARNING: failed to enable IP forwarding: %v\n", writeErr)
+	}
+
+	// 5. Create overlay driver and call Init()
 	driver := overlayDriverFactory()
 	if initErr := driver.Init(ctx, *subnet, hostIP); initErr != nil {
 		return fmt.Errorf("overlay init failed: %w", initErr)
 	}
 
-	// 5. Write CNI config via driver
+	// 6. Write CNI config via driver
 	if writeErr := driver.WriteCNIConfig(*subnet); writeErr != nil {
 		return fmt.Errorf("failed to write CNI config: %w", writeErr)
 	}
@@ -120,4 +130,76 @@ func detectHostIP() (net.IP, error) {
 		return ip, nil
 	}
 	return nil, fmt.Errorf("no non-loopback IPv4 address found")
+}
+
+// initializeDNS creates a DNS manager and server, binding to the bridge gateway IP.
+// Called once during Agent.Run() after VPC networking is initialized.
+func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error {
+	_, ipnet, err := net.ParseCIDR(allocatedSubnet)
+	if err != nil {
+		return fmt.Errorf("invalid subnet %q: %w", allocatedSubnet, err)
+	}
+
+	// Gateway IP is the first usable IP in the subnet (VTEP IP)
+	gatewayIP := overlay.VTEPIP(*ipnet)
+
+	manager := dnsManagerFactory()
+	server := dnsServerFactory(manager, dns.ServerConfig{
+		BindAddr:     gatewayIP.String() + ":53",
+		InternalZone: "internal",
+		UpstreamDNS:  "8.8.8.8:53",
+	})
+
+	if startErr := server.Start(); startErr != nil {
+		return fmt.Errorf("DNS server failed to start: %w", startErr)
+	}
+
+	a.dnsManager = manager
+	a.dnsServer = server
+	a.gatewayIP = gatewayIP.String()
+	fmt.Printf("  DNS server started (bind: %s:53)\n", a.gatewayIP)
+
+	return nil
+}
+
+// reconcileDNS updates the DNS manager with the current set of service backends.
+// It removes stale hostnames and rebuilds all desired entries for clean state.
+func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
+	if a.dnsManager == nil {
+		return
+	}
+
+	// Build desired: hostname → set of IPs
+	desired := map[string]map[string]bool{}
+	for _, b := range backends {
+		if b.ServiceName == "" || b.ContainerIP == "" {
+			continue
+		}
+		hostname := b.ServiceName + ".internal"
+		if desired[hostname] == nil {
+			desired[hostname] = map[string]bool{}
+		}
+		desired[hostname][b.ContainerIP] = true
+	}
+
+	// Remove stale hostnames (in registeredDNS but not in desired)
+	for hostname := range a.registeredDNS {
+		if _, ok := desired[hostname]; !ok {
+			a.dnsManager.UnregisterHost(ctx, hostname) //nolint:errcheck // best-effort cleanup
+		}
+	}
+
+	// Rebuild all desired entries (unregister + re-register for clean state)
+	for hostname, ips := range desired {
+		a.dnsManager.UnregisterHost(ctx, hostname) //nolint:errcheck // may not exist yet
+		for ipStr := range ips {
+			a.dnsManager.RegisterHost(ctx, hostname, net.ParseIP(ipStr)) //nolint:errcheck // best-effort
+		}
+	}
+
+	// Track what we registered
+	a.registeredDNS = make(map[string]bool, len(desired))
+	for hostname := range desired {
+		a.registeredDNS[hostname] = true
+	}
 }

@@ -1044,12 +1044,11 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 			if err := s.store.Get(ctx, taskKey, &task); err != nil {
 				continue
 			}
-			// Only include running containers with ports and an IP
+			// Only include running containers with an IP
 			if task.Type != types.TaskTypeCreateAndStart ||
 				task.Status != types.StatusCompleted ||
 				task.ContainerStatus != types.StatusRunning ||
-				task.ContainerIP == "" ||
-				len(task.Ports) == 0 {
+				task.ContainerIP == "" {
 				continue
 			}
 			backends = append(backends, &banyanpb.ServiceBackend{
@@ -1057,6 +1056,7 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 				ContainerIp:   task.ContainerIP,
 				Ports:         task.Ports,
 				AgentName:     task.AgentID,
+				ServiceName:   task.ServiceName,
 			})
 		}
 	}

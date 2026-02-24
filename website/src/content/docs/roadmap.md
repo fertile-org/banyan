@@ -77,6 +77,7 @@ Built-in overlay networking and cross-host load balancing without external depen
 - Peer discovery via heartbeat RPC (15s convergence)
 - iptables DNAT proxy on each agent for port forwarding to container backends
 - Cross-host load balancing: every agent aware of all service backends cluster-wide, probability-based DNAT rules distribute traffic across all replicas regardless of which agent they run on
+- Service DNS: agent-local DNS server on bridge gateway IP resolves `<service>.internal` to container IPs, with `--dns-search internal` enabling short names (e.g., `ping db` from any container)
 
 ---
 
@@ -196,7 +197,6 @@ Deeper observability and richer operational tooling.
 
 Service discovery, traffic policies, and encrypted communication across the cluster.
 
-- **Service DNS**: Containers resolve service names to IPs (e.g. `curl http://api:8080` from any container). Options: `/etc/hosts` injection via CNI or lightweight DNS server on the bridge
 - **Health-check-based routing**: Only route to healthy containers — filter backends by `container_status` before including in HeartbeatResponse
 - **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
 - **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)

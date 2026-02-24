@@ -95,6 +95,7 @@ message ServiceBackend {
   string container_ip = 2;
   repeated string ports = 3;
   string agent_name = 4;
+  string service_name = 5;
 }
 
 message ReportContainerHealthResponse {}

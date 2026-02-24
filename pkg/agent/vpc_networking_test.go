@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
@@ -347,7 +348,12 @@ func TestReconcileVPCPeers(t *testing.T) {
 }
 
 func TestBuildNerdctlRunArgs_VPC(t *testing.T) {
-	t.Run("with VPC enabled", func(t *testing.T) {
+	// Save and restore dnsGatewayIPAddr (tests may set it)
+	origDNSGateway := dnsGatewayIPAddr
+	t.Cleanup(func() { dnsGatewayIPAddr = origDNSGateway })
+
+	t.Run("with VPC enabled no DNS", func(t *testing.T) {
+		dnsGatewayIPAddr = "" // no DNS
 		task := &types.TaskRecord{
 			ContainerName: "myapp-web-0",
 			Image:         "nginx:alpine",
@@ -364,7 +370,26 @@ func TestBuildNerdctlRunArgs_VPC(t *testing.T) {
 		}
 	})
 
+	t.Run("with VPC and DNS enabled", func(t *testing.T) {
+		dnsGatewayIPAddr = "10.0.45.1"
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Image:         "nginx:alpine",
+		}
+		args := buildNerdctlRunArgs(task, true)
+		expected := []string{"run", "-d", "--name", "myapp-web-0", "--net", "banyan", "--dns", "10.0.45.1", "--dns-search", "internal", "nginx:alpine"}
+		if len(args) != len(expected) {
+			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+		}
+		for i, exp := range expected {
+			if args[i] != exp {
+				t.Errorf("arg[%d]: expected %q, got %q", i, exp, args[i])
+			}
+		}
+	})
+
 	t.Run("without VPC enabled", func(t *testing.T) {
+		dnsGatewayIPAddr = "10.0.45.1" // DNS set but VPC disabled — should NOT add --dns
 		task := &types.TaskRecord{
 			ContainerName: "myapp-web-0",
 			Image:         "nginx:alpine",
@@ -382,6 +407,7 @@ func TestBuildNerdctlRunArgs_VPC(t *testing.T) {
 	})
 
 	t.Run("VPC with env and command", func(t *testing.T) {
+		dnsGatewayIPAddr = ""
 		task := &types.TaskRecord{
 			ContainerName: "myapp-web-0",
 			Image:         "nginx:alpine",
@@ -423,4 +449,196 @@ func TestDetectHostIP(t *testing.T) {
 	if ip.IsLoopback() {
 		t.Errorf("expected non-loopback IP, got %s", ip.String())
 	}
+}
+
+func TestInitializeDNS(t *testing.T) {
+	origManagerFactory := dnsManagerFactory
+	origServerFactory := dnsServerFactory
+	t.Cleanup(func() {
+		dnsManagerFactory = origManagerFactory
+		dnsServerFactory = origServerFactory
+	})
+
+	t.Run("creates manager and server with correct gateway IP", func(t *testing.T) {
+		var capturedBindAddr string
+		dnsManagerFactory = func() *dns.Manager { return dns.NewManager() }
+		dnsServerFactory = func(m *dns.Manager, c dns.ServerConfig) *dns.Server {
+			capturedBindAddr = c.BindAddr
+			// Use a high port to avoid permission issues in tests
+			c.BindAddr = "127.0.0.1:0" // will fail to bind but we can check captured values
+			return dns.NewServer(m, c)
+		}
+
+		a := &Agent{registeredDNS: make(map[string]bool)}
+		// 10.0.45.0/24 → gateway is 10.0.45.1 (VTEP IP)
+		err := a.initializeDNS(context.Background(), "10.0.45.0/24")
+
+		// The server.Start() may fail on binding, that's OK for this test
+		// We just verify the gateway IP calculation and manager/server creation
+		if err != nil {
+			// Expected in test environments without root
+			t.Logf("initializeDNS returned (expected): %v", err)
+		}
+
+		if capturedBindAddr != "10.0.45.1:53" {
+			t.Errorf("expected bind addr '10.0.45.1:53', got %q", capturedBindAddr)
+		}
+	})
+
+	t.Run("fails on invalid subnet", func(t *testing.T) {
+		a := &Agent{registeredDNS: make(map[string]bool)}
+		err := a.initializeDNS(context.Background(), "not-a-cidr")
+		if err == nil {
+			t.Fatal("expected error for invalid subnet")
+		}
+		if !strings.Contains(err.Error(), "invalid subnet") {
+			t.Errorf("expected 'invalid subnet' in error, got: %v", err)
+		}
+	})
+}
+
+func TestReconcileDNS(t *testing.T) {
+	t.Run("registers backends by service name", func(t *testing.T) {
+		manager := dns.NewManager()
+		a := &Agent{
+			dnsManager:    manager,
+			registeredDNS: make(map[string]bool),
+		}
+
+		backends := []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", ServiceName: "web", AgentName: "worker-1"},
+			{ContainerName: "app-web-1", ContainerIP: "10.0.2.5", ServiceName: "web", AgentName: "worker-2"},
+			{ContainerName: "app-db-0", ContainerIP: "10.0.1.6", ServiceName: "db", AgentName: "worker-1"},
+		}
+
+		a.reconcileDNS(context.Background(), backends)
+
+		// Verify web.internal resolves to both IPs
+		ctx := context.Background()
+		ips, err := manager.LookupHost(ctx, "web.internal")
+		if err != nil {
+			t.Fatalf("LookupHost web.internal failed: %v", err)
+		}
+		if len(ips) != 2 {
+			t.Fatalf("expected 2 IPs for web.internal, got %d", len(ips))
+		}
+
+		// Verify db.internal resolves
+		ips, err = manager.LookupHost(ctx, "db.internal")
+		if err != nil {
+			t.Fatalf("LookupHost db.internal failed: %v", err)
+		}
+		if len(ips) != 1 {
+			t.Fatalf("expected 1 IP for db.internal, got %d", len(ips))
+		}
+
+		// Verify tracking
+		if len(a.registeredDNS) != 2 {
+			t.Errorf("expected 2 registered hostnames, got %d", len(a.registeredDNS))
+		}
+		if !a.registeredDNS["web.internal"] {
+			t.Error("expected web.internal in registeredDNS")
+		}
+		if !a.registeredDNS["db.internal"] {
+			t.Error("expected db.internal in registeredDNS")
+		}
+	})
+
+	t.Run("removes stale hostnames", func(t *testing.T) {
+		manager := dns.NewManager()
+		ctx := context.Background()
+
+		// Pre-register a hostname
+		manager.RegisterHost(ctx, "old.internal", net.ParseIP("10.0.1.99"))
+
+		a := &Agent{
+			dnsManager:    manager,
+			registeredDNS: map[string]bool{"old.internal": true},
+		}
+
+		// Reconcile with only new backends (old.internal should be removed)
+		backends := []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", ServiceName: "web", AgentName: "worker-1"},
+		}
+
+		a.reconcileDNS(ctx, backends)
+
+		// old.internal should be gone
+		_, err := manager.LookupHost(ctx, "old.internal")
+		if err == nil {
+			t.Error("expected old.internal to be removed")
+		}
+
+		// web.internal should exist
+		ips, err := manager.LookupHost(ctx, "web.internal")
+		if err != nil {
+			t.Fatalf("LookupHost web.internal failed: %v", err)
+		}
+		if len(ips) != 1 {
+			t.Errorf("expected 1 IP for web.internal, got %d", len(ips))
+		}
+	})
+
+	t.Run("skips empty service names and IPs", func(t *testing.T) {
+		manager := dns.NewManager()
+		a := &Agent{
+			dnsManager:    manager,
+			registeredDNS: make(map[string]bool),
+		}
+
+		backends := []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", ServiceName: "", AgentName: "worker-1"},  // no service name
+			{ContainerName: "app-db-0", ContainerIP: "", ServiceName: "db", AgentName: "worker-1"},          // no IP
+			{ContainerName: "app-api-0", ContainerIP: "10.0.1.7", ServiceName: "api", AgentName: "worker-1"}, // valid
+		}
+
+		a.reconcileDNS(context.Background(), backends)
+
+		if len(a.registeredDNS) != 1 {
+			t.Errorf("expected 1 registered hostname, got %d", len(a.registeredDNS))
+		}
+		if !a.registeredDNS["api.internal"] {
+			t.Error("expected api.internal in registeredDNS")
+		}
+	})
+
+	t.Run("no-op when manager is nil", func(t *testing.T) {
+		a := &Agent{
+			dnsManager:    nil,
+			registeredDNS: make(map[string]bool),
+		}
+
+		// Should not panic
+		a.reconcileDNS(context.Background(), []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", ServiceName: "web"},
+		})
+
+		if len(a.registeredDNS) != 0 {
+			t.Errorf("expected 0 registered hostnames, got %d", len(a.registeredDNS))
+		}
+	})
+
+	t.Run("handles empty backends list", func(t *testing.T) {
+		manager := dns.NewManager()
+		ctx := context.Background()
+
+		// Pre-register
+		manager.RegisterHost(ctx, "old.internal", net.ParseIP("10.0.1.99"))
+
+		a := &Agent{
+			dnsManager:    manager,
+			registeredDNS: map[string]bool{"old.internal": true},
+		}
+
+		a.reconcileDNS(ctx, nil)
+
+		// old.internal should be removed
+		_, err := manager.LookupHost(ctx, "old.internal")
+		if err == nil {
+			t.Error("expected old.internal to be removed with empty backends")
+		}
+		if len(a.registeredDNS) != 0 {
+			t.Errorf("expected 0 registered hostnames, got %d", len(a.registeredDNS))
+		}
+	})
 }

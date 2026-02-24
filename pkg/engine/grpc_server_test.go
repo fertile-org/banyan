@@ -3630,7 +3630,7 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Task with IP, ports, running, completed — should be included
 	store.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
-		ID: "task-1", AgentID: "worker-1",
+		ID: "task-1", AgentID: "worker-1", ServiceName: "web",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-0", ContainerStatus: "running",
 		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
@@ -3638,15 +3638,15 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Task without IP — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
-		ID: "task-2", AgentID: "worker-1",
+		ID: "task-2", AgentID: "worker-1", ServiceName: "api",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-api-0", ContainerStatus: "running",
 		Ports: []string{"9090:90"},
 	})
 
-	// Task with IP but no ports — should be excluded
+	// Task with IP but no ports — should be INCLUDED (DNS needs portless containers)
 	store.Save(ctx, types.KeyTasks+"worker-2/task-3", &types.TaskRecord{
-		ID: "task-3", AgentID: "worker-2",
+		ID: "task-3", AgentID: "worker-2", ServiceName: "db",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-worker-0", ContainerStatus: "running",
 		ContainerIP: "10.0.2.5",
@@ -3654,7 +3654,7 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Task with IP and ports but not running — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
-		ID: "task-4", AgentID: "worker-2",
+		ID: "task-4", AgentID: "worker-2", ServiceName: "db",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-db-0", ContainerStatus: "exited",
 		ContainerIP: "10.0.2.6", Ports: []string{"5432:5432"},
@@ -3669,7 +3669,7 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Full match on worker-2
 	store.Save(ctx, types.KeyTasks+"worker-2/task-6", &types.TaskRecord{
-		ID: "task-6", AgentID: "worker-2",
+		ID: "task-6", AgentID: "worker-2", ServiceName: "web",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-1", ContainerStatus: "running",
 		ContainerIP: "10.0.2.7", Ports: []string{"8080:80"},
@@ -3677,26 +3677,35 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	backends := srv.collectServiceBackends(ctx)
 
-	if len(backends) != 2 {
-		t.Fatalf("expected 2 backends, got %d", len(backends))
+	// 3 backends: app-web-0 (with ports), app-worker-0 (no ports but has IP), app-web-1 (with ports)
+	if len(backends) != 3 {
+		t.Fatalf("expected 3 backends, got %d", len(backends))
 	}
 
 	// Verify the included backends
-	names := make(map[string]bool)
+	byName := make(map[string]*banyanpb.ServiceBackend)
 	for _, b := range backends {
-		names[b.ContainerName] = true
+		byName[b.ContainerName] = b
 		if b.ContainerIp == "" {
 			t.Errorf("backend %s has empty IP", b.ContainerName)
 		}
-		if len(b.Ports) == 0 {
-			t.Errorf("backend %s has no ports", b.ContainerName)
-		}
 	}
-	if !names["app-web-0"] {
+	if _, ok := byName["app-web-0"]; !ok {
 		t.Error("expected app-web-0 in backends")
 	}
-	if !names["app-web-1"] {
+	if _, ok := byName["app-web-1"]; !ok {
 		t.Error("expected app-web-1 in backends")
+	}
+	if _, ok := byName["app-worker-0"]; !ok {
+		t.Error("expected app-worker-0 in backends (portless container with IP)")
+	}
+
+	// Verify ServiceName is populated
+	if byName["app-web-0"].ServiceName != "web" {
+		t.Errorf("expected ServiceName 'web' for app-web-0, got %q", byName["app-web-0"].ServiceName)
+	}
+	if byName["app-worker-0"].ServiceName != "db" {
+		t.Errorf("expected ServiceName 'db' for app-worker-0, got %q", byName["app-worker-0"].ServiceName)
 	}
 }
 
@@ -3715,7 +3724,7 @@ func TestHeartbeat_ReturnsServiceBackends(t *testing.T) {
 	// Register agent and add a running container with IP
 	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
 	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb1", &types.TaskRecord{
-		ID: "task-hb1", AgentID: "worker-1",
+		ID: "task-hb1", AgentID: "worker-1", ServiceName: "web",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-0", ContainerStatus: "running",
 		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
@@ -3738,6 +3747,9 @@ func TestHeartbeat_ReturnsServiceBackends(t *testing.T) {
 	}
 	if b.AgentName != "worker-1" {
 		t.Errorf("expected agent name worker-1, got %s", b.AgentName)
+	}
+	if b.ServiceName != "web" {
+		t.Errorf("expected service name web, got %s", b.ServiceName)
 	}
 }
 

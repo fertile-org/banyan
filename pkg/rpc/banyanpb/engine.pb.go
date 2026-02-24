@@ -699,6 +699,7 @@ type ServiceBackend struct {
 	ContainerIp   string                 `protobuf:"bytes,2,opt,name=container_ip,json=containerIp,proto3" json:"container_ip,omitempty"`
 	Ports         []string               `protobuf:"bytes,3,rep,name=ports,proto3" json:"ports,omitempty"`
 	AgentName     string                 `protobuf:"bytes,4,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	ServiceName   string                 `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -757,6 +758,13 @@ func (x *ServiceBackend) GetPorts() []string {
 func (x *ServiceBackend) GetAgentName() string {
 	if x != nil {
 		return x.AgentName
+	}
+	return ""
+}
+
+func (x *ServiceBackend) GetServiceName() string {
+	if x != nil {
+		return x.ServiceName
 	}
 	return ""
 }
@@ -2359,13 +2367,14 @@ const file_engine_proto_rawDesc = "" +
 	"\x0fContainerStatus\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x0e\n" +
-	"\x02ip\x18\x03 \x01(\tR\x02ip\"\x8f\x01\n" +
+	"\x02ip\x18\x03 \x01(\tR\x02ip\"\xb2\x01\n" +
 	"\x0eServiceBackend\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12!\n" +
 	"\fcontainer_ip\x18\x02 \x01(\tR\vcontainerIp\x12\x14\n" +
 	"\x05ports\x18\x03 \x03(\tR\x05ports\x12\x1d\n" +
 	"\n" +
-	"agent_name\x18\x04 \x01(\tR\tagentName\"\x1f\n" +
+	"agent_name\x18\x04 \x01(\tR\tagentName\x12!\n" +
+	"\fservice_name\x18\x05 \x01(\tR\vserviceName\"\x1f\n" +
 	"\x1dReportContainerHealthResponse\"\xdf\x02\n" +
 	"\n" +
 	"TaskRecord\x12\x0e\n" +

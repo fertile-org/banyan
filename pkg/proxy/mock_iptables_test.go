@@ -87,6 +87,27 @@ func (m *mockIPTables) Append(table, chain string, rulespec ...string) error {
 	return nil
 }
 
+func (m *mockIPTables) Insert(table, chain string, pos int, rulespec ...string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if err := m.getError("Insert"); err != nil {
+		return err
+	}
+	m.ensureTable(table)
+	rule := strings.Join(rulespec, " ")
+	rules := m.chains[table][chain]
+	idx := pos - 1 // iptables positions are 1-based
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= len(rules) {
+		m.chains[table][chain] = append(rules, rule)
+	} else {
+		m.chains[table][chain] = append(rules[:idx], append([]string{rule}, rules[idx:]...)...)
+	}
+	return nil
+}
+
 func (m *mockIPTables) Delete(table, chain string, rulespec ...string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

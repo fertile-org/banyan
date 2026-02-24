@@ -24,6 +24,7 @@ type LinkOperations interface {
 	CreateBridge(name string) error
 	SetLinkMaster(slave, master string) error
 	SetLinkUp(name string) error
+	SetLinkAddress(name string, mac net.HardwareAddr) error
 	AddAddress(name string, addr *net.IPNet) error
 	AddRoute(dst net.IPNet, gw net.IP, dev string) error
 	AddFDBEntry(mac net.HardwareAddr, ip net.IP, dev string) error
@@ -79,12 +80,22 @@ func (d *VXLANDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP)
 		return fmt.Errorf("create bridge: %w", err)
 	}
 
-	// 3. Attach VXLAN to bridge
+	// 3. Set bridge MAC to deterministic VTEP MAC so the bridge recognizes
+	// incoming VXLAN-decapsulated frames (whose dst MAC is the VTEP MAC)
+	// as "for me" and delivers them to the IP stack for L3 forwarding.
+	// Without this, the bridge floods unknown-unicast frames but never
+	// passes them up to the kernel for routing to containers.
+	vtepMAC := DeterministicMAC(subnet)
+	if err := d.linkOps.SetLinkAddress(d.bridgeName, vtepMAC); err != nil {
+		return fmt.Errorf("set bridge MAC: %w", err)
+	}
+
+	// 4. Attach VXLAN to bridge
 	if err := d.linkOps.SetLinkMaster(d.vxlanName, d.bridgeName); err != nil {
 		return fmt.Errorf("attach VXLAN to bridge: %w", err)
 	}
 
-	// 4. Assign VTEP IP to bridge (gateway IP for this agent's subnet)
+	// 5. Assign VTEP IP to bridge (gateway IP for this agent's subnet)
 	vtepIP := VTEPIP(subnet)
 	bridgeAddr := &net.IPNet{
 		IP:   vtepIP,
@@ -94,7 +105,7 @@ func (d *VXLANDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP)
 		return fmt.Errorf("assign IP to bridge: %w", err)
 	}
 
-	// 5. Bring up both interfaces
+	// 6. Bring up both interfaces
 	if err := d.linkOps.SetLinkUp(d.vxlanName); err != nil {
 		return fmt.Errorf("bring up VXLAN: %w", err)
 	}
@@ -106,12 +117,12 @@ func (d *VXLANDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP)
 }
 
 // ReconcilePeers updates FDB, ARP, and route entries for remote peers.
+// All operations are idempotent (replace/append semantics), so we always
+// re-apply them to recover from external modifications (e.g., CNI bridge
+// plugin resetting routes during container creation).
 func (d *VXLANDriver) ReconcilePeers(ctx context.Context, peers []Peer) error {
 	for _, peer := range peers {
 		peerKey := peer.Subnet.String()
-		if d.knownPeers[peerKey] {
-			continue
-		}
 
 		// Add FDB entry: bridge fdb append <peerMAC> dev banyan.1 dst <peerHostIP>
 		if err := d.linkOps.AddFDBEntry(peer.MAC, peer.HostIP, d.vxlanName); err != nil {
@@ -123,8 +134,10 @@ func (d *VXLANDriver) ReconcilePeers(ctx context.Context, peers []Peer) error {
 			return fmt.Errorf("add ARP entry for %s: %w", peerKey, err)
 		}
 
-		// Add route: ip route replace <peerSubnet> via <peerVTEPIP> dev banyan0
-		if err := d.linkOps.AddRoute(peer.Subnet, peer.VTEPIP, d.bridgeName); err != nil {
+		// Add route: ip route replace <peerSubnet> via <peerVTEPIP> dev banyan.1 onlink
+		// Route via the VXLAN interface (not bridge) so ARP resolves against static
+		// neighbor entries on banyan.1. This follows standard VXLAN overlay practice.
+		if err := d.linkOps.AddRoute(peer.Subnet, peer.VTEPIP, d.vxlanName); err != nil {
 			return fmt.Errorf("add route for %s: %w", peerKey, err)
 		}
 

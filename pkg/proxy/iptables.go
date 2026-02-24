@@ -7,6 +7,7 @@ type IPTables interface {
 	ClearChain(table, chain string) error
 	DeleteChain(table, chain string) error
 	Append(table, chain string, rulespec ...string) error
+	Insert(table, chain string, pos int, rulespec ...string) error
 	Delete(table, chain string, rulespec ...string) error
 	Exists(table, chain string, rulespec ...string) (bool, error)
 	List(table, chain string) ([]string, error)

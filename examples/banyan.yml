@@ -6,13 +6,6 @@
 name: my-app
 
 services:
-  web:
-    build: ./web
-    ports:
-      - "80:80"
-    depends_on:
-      - api
-
   api:
     build: ./api
     deploy:

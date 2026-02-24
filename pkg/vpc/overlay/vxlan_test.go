@@ -43,6 +43,11 @@ func (m *mockLinkOps) SetLinkUp(name string) error {
 	return nil
 }
 
+func (m *mockLinkOps) SetLinkAddress(name string, mac net.HardwareAddr) error {
+	m.record("SetLinkAddress", name, mac.String())
+	return nil
+}
+
 func (m *mockLinkOps) AddAddress(name string, addr *net.IPNet) error {
 	m.record("AddAddress", name, addr.String())
 	return nil
@@ -109,12 +114,13 @@ func TestVXLANDriver_Init(t *testing.T) {
 
 	// Verify call sequence
 	expectedMethods := []string{
-		"CreateVXLAN",  // 1. Create VXLAN interface
-		"CreateBridge", // 2. Create bridge
-		"SetLinkMaster", // 3. Attach VXLAN to bridge
-		"AddAddress",   // 4. Assign VTEP IP
-		"SetLinkUp",    // 5. Bring up VXLAN
-		"SetLinkUp",    // 6. Bring up bridge
+		"CreateVXLAN",    // 1. Create VXLAN interface
+		"CreateBridge",   // 2. Create bridge
+		"SetLinkAddress", // 3. Set bridge MAC to deterministic VTEP MAC
+		"SetLinkMaster",  // 4. Attach VXLAN to bridge
+		"AddAddress",     // 5. Assign VTEP IP
+		"SetLinkUp",      // 6. Bring up VXLAN
+		"SetLinkUp",      // 7. Bring up bridge
 	}
 
 	if len(ops.calls) != len(expectedMethods) {
@@ -137,9 +143,17 @@ func TestVXLANDriver_Init(t *testing.T) {
 		t.Errorf("expected bridge name 'banyan0', got %q", ops.calls[1].args[0])
 	}
 
+	// Verify bridge MAC was set to deterministic VTEP MAC (02:42:0a:00:2d:01 for 10.0.45.0/24)
+	if ops.calls[2].args[0] != "banyan0" {
+		t.Errorf("expected SetLinkAddress on 'banyan0', got %q", ops.calls[2].args[0])
+	}
+	if ops.calls[2].args[1] != "02:42:0a:00:2d:01" {
+		t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", ops.calls[2].args[1])
+	}
+
 	// Verify VTEP IP was assigned correctly (10.0.45.1/24)
-	if ops.calls[3].args[1] != "10.0.45.1/24" {
-		t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", ops.calls[3].args[1])
+	if ops.calls[4].args[1] != "10.0.45.1/24" {
+		t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", ops.calls[4].args[1])
 	}
 }
 
@@ -175,6 +189,17 @@ func TestVXLANDriver_ReconcilePeers(t *testing.T) {
 	if len(ops.calls) != 3 {
 		t.Errorf("expected 3 calls, got %d", len(ops.calls))
 	}
+
+	// Verify route is via VXLAN interface (banyan.1), not bridge (banyan0).
+	// ARP entries are on banyan.1, so the route must also use banyan.1
+	// for the kernel to resolve the next hop's MAC from static neighbor entries.
+	routeCall := ops.calls[2]
+	if routeCall.method != "AddRoute" {
+		t.Fatalf("expected call 2 to be AddRoute, got %s", routeCall.method)
+	}
+	if routeCall.args[2] != "banyan.1" {
+		t.Errorf("expected route via VXLAN 'banyan.1', got %q", routeCall.args[2])
+	}
 }
 
 func TestVXLANDriver_ReconcilePeers_Incremental(t *testing.T) {
@@ -196,13 +221,15 @@ func TestVXLANDriver_ReconcilePeers_Incremental(t *testing.T) {
 		t.Fatalf("expected 3 calls after first reconcile, got %d", firstCallCount)
 	}
 
-	// Second reconcile with same peer — should be no-op
+	// Second reconcile with same peer — re-applies idempotent commands (FDB, ARP, route)
+	// to recover from external modifications (e.g., CNI resetting routes)
 	driver.ReconcilePeers(context.Background(), []Peer{peer1})
-	if len(ops.calls) != firstCallCount {
-		t.Errorf("expected no new calls for known peer, got %d new calls", len(ops.calls)-firstCallCount)
+	secondCallCount := len(ops.calls)
+	if secondCallCount != firstCallCount+3 {
+		t.Errorf("expected 3 idempotent re-apply calls, got %d new calls", secondCallCount-firstCallCount)
 	}
 
-	// Third reconcile with new peer — should add entries
+	// Third reconcile with additional peer — should add entries for new peer
 	_, subnet2, _ := net.ParseCIDR("10.0.47.0/24")
 	peer2 := Peer{
 		Subnet: *subnet2,
@@ -211,8 +238,9 @@ func TestVXLANDriver_ReconcilePeers_Incremental(t *testing.T) {
 		MAC:    DeterministicMAC(*subnet2),
 	}
 	driver.ReconcilePeers(context.Background(), []Peer{peer1, peer2})
-	if len(ops.calls) != firstCallCount+3 {
-		t.Errorf("expected 3 new calls for new peer, got %d", len(ops.calls)-firstCallCount)
+	thirdCallCount := len(ops.calls)
+	if thirdCallCount != secondCallCount+6 {
+		t.Errorf("expected 6 calls (3 per peer), got %d", thirdCallCount-secondCallCount)
 	}
 }
 

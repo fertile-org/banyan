@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Deploy containers across a Banyan cluster.
+description: Run containers across a Banyan cluster.
 sidebar:
   order: 2
 ---

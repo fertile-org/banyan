@@ -9,7 +9,7 @@ sidebar:
 
 Status: **Done**
 
-Deploy containers across multiple servers using a familiar YAML manifest.
+Run containers across multiple servers using a familiar YAML manifest.
 
 - Parse banyan.yaml manifest (Docker Compose-compatible syntax)
 - Engine control plane with etcd-based state

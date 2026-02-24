@@ -10,7 +10,7 @@ export default defineConfig({
     }),
     starlight({
       title: "Banyan",
-      description: "Docker Compose syntax that scales.",
+      description: "Container orchestration you already know.",
       favicon: "/og-image.png",
       logo: {
         src: "./src/assets/logo.png",

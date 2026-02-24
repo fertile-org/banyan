@@ -371,17 +371,98 @@ func (s *vpcTestEngineServer) Health(ctx context.Context, req *banyanpb.HealthRe
 	return &banyanpb.HealthResponse{Status: "ok"}, nil
 }
 
+// backendsTestEngineServer returns service backends in Heartbeat responses.
+type backendsTestEngineServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	store    storage.StateStore
+	backends []*banyanpb.ServiceBackend
+}
+
+func (s *backendsTestEngineServer) Heartbeat(ctx context.Context, req *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error) {
+	return &banyanpb.HeartbeatResponse{ServiceBackends: s.backends}, nil
+}
+
+func (s *backendsTestEngineServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
 func TestEngineClient_Heartbeat(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
-	peers, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
-	// testEngineServer returns empty response, so no peers expected
+	// testEngineServer returns empty response, so no peers or backends expected
 	if len(peers) != 0 {
 		t.Errorf("expected 0 peers, got %d", len(peers))
+	}
+	if len(backends) != 0 {
+		t.Errorf("expected 0 backends, got %d", len(backends))
+	}
+}
+
+func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
+	store := storage.NewMemoryStore()
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
+	validator := &testTokenValidator{validHash: banyanrpc.HashPassword(testToken)}
+
+	lis := bufconn.Listen(testBufSize)
+	srv := grpc.NewServer(
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
+	)
+
+	engineSrv := &backendsTestEngineServer{
+		store: store,
+		backends: []*banyanpb.ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIp: "10.0.1.5", Ports: []string{"8080:80"}, AgentName: "worker-1"},
+			{ContainerName: "app-web-1", ContainerIp: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
+		},
+	}
+	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
+
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: testToken}),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer func() {
+		conn.Close()
+		srv.Stop()
+	}()
+
+	client := &EngineClient{
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}
+
+	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	if hbErr != nil {
+		t.Fatalf("Heartbeat failed: %v", hbErr)
+	}
+	if len(backends) != 2 {
+		t.Fatalf("expected 2 backends, got %d", len(backends))
+	}
+	if backends[0].ContainerName != "app-web-0" {
+		t.Errorf("expected app-web-0, got %s", backends[0].ContainerName)
+	}
+	if backends[0].ContainerIP != "10.0.1.5" {
+		t.Errorf("expected IP 10.0.1.5, got %s", backends[0].ContainerIP)
+	}
+	if backends[1].AgentName != "worker-2" {
+		t.Errorf("expected agent worker-2, got %s", backends[1].AgentName)
 	}
 }
 
@@ -491,7 +572,7 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Heartbeat error", func(t *testing.T) {
-		_, err := client.Heartbeat(ctx, "worker-1", "token", nil)
+		_, _, err := client.Heartbeat(ctx, "worker-1", "token", nil)
 		if err == nil {
 			t.Error("expected error from Heartbeat on stopped server")
 		}

@@ -66,6 +66,20 @@ Optional tags on agents and deployments for environment isolation (e.g. staging 
 
 ---
 
+## Milestone 3.6 — Basic Networking
+
+Status: **Done**
+
+Built-in overlay networking and cross-host load balancing without external dependencies.
+
+- Built-in VXLAN overlay managed by Engine (replaced Flannel) with deterministic VTEP MACs
+- Per-agent /24 subnet allocation from VPC CIDR via `SubnetAllocator`
+- Peer discovery via heartbeat RPC (15s convergence)
+- iptables DNAT proxy on each agent for port forwarding to container backends
+- Cross-host load balancing: every agent aware of all service backends cluster-wide, probability-based DNAT rules distribute traffic across all replicas regardless of which agent they run on
+
+---
+
 ## Milestone 4 — Metrics Collection
 
 Collect and expose resource metrics from every node and container in Prometheus-compatible format.
@@ -175,3 +189,18 @@ Deeper observability and richer operational tooling.
 - Historical trends and capacity planning views
 - Multi-cluster dashboard support
 - Metric export to external systems (Prometheus, Grafana)
+
+---
+
+## Milestone 12 — Advanced Networking
+
+Service discovery, traffic policies, and encrypted communication across the cluster.
+
+- **Service DNS**: Containers resolve service names to IPs (e.g. `curl http://api:8080` from any container). Options: `/etc/hosts` injection via CNI or lightweight DNS server on the bridge
+- **Health-check-based routing**: Only route to healthy containers — filter backends by `container_status` before including in HeartbeatResponse
+- **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
+- **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
+- **WireGuard overlay driver**: Alternative to VXLAN via the existing `OverlayDriver` interface — better performance and built-in encryption, no separate mTLS needed
+- **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
+- **mTLS between services**: Encrypted service-to-service communication — WireGuard approach (transparent at network layer) or sidecar proxy pattern
+- **Multi-tenant network isolation**: Separate VPC CIDRs per deployment or tag group with different VNIs

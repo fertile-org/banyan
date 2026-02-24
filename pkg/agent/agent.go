@@ -40,13 +40,14 @@ type Options struct {
 
 // Agent is the Banyan data-plane worker.
 type Agent struct {
-	opts          Options
-	client        *EngineClient
-	containers    *containerTracker
-	sessionToken  string
-	proxy         PortProxy
-	vpcEnabled    bool
-	overlayDriver overlay.OverlayDriver
+	opts           Options
+	client         *EngineClient
+	containers     *containerTracker
+	sessionToken   string
+	proxy          PortProxy
+	vpcEnabled     bool
+	overlayDriver  overlay.OverlayDriver
+	remoteBackends map[string]ServiceBackend // key: containerName
 }
 
 // Package-level function variables for testing.
@@ -68,9 +69,10 @@ func New(opts *Options) (*Agent, error) {
 	}
 
 	return &Agent{
-		opts:         *opts,
-		containers:   &containerTracker{},
-		sessionToken: hex.EncodeToString(tokenBytes),
+		opts:           *opts,
+		containers:     &containerTracker{},
+		sessionToken:   hex.EncodeToString(tokenBytes),
+		remoteBackends: make(map[string]ServiceBackend),
 	}, nil
 }
 
@@ -205,10 +207,11 @@ func (a *Agent) processTasks(ctx context.Context) {
 
 		// Track containers and setup proxy after successful create_and_start
 		if pbTask.Type == types.TaskTypeCreateAndStart {
-			if proxyErr := a.setupProxyForContainer(ctx, task); proxyErr != nil {
+			containerIP, proxyErr := a.setupProxyForContainer(ctx, task)
+			if proxyErr != nil {
 				fmt.Printf("[Agent] WARNING: proxy setup failed for %s: %v\n", task.ContainerName, proxyErr)
 			}
-			a.containers.Add(pbTask.ContainerName, pbTask.Id)
+			a.containers.Add(pbTask.ContainerName, pbTask.Id, containerIP)
 		}
 
 		fmt.Printf("[Agent] Task %s COMPLETED (container: %s)\n", pbTask.Id, pbTask.ContainerName)
@@ -377,7 +380,7 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			peers, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags)
+			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags)
 			if err != nil {
 				fmt.Printf("[Agent] WARNING: heartbeat failed: %v\n", err)
 				continue
@@ -386,6 +389,9 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 				if reconcileErr := a.reconcileVPCPeers(ctx, peers); reconcileErr != nil {
 					fmt.Printf("[Agent] WARNING: peer reconciliation failed: %v\n", reconcileErr)
 				}
+			}
+			if a.vpcEnabled && a.proxy != nil {
+				a.reconcileRemoteBackends(backends)
 			}
 		}
 	}
@@ -417,6 +423,7 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 		statuses = append(statuses, &banyanpb.ContainerStatus{
 			ContainerName: c.containerName,
 			Status:        status,
+			Ip:            c.containerIP,
 		})
 	}
 
@@ -426,27 +433,28 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 }
 
 // setupProxyForContainer registers a container's ports with the TCP proxy.
-// If the task has no ports, this is a no-op.
-func (a *Agent) setupProxyForContainer(ctx context.Context, task *types.TaskRecord) error {
-	if len(task.Ports) == 0 || a.proxy == nil {
-		return nil
-	}
-
+// Returns the container IP and any error. If the task has no ports, proxy setup
+// is skipped but the IP is still retrieved for cross-host load balancing.
+func (a *Agent) setupProxyForContainer(ctx context.Context, task *types.TaskRecord) (string, error) {
 	containerIP, err := containerIPGetter(ctx, task.ContainerName)
 	if err != nil {
-		return err
+		return "", err
+	}
+
+	if len(task.Ports) == 0 || a.proxy == nil {
+		return containerIP, nil
 	}
 
 	for _, portStr := range task.Ports {
 		hostPort, containerPort, parseErr := proxy.ParsePort(portStr)
 		if parseErr != nil {
-			return parseErr
+			return containerIP, parseErr
 		}
 		if addErr := a.proxy.AddBackend(hostPort, containerPort, task.ContainerName, containerIP); addErr != nil {
-			return addErr
+			return containerIP, addErr
 		}
 	}
-	return nil
+	return containerIP, nil
 }
 
 // waitForEngineGRPC retries a health check to verify the engine gRPC server is ready.
@@ -466,4 +474,54 @@ func (a *Agent) waitForEngineGRPC(ctx context.Context, timeout time.Duration) er
 		}
 	}
 	return fmt.Errorf("timeout waiting for engine gRPC")
+}
+
+// ServiceBackend represents a container backend for cross-host load balancing.
+type ServiceBackend struct {
+	ContainerName string
+	ContainerIP   string
+	Ports         []string
+	AgentName     string
+}
+
+// reconcileRemoteBackends adds/removes remote backends from the proxy
+// based on the current set of backends from the engine.
+func (a *Agent) reconcileRemoteBackends(backends []ServiceBackend) {
+	// Build set of current remote backends (skip local)
+	current := make(map[string]ServiceBackend)
+	for _, b := range backends {
+		if b.AgentName == a.opts.NodeName {
+			continue // skip local backends
+		}
+		current[b.ContainerName] = b
+	}
+
+	// Remove stale or changed: in tracked but not in current, or IP changed
+	for name, tracked := range a.remoteBackends {
+		b, ok := current[name]
+		if !ok || tracked.ContainerIP != b.ContainerIP {
+			if err := a.proxy.RemoveBackend(name); err != nil {
+				fmt.Printf("[Agent] WARNING: failed to remove remote backend %s: %v\n", name, err)
+			}
+			delete(a.remoteBackends, name)
+		}
+	}
+
+	// Add new or re-add changed: in current but not in tracked
+	for name, b := range current {
+		if _, ok := a.remoteBackends[name]; ok {
+			continue // already tracked with same IP
+		}
+		for _, portStr := range b.Ports {
+			hostPort, containerPort, parseErr := proxy.ParsePort(portStr)
+			if parseErr != nil {
+				fmt.Printf("[Agent] WARNING: failed to parse port %s for remote backend %s: %v\n", portStr, name, parseErr)
+				continue
+			}
+			if addErr := a.proxy.AddBackend(hostPort, containerPort, b.ContainerName, b.ContainerIP); addErr != nil {
+				fmt.Printf("[Agent] WARNING: failed to add remote backend %s: %v\n", name, addErr)
+			}
+		}
+		a.remoteBackends[name] = b
+	}
 }

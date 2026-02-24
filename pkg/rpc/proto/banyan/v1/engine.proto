@@ -47,6 +47,7 @@ message HeartbeatRequest {
 
 message HeartbeatResponse {
   repeated VPCPeer vpc_peers = 1;       // all other agents' network info
+  repeated ServiceBackend service_backends = 2;  // all service backends cluster-wide
 }
 
 message VPCPeer {
@@ -86,6 +87,14 @@ message ReportContainerHealthRequest {
 message ContainerStatus {
   string container_name = 1;
   string status = 2;
+  string ip = 3;                              // container's overlay IP
+}
+
+message ServiceBackend {
+  string container_name = 1;
+  string container_ip = 2;
+  repeated string ports = 3;
+  string agent_name = 4;
 }
 
 message ReportContainerHealthResponse {}

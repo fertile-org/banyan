@@ -26,8 +26,8 @@ func newTestProxy(t *testing.T) *proxy.Proxy {
 func TestContainerTracker(t *testing.T) {
 	t.Run("add and list", func(t *testing.T) {
 		tracker := &containerTracker{}
-		tracker.Add("container-1", "task-1")
-		tracker.Add("container-2", "task-2")
+		tracker.Add("container-1", "task-1", "10.0.1.2")
+		tracker.Add("container-2", "task-2", "10.0.1.3")
 
 		list := tracker.List()
 		if len(list) != 2 {
@@ -39,11 +39,14 @@ func TestContainerTracker(t *testing.T) {
 		if list[1].taskID != "task-2" {
 			t.Errorf("expected task-2, got %s", list[1].taskID)
 		}
+		if list[0].containerIP != "10.0.1.2" {
+			t.Errorf("expected IP 10.0.1.2, got %s", list[0].containerIP)
+		}
 	})
 
 	t.Run("list returns copies", func(t *testing.T) {
 		tracker := &containerTracker{}
-		tracker.Add("container-1", "task-1")
+		tracker.Add("container-1", "task-1", "10.0.1.2")
 
 		list1 := tracker.List()
 		list1[0].containerName = "modified"
@@ -59,6 +62,28 @@ func TestContainerTracker(t *testing.T) {
 		list := tracker.List()
 		if len(list) != 0 {
 			t.Errorf("expected 0 containers, got %d", len(list))
+		}
+	})
+
+	t.Run("GetIP returns IP for existing container", func(t *testing.T) {
+		tracker := &containerTracker{}
+		tracker.Add("container-1", "task-1", "10.0.1.2")
+		tracker.Add("container-2", "task-2", "10.0.1.3")
+
+		if ip := tracker.GetIP("container-1"); ip != "10.0.1.2" {
+			t.Errorf("expected 10.0.1.2, got %s", ip)
+		}
+		if ip := tracker.GetIP("container-2"); ip != "10.0.1.3" {
+			t.Errorf("expected 10.0.1.3, got %s", ip)
+		}
+	})
+
+	t.Run("GetIP returns empty for unknown container", func(t *testing.T) {
+		tracker := &containerTracker{}
+		tracker.Add("container-1", "task-1", "10.0.1.2")
+
+		if ip := tracker.GetIP("nonexistent"); ip != "" {
+			t.Errorf("expected empty string, got %s", ip)
 		}
 	})
 }
@@ -301,8 +326,8 @@ func TestCheckContainerHealth(t *testing.T) {
 			client:     client,
 			containers: &containerTracker{},
 		}
-		a.containers.Add("myapp-web-0", "task-1")
-		a.containers.Add("myapp-api-0", "task-2")
+		a.containers.Add("myapp-web-0", "task-1", "10.0.1.2")
+		a.containers.Add("myapp-api-0", "task-2", "10.0.1.3")
 
 		// Should not panic
 		a.checkContainerHealth(context.Background())
@@ -712,7 +737,7 @@ func TestCheckContainerHealth_ReportError(t *testing.T) {
 		client:     client,
 		containers: &containerTracker{},
 	}
-	a.containers.Add("myapp-web-0", "task-1")
+	a.containers.Add("myapp-web-0", "task-1", "10.0.1.2")
 
 	// Should not panic; just prints warning
 	a.checkContainerHealth(context.Background())
@@ -910,9 +935,12 @@ func TestSetupProxyForContainer(t *testing.T) {
 			Ports:         []string{"8080:80", "8443:443"},
 		}
 
-		err := a.setupProxyForContainer(context.Background(), task)
+		ip, err := a.setupProxyForContainer(context.Background(), task)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if ip != "172.17.0.5" {
+			t.Errorf("expected IP 172.17.0.5, got %s", ip)
 		}
 
 		if p.BackendCount(8080) != 1 {
@@ -923,7 +951,11 @@ func TestSetupProxyForContainer(t *testing.T) {
 		}
 	})
 
-	t.Run("no-op when no ports", func(t *testing.T) {
+	t.Run("returns IP even when no ports", func(t *testing.T) {
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			return "172.17.0.5", nil
+		}
+
 		p := newTestProxy(t)
 		defer p.Close()
 		a := &Agent{proxy: p}
@@ -932,9 +964,12 @@ func TestSetupProxyForContainer(t *testing.T) {
 			ContainerName: "myapp-worker-0",
 		}
 
-		err := a.setupProxyForContainer(context.Background(), task)
+		ip, err := a.setupProxyForContainer(context.Background(), task)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if ip != "172.17.0.5" {
+			t.Errorf("expected IP 172.17.0.5, got %s", ip)
 		}
 
 		if p.ListenerCount() != 0 {
@@ -942,7 +977,11 @@ func TestSetupProxyForContainer(t *testing.T) {
 		}
 	})
 
-	t.Run("no-op when proxy is nil", func(t *testing.T) {
+	t.Run("returns IP when proxy is nil and no ports", func(t *testing.T) {
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			return "172.17.0.5", nil
+		}
+
 		a := &Agent{proxy: nil}
 
 		task := &types.TaskRecord{
@@ -950,9 +989,12 @@ func TestSetupProxyForContainer(t *testing.T) {
 			Ports:         []string{"80:80"},
 		}
 
-		err := a.setupProxyForContainer(context.Background(), task)
+		ip, err := a.setupProxyForContainer(context.Background(), task)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if ip != "172.17.0.5" {
+			t.Errorf("expected IP 172.17.0.5, got %s", ip)
 		}
 	})
 
@@ -970,7 +1012,7 @@ func TestSetupProxyForContainer(t *testing.T) {
 			Ports:         []string{"80:80"},
 		}
 
-		err := a.setupProxyForContainer(context.Background(), task)
+		_, err := a.setupProxyForContainer(context.Background(), task)
 		if err == nil {
 			t.Fatal("expected error when IP lookup fails")
 		}
@@ -990,7 +1032,7 @@ func TestSetupProxyForContainer(t *testing.T) {
 			Ports:         []string{"invalid"},
 		}
 
-		err := a.setupProxyForContainer(context.Background(), task)
+		_, err := a.setupProxyForContainer(context.Background(), task)
 		if err == nil {
 			t.Fatal("expected error for invalid port string")
 		}
@@ -1043,6 +1085,136 @@ func TestProcessTasks_StopRemovesProxyBackend(t *testing.T) {
 	if p.BackendCount(39080) != 0 {
 		t.Errorf("expected 0 backends after stop, got %d", p.BackendCount(39080))
 	}
+}
+
+func TestReconcileRemoteBackends(t *testing.T) {
+	t.Run("adds new remote backends", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{
+			opts:           Options{NodeName: "worker-1"},
+			proxy:          p,
+			remoteBackends: make(map[string]ServiceBackend),
+		}
+
+		backends := []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
+		}
+		a.reconcileRemoteBackends(backends)
+
+		if p.BackendCount(8080) != 1 {
+			t.Errorf("expected 1 backend on port 8080, got %d", p.BackendCount(8080))
+		}
+		if len(a.remoteBackends) != 1 {
+			t.Errorf("expected 1 remote backend tracked, got %d", len(a.remoteBackends))
+		}
+	})
+
+	t.Run("removes stale remote backends", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{
+			opts:  Options{NodeName: "worker-1"},
+			proxy: p,
+			remoteBackends: map[string]ServiceBackend{
+				"app-web-0": {ContainerName: "app-web-0", ContainerIP: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
+			},
+		}
+
+		// Add the backend to proxy first
+		p.AddBackend(8080, 80, "app-web-0", "10.0.2.5")
+
+		// Reconcile with empty list (backend should be removed)
+		a.reconcileRemoteBackends(nil)
+
+		if p.BackendCount(8080) != 0 {
+			t.Errorf("expected 0 backends after removal, got %d", p.BackendCount(8080))
+		}
+		if len(a.remoteBackends) != 0 {
+			t.Errorf("expected 0 remote backends tracked, got %d", len(a.remoteBackends))
+		}
+	})
+
+	t.Run("skips local backends", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{
+			opts:           Options{NodeName: "worker-1"},
+			proxy:          p,
+			remoteBackends: make(map[string]ServiceBackend),
+		}
+
+		backends := []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", Ports: []string{"8080:80"}, AgentName: "worker-1"}, // local
+			{ContainerName: "app-web-1", ContainerIP: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"}, // remote
+		}
+		a.reconcileRemoteBackends(backends)
+
+		// Only 1 backend (remote), not 2
+		if p.BackendCount(8080) != 1 {
+			t.Errorf("expected 1 backend (remote only), got %d", p.BackendCount(8080))
+		}
+		if len(a.remoteBackends) != 1 {
+			t.Errorf("expected 1 remote backend tracked, got %d", len(a.remoteBackends))
+		}
+		if _, ok := a.remoteBackends["app-web-0"]; ok {
+			t.Error("local backend should not be tracked")
+		}
+	})
+
+	t.Run("updates proxy when IP changes", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{
+			opts:  Options{NodeName: "worker-1"},
+			proxy: p,
+			remoteBackends: map[string]ServiceBackend{
+				"app-web-0": {ContainerName: "app-web-0", ContainerIP: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
+			},
+		}
+
+		// Add the old backend to proxy
+		p.AddBackend(8080, 80, "app-web-0", "10.0.2.5")
+		if p.BackendCount(8080) != 1 {
+			t.Fatalf("expected 1 backend before reconcile, got %d", p.BackendCount(8080))
+		}
+
+		// Reconcile with same container but new IP
+		backends := []ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIP: "10.0.2.99", Ports: []string{"8080:80"}, AgentName: "worker-2"},
+		}
+		a.reconcileRemoteBackends(backends)
+
+		// Should have removed old and added new (1 backend)
+		if p.BackendCount(8080) != 1 {
+			t.Errorf("expected 1 backend after IP change, got %d", p.BackendCount(8080))
+		}
+		// Tracked backend should have the new IP
+		tracked, ok := a.remoteBackends["app-web-0"]
+		if !ok {
+			t.Fatal("expected app-web-0 to be tracked")
+		}
+		if tracked.ContainerIP != "10.0.2.99" {
+			t.Errorf("expected tracked IP 10.0.2.99, got %s", tracked.ContainerIP)
+		}
+	})
+
+	t.Run("no-op with nil backends", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+		a := &Agent{
+			opts:           Options{NodeName: "worker-1"},
+			proxy:          p,
+			remoteBackends: make(map[string]ServiceBackend),
+		}
+
+		// Should not panic with nil backends
+		a.reconcileRemoteBackends(nil)
+
+		if len(a.remoteBackends) != 0 {
+			t.Errorf("expected 0 remote backends, got %d", len(a.remoteBackends))
+		}
+	})
 }
 
 func TestGetContainerIP(t *testing.T) {

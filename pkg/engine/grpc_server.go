@@ -164,6 +164,11 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 
 	resp := &banyanpb.HeartbeatResponse{}
 
+	// Return service backends for cross-host load balancing (VPC-gated)
+	if s.peerTracker != nil {
+		resp.ServiceBackends = s.collectServiceBackends(ctx)
+	}
+
 	// Return VPC peer list if overlay networking is enabled
 	if s.peerTracker != nil {
 		// Update peer's host IP from gRPC connection (in case it changed)
@@ -270,10 +275,14 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
 
-	// Build a map of container statuses for quick lookup
+	// Build maps of container statuses and IPs for quick lookup
 	statusMap := make(map[string]string, len(req.Containers))
+	ipMap := make(map[string]string, len(req.Containers))
 	for _, c := range req.Containers {
 		statusMap[c.ContainerName] = c.Status
+		if c.Ip != "" {
+			ipMap[c.ContainerName] = c.Ip
+		}
 	}
 
 	// Update matching tasks in store
@@ -294,6 +303,9 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		if containerStatus, ok := statusMap[task.ContainerName]; ok {
 			task.ContainerStatus = containerStatus
 			task.ContainerCheckedAt = time.Now()
+			if ip, hasIP := ipMap[task.ContainerName]; hasIP {
+				task.ContainerIP = ip
+			}
 			if err := s.store.Save(ctx, key, &task); err != nil {
 				log.Printf("WARNING: failed to save container health for %s: %v", task.ContainerName, err)
 			}
@@ -1005,6 +1017,51 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 		Version:  m.Version,
 		Services: services,
 	}
+}
+
+// collectServiceBackends gathers all running container backends across all agents.
+// Used for cross-host load balancing via heartbeat responses.
+func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyanpb.ServiceBackend {
+	nodeKeys, err := s.store.List(ctx, types.KeyNodes)
+	if err != nil {
+		return nil
+	}
+
+	var backends []*banyanpb.ServiceBackend
+	for _, nodeKey := range nodeKeys {
+		var node types.NodeRecord
+		if err := s.store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+
+		taskKeys, err := s.store.List(ctx, types.KeyTasks+node.Name+"/")
+		if err != nil {
+			continue
+		}
+
+		for _, taskKey := range taskKeys {
+			var task types.TaskRecord
+			if err := s.store.Get(ctx, taskKey, &task); err != nil {
+				continue
+			}
+			// Only include running containers with ports and an IP
+			if task.Type != types.TaskTypeCreateAndStart ||
+				task.Status != types.StatusCompleted ||
+				task.ContainerStatus != types.StatusRunning ||
+				task.ContainerIP == "" ||
+				len(task.Ports) == 0 {
+				continue
+			}
+			backends = append(backends, &banyanpb.ServiceBackend{
+				ContainerName: task.ContainerName,
+				ContainerIp:   task.ContainerIP,
+				Ports:         task.Ports,
+				AgentName:     task.AgentID,
+			})
+		}
+	}
+
+	return backends
 }
 
 // extractPeerIP extracts the remote IP address from the gRPC connection context.

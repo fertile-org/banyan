@@ -3583,3 +3583,190 @@ func TestDeployServices(t *testing.T) {
 		}
 	})
 }
+
+func TestReportContainerHealth_StoresIP(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t, "test-password")
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a completed task
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-ip1", &types.TaskRecord{
+		ID: "task-ip1", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0",
+	})
+
+	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+		AgentName: "worker-1",
+		Containers: []*banyanpb.ContainerStatus{
+			{ContainerName: "app-web-0", Status: "running", Ip: "10.0.1.5"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReportContainerHealth failed: %v", err)
+	}
+
+	var updated types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-ip1", &updated); err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.ContainerIP != "10.0.1.5" {
+		t.Errorf("expected container IP '10.0.1.5', got %q", updated.ContainerIP)
+	}
+	if updated.ContainerStatus != "running" {
+		t.Errorf("expected container status 'running', got %q", updated.ContainerStatus)
+	}
+}
+
+func TestCollectServiceBackends(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+	ctx := context.Background()
+
+	// Register an agent
+	store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"worker-2", &types.NodeRecord{Name: "worker-2", Status: "ready"})
+
+	// Task with IP, ports, running, completed — should be included
+	store.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
+		ID: "task-1", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+	})
+
+	// Task without IP — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
+		ID: "task-2", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-api-0", ContainerStatus: "running",
+		Ports: []string{"9090:90"},
+	})
+
+	// Task with IP but no ports — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-2/task-3", &types.TaskRecord{
+		ID: "task-3", AgentID: "worker-2",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-worker-0", ContainerStatus: "running",
+		ContainerIP: "10.0.2.5",
+	})
+
+	// Task with IP and ports but not running — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
+		ID: "task-4", AgentID: "worker-2",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-db-0", ContainerStatus: "exited",
+		ContainerIP: "10.0.2.6", Ports: []string{"5432:5432"},
+	})
+
+	// Stop task — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-1/task-5", &types.TaskRecord{
+		ID: "task-5", AgentID: "worker-1",
+		Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		ContainerName: "app-old-0",
+	})
+
+	// Full match on worker-2
+	store.Save(ctx, types.KeyTasks+"worker-2/task-6", &types.TaskRecord{
+		ID: "task-6", AgentID: "worker-2",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-1", ContainerStatus: "running",
+		ContainerIP: "10.0.2.7", Ports: []string{"8080:80"},
+	})
+
+	backends := srv.collectServiceBackends(ctx)
+
+	if len(backends) != 2 {
+		t.Fatalf("expected 2 backends, got %d", len(backends))
+	}
+
+	// Verify the included backends
+	names := make(map[string]bool)
+	for _, b := range backends {
+		names[b.ContainerName] = true
+		if b.ContainerIp == "" {
+			t.Errorf("backend %s has empty IP", b.ContainerName)
+		}
+		if len(b.Ports) == 0 {
+			t.Errorf("backend %s has no ports", b.ContainerName)
+		}
+	}
+	if !names["app-web-0"] {
+		t.Error("expected app-web-0 in backends")
+	}
+	if !names["app-web-1"] {
+		t.Error("expected app-web-1 in backends")
+	}
+}
+
+func TestHeartbeat_ReturnsServiceBackends(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	peerTracker := overlay.NewPeerTracker()
+
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		peerTracker: peerTracker,
+	}
+
+	ctx := context.Background()
+
+	// Register agent and add a running container with IP
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb1", &types.TaskRecord{
+		ID: "task-hb1", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+	})
+
+	resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{AgentName: "worker-1", SessionToken: "t1"})
+	if err != nil {
+		t.Fatalf("Heartbeat failed: %v", err)
+	}
+
+	if len(resp.ServiceBackends) != 1 {
+		t.Fatalf("expected 1 service backend, got %d", len(resp.ServiceBackends))
+	}
+	b := resp.ServiceBackends[0]
+	if b.ContainerName != "app-web-0" {
+		t.Errorf("expected container name app-web-0, got %s", b.ContainerName)
+	}
+	if b.ContainerIp != "10.0.1.5" {
+		t.Errorf("expected container IP 10.0.1.5, got %s", b.ContainerIp)
+	}
+	if b.AgentName != "worker-1" {
+		t.Errorf("expected agent name worker-1, got %s", b.AgentName)
+	}
+}
+
+func TestHeartbeat_NoBackendsWithoutPeerTracker(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		// peerTracker is nil — no VPC
+	}
+
+	ctx := context.Background()
+
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb2", &types.TaskRecord{
+		ID: "task-hb2", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+	})
+
+	resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{AgentName: "worker-1", SessionToken: "t1"})
+	if err != nil {
+		t.Fatalf("Heartbeat failed: %v", err)
+	}
+
+	// Without peer tracker, no backends should be returned
+	if len(resp.ServiceBackends) != 0 {
+		t.Errorf("expected 0 service backends without VPC, got %d", len(resp.ServiceBackends))
+	}
+}

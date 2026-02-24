@@ -97,14 +97,14 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 	return resp.RegistryUrl, vpcConfig, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) ([]VPCPeer, error) {
+func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) ([]VPCPeer, []ServiceBackend, error) {
 	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    name,
 		SessionToken: sessionToken,
 		Tags:         tags,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("heartbeat failed: %w", err)
+		return nil, nil, fmt.Errorf("heartbeat failed: %w", err)
 	}
 
 	var peers []VPCPeer
@@ -116,7 +116,17 @@ func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string,
 		})
 	}
 
-	return peers, nil
+	var backends []ServiceBackend
+	for _, b := range resp.ServiceBackends {
+		backends = append(backends, ServiceBackend{
+			ContainerName: b.ContainerName,
+			ContainerIP:   b.ContainerIp,
+			Ports:         b.Ports,
+			AgentName:     b.AgentName,
+		})
+	}
+
+	return peers, backends, nil
 }
 
 func (c *EngineClient) PollTasks(ctx context.Context, name string) ([]*banyanpb.TaskRecord, error) {

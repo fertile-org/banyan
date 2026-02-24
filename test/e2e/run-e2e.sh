@@ -204,15 +204,30 @@ echo "  worker-2:"
 docker exec banyan-worker-2 nerdctl ps 2>/dev/null || log_warn "  Could not list containers on worker-2"
 
 # Wait for API containers to be fully ready (Node.js needs time to start listening)
+# Check from inside the container directly — curling localhost on the worker host
+# doesn't work because iptables DNAT + 127.0.0.1 source requires route_localnet=1.
 log_info "Waiting for API containers to become ready..."
-READY=false
-for i in $(seq 1 12); do
-    if docker exec banyan-worker-1 curl -s -o /dev/null -w "%{http_code}" --connect-timeout 2 http://127.0.0.1:3000/ 2>/dev/null | grep -q "200"; then
-        READY=true
-        break
-    fi
-    sleep 5
+API_READY_CONTAINER=""
+for worker in banyan-worker-1 banyan-worker-2; do
+    for c in $(docker exec "$worker" nerdctl ps --format '{{.Names}}' 2>/dev/null); do
+        if [[ "$c" == *"-api-"* ]]; then
+            API_READY_CONTAINER="$worker:$c"
+            break 2
+        fi
+    done
 done
+READY=false
+if [ -n "$API_READY_CONTAINER" ]; then
+    WORKER="${API_READY_CONTAINER%%:*}"
+    CONTAINER="${API_READY_CONTAINER##*:}"
+    for i in $(seq 1 10); do
+        if docker exec "$WORKER" nerdctl exec "$CONTAINER" wget -qO- --timeout=2 http://127.0.0.1:3000/ 2>/dev/null | grep -q "OK"; then
+            READY=true
+            break
+        fi
+        sleep 2
+    done
+fi
 if [ "$READY" = true ]; then
     log_info "API containers are ready"
 else

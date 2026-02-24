@@ -4,7 +4,7 @@
 
 <h1 align="center">Banyan</h1>
 
-<p align="center"><strong>Docker Compose syntax that scales.</strong></p>
+<p align="center"><strong>Container orchestration you already know.</strong></p>
 
 <p align="center">
   <a href="https://github.com/fertile-org/banyan/actions/workflows/ci.yml"><img src="https://github.com/fertile-org/banyan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/go-1.24-00ADD8?logo=go" alt="Go 1.24">
 </p>
 
-<p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
+<p align="center">Run containers across multiple servers with the Docker Compose syntax you already know.</p>
 
 <p align="center">
   <a href="https://getbanyan.dev/">Documentation</a> &middot;
@@ -93,7 +93,7 @@ Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and
 
 **Teams who've outgrown a single server but don't need — or don't want — Kubernetes.**
 
-You might be a team of 5 who needs your API on 3 servers. Or a team of 50 who wants a lighter option for staging environments and internal tools. Either way, you want to write a YAML file and deploy, not operate a platform.
+You might be a team of 5 who needs your API on 3 servers. Or a team of 50 who wants a lighter option for staging environments and internal tools. Either way, you want to write a YAML file and ship, not operate a platform.
 
 Banyan handles the orchestration so you can focus on the software you're building.
 

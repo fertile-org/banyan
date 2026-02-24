@@ -444,8 +444,13 @@ func resolveDefaultStoreAddress(backend, address string) string {
 	}
 }
 
-// managedEtcdClientURL is the default client URL for managed etcd.
+// managedEtcdClientURL is the default client URL for managed etcd (used for health checks and local access).
 const managedEtcdClientURL = "http://127.0.0.1:2379"
+
+// managedEtcdListenURL is the listen address for managed etcd.
+// Listens on localhost only — agents no longer need direct etcd access
+// (overlay networking is managed by the engine via gRPC).
+const managedEtcdListenURL = "http://127.0.0.1:2379"
 
 // startManagedEtcd starts an etcd process using the system-installed etcd binary.
 // It waits for etcd to become healthy before returning.
@@ -456,7 +461,7 @@ func startManagedEtcd(dataDir string) (*exec.Cmd, error) {
 
 	etcdCmd := exec.Command("etcd",
 		"--data-dir", dataDir,
-		"--listen-client-urls", managedEtcdClientURL,
+		"--listen-client-urls", managedEtcdListenURL,
 		"--advertise-client-urls", managedEtcdClientURL,
 		"--listen-peer-urls", "http://127.0.0.1:2380",
 	)

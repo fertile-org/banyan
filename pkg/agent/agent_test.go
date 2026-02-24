@@ -98,7 +98,7 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 			ContainerName: "myapp-web-0",
 			Image:         "nginx:alpine",
 		}
-		args := buildNerdctlRunArgs(task)
+		args := buildNerdctlRunArgs(task, false)
 		expected := []string{"run", "-d", "--name", "myapp-web-0", "nginx:alpine"}
 		if len(args) != len(expected) {
 			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -117,7 +117,7 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 			Ports:         []string{"80:80", "443:443"},
 			Environment:   []string{"FOO=bar"},
 		}
-		args := buildNerdctlRunArgs(task)
+		args := buildNerdctlRunArgs(task, false)
 		// Ports are handled by the agent proxy, NOT by nerdctl -p flags.
 		// run -d --name myapp-web-0 -e FOO=bar nginx:alpine
 		if len(args) != 7 {
@@ -140,7 +140,7 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 			Image:         "python:3",
 			Command:       []string{"python", "worker.py"},
 		}
-		args := buildNerdctlRunArgs(task)
+		args := buildNerdctlRunArgs(task, false)
 		lastTwo := args[len(args)-2:]
 		if lastTwo[0] != "python" || lastTwo[1] != "worker.py" {
 			t.Errorf("expected command at end, got %v", lastTwo)

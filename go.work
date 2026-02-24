@@ -12,5 +12,6 @@ use (
 	./pkg/storage
 	./pkg/types
 	./pkg/vpc
+	./pkg/vpc/overlay
 	./test
 )

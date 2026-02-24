@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.12.4
-// source: engine.proto
+// source: pkg/rpc/proto/banyan/v1/engine.proto
 
 package banyanpb
 
@@ -549,5 +549,5 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "engine.proto",
+	Metadata: "pkg/rpc/proto/banyan/v1/engine.proto",
 }

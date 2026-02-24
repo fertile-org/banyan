@@ -16,6 +16,7 @@ import (
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // PortProxy manages TCP port forwarding to container backends.
@@ -39,11 +40,13 @@ type Options struct {
 
 // Agent is the Banyan data-plane worker.
 type Agent struct {
-	opts         Options
-	client       *EngineClient
-	containers   *containerTracker
-	sessionToken string
-	proxy        PortProxy
+	opts          Options
+	client        *EngineClient
+	containers    *containerTracker
+	sessionToken  string
+	proxy         PortProxy
+	vpcEnabled    bool
+	overlayDriver overlay.OverlayDriver
 }
 
 // Package-level function variables for testing.
@@ -54,6 +57,7 @@ var (
 	containerIDGetter   = getContainerID
 	containerRemover    = removeContainer
 	containerIPGetter   = getContainerIP
+	vpcNetworkEnabled   bool // set by Agent.Run() after VPC init
 )
 
 // New creates a new Agent with a random session token.
@@ -104,11 +108,22 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// Register node
-	registryURL, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags)
+	registryURL, vpcConfig, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags)
 	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
 	fmt.Printf("Node registered: %s (registry: %s)\n", a.opts.NodeName, registryURL)
+
+	// Initialize VPC overlay networking after registration
+	if vpcConfig != nil && vpcConfig.AllocatedSubnet != "" {
+		fmt.Println("Initializing VPC overlay networking...")
+		if vpcErr := a.initializeVPCNetworking(ctx, vpcConfig); vpcErr != nil {
+			return fmt.Errorf("VPC networking init failed: %w", vpcErr)
+		}
+		a.vpcEnabled = true
+		vpcNetworkEnabled = true
+		fmt.Println("VPC overlay networking ready")
+	}
 
 	// Start the task execution loop
 	go a.agentLoop(ctx)
@@ -123,6 +138,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	go startAgentGRPC(ctx, &NerdctlLogProvider{}, a.opts.APIPort, a.sessionToken)
 
 	<-ctx.Done()
+
+	// Clean up overlay networking
+	if a.overlayDriver != nil {
+		if cleanupErr := a.overlayDriver.Cleanup(context.Background()); cleanupErr != nil {
+			fmt.Printf("[Agent] WARNING: overlay cleanup failed: %v\n", cleanupErr)
+		}
+	}
 
 	fmt.Println("Agent stopped")
 	return nil
@@ -228,7 +250,7 @@ func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.
 		return nil, fmt.Errorf("failed to pull image %s: %v", task.Image, err)
 	}
 
-	args := buildNerdctlRunArgs(task)
+	args := buildNerdctlRunArgs(task, vpcNetworkEnabled)
 
 	fmt.Printf("[Agent]   Starting container %s...\n", task.ContainerName)
 	if err := commandRunner(ctx, "nerdctl", args...); err != nil {
@@ -313,8 +335,13 @@ func getContainerIP(ctx context.Context, containerName string) (string, error) {
 
 // buildNerdctlRunArgs builds the argument list for "nerdctl run" from a task.
 // Ports are handled by the agent's TCP proxy, not by nerdctl port mapping.
-func buildNerdctlRunArgs(task *types.TaskRecord) []string {
+// When vpcEnabled is true, containers are connected to the "banyan" CNI network.
+func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 	args := []string{"run", "-d", "--name", task.ContainerName}
+
+	if vpcEnabled {
+		args = append(args, "--net", "banyan")
+	}
 
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
@@ -350,8 +377,15 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags); err != nil {
+			peers, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags)
+			if err != nil {
 				fmt.Printf("[Agent] WARNING: heartbeat failed: %v\n", err)
+				continue
+			}
+			if a.vpcEnabled && len(peers) > 0 {
+				if reconcileErr := a.reconcileVPCPeers(ctx, peers); reconcileErr != nil {
+					fmt.Printf("[Agent] WARNING: peer reconciliation failed: %v\n", reconcileErr)
+				}
 			}
 		}
 	}

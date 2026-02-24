@@ -62,7 +62,20 @@ func (c *EngineClient) ExchangeToken(ctx context.Context, name, role string) (st
 	return resp.Token, nil
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string) (string, error) {
+// VPCConfig holds VPC networking configuration returned by the engine during registration.
+type VPCConfig struct {
+	VPCCIDR         string
+	AllocatedSubnet string // /24 subnet allocated for this agent
+}
+
+// VPCPeer represents a remote agent in the overlay network.
+type VPCPeer struct {
+	Subnet  string
+	HostIP  string
+	VTEPMAC string
+}
+
+func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string) (string, *VPCConfig, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:    name,
 		ApiAddress:   apiAddr,
@@ -70,21 +83,40 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 		Tags:         tags,
 	})
 	if err != nil {
-		return "", fmt.Errorf("register failed: %w", err)
+		return "", nil, fmt.Errorf("register failed: %w", err)
 	}
-	return resp.RegistryUrl, nil
+
+	var vpcConfig *VPCConfig
+	if resp.AllocatedSubnet != "" && resp.VpcCidr != "" {
+		vpcConfig = &VPCConfig{
+			VPCCIDR:         resp.VpcCidr,
+			AllocatedSubnet: resp.AllocatedSubnet,
+		}
+	}
+
+	return resp.RegistryUrl, vpcConfig, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) error {
-	_, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) ([]VPCPeer, error) {
+	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    name,
 		SessionToken: sessionToken,
 		Tags:         tags,
 	})
 	if err != nil {
-		return fmt.Errorf("heartbeat failed: %w", err)
+		return nil, fmt.Errorf("heartbeat failed: %w", err)
 	}
-	return nil
+
+	var peers []VPCPeer
+	for _, p := range resp.VpcPeers {
+		peers = append(peers, VPCPeer{
+			Subnet:  p.Subnet,
+			HostIP:  p.HostIp,
+			VTEPMAC: p.VtepMac,
+		})
+	}
+
+	return peers, nil
 }
 
 func (c *EngineClient) PollTasks(ctx context.Context, name string) ([]*banyanpb.TaskRecord, error) {

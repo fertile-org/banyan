@@ -3,6 +3,7 @@ module github.com/fertile-org/banyan/pkg/vpc
 go 1.24.0
 
 require (
+	github.com/coreos/go-iptables v0.8.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/miekg/dns v1.1.69
@@ -13,12 +14,11 @@ require (
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
-	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/stretchr/testify v1.10.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/v3 v3.5.21 // indirect
-	go.opentelemetry.io/otel/sdk v1.37.0 // indirect
+	go.opentelemetry.io/otel/metric v1.37.0 // indirect
+	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
 	golang.org/x/mod v0.32.0 // indirect

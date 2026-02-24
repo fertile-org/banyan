@@ -325,6 +325,7 @@ verify() {
             error "  buildkit: NOT FOUND"
             ok=false
         fi
+
     fi
 
     if ! $ok; then

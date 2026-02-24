@@ -7,6 +7,7 @@ require (
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
+	github.com/fertile-org/banyan/pkg/vpc/overlay v0.0.0
 	golang.org/x/crypto v0.48.0
 	google.golang.org/grpc v1.72.1
 )
@@ -35,4 +36,5 @@ replace (
 	github.com/fertile-org/banyan/pkg/rpc => ../rpc
 	github.com/fertile-org/banyan/pkg/storage => ../storage
 	github.com/fertile-org/banyan/pkg/types => ../types
+	github.com/fertile-org/banyan/pkg/vpc/overlay => ../vpc/overlay
 )

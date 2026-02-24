@@ -78,7 +78,7 @@ scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 When building from source, you still need runtime dependencies on each node:
 
 - **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below).
-- **Worker nodes**: containerd, nerdctl, BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
+- **Worker nodes**: containerd, nerdctl, CNI plugins, BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
 
 ### Etcd (state store)
 

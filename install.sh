@@ -20,7 +20,6 @@ NERDCTL_VERSION="2.0.3"
 CNI_VERSION="1.6.1"
 ETCD_VERSION="3.5.17"
 BUILDKIT_VERSION="0.19.0"
-
 # --- Output helpers ---
 
 GREEN='\033[0;32m'
@@ -336,6 +335,7 @@ verify() {
             error "  buildkit: NOT FOUND"
             ok=false
         fi
+
     fi
 
     if ! $ok; then

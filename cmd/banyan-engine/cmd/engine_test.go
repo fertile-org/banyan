@@ -225,6 +225,12 @@ func TestManagedEtcdClientURL(t *testing.T) {
 	}
 }
 
+func TestManagedEtcdListenURL(t *testing.T) {
+	if managedEtcdListenURL != "http://127.0.0.1:2379" {
+		t.Errorf("expected 'http://127.0.0.1:2379', got %q", managedEtcdListenURL)
+	}
+}
+
 func TestStartManagedEtcd_BinaryNotFound(t *testing.T) {
 	// Temporarily override PATH to ensure etcd binary is not found
 	origPath := t.TempDir() // empty dir — no etcd binary

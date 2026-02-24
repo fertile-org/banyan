@@ -13,6 +13,7 @@ import (
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -2046,6 +2047,179 @@ func TestRegister_SaveError(t *testing.T) {
 	if status.Code(err) != codes.Internal {
 		t.Errorf("expected Internal, got %v", status.Code(err))
 	}
+}
+
+func TestRegister_VPCConfig(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns allocated subnet when allocator is set", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		allocator, err := overlay.NewSubnetAllocator("10.0.0.0/16")
+		if err != nil {
+			t.Fatalf("failed to create allocator: %v", err)
+		}
+		peerTracker := overlay.NewPeerTracker()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+			allocator:   allocator,
+			peerTracker: peerTracker,
+			vpcCIDR:     "10.0.0.0/16",
+		}
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+			ApiAddress:   "worker-1:9090",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if resp.AllocatedSubnet == "" {
+			t.Error("expected non-empty allocated_subnet")
+		}
+		if resp.VpcCidr != "10.0.0.0/16" {
+			t.Errorf("expected vpc_cidr '10.0.0.0/16', got %q", resp.VpcCidr)
+		}
+	})
+
+	t.Run("idempotent allocation for same agent", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		allocator, _ := overlay.NewSubnetAllocator("10.0.0.0/16")
+		peerTracker := overlay.NewPeerTracker()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+			allocator:   allocator,
+			peerTracker: peerTracker,
+			vpcCIDR:     "10.0.0.0/16",
+		}
+
+		resp1, _ := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+			ApiAddress:   "worker-1:9090",
+		})
+		resp2, _ := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+			ApiAddress:   "worker-1:9090",
+		})
+
+		if resp1.AllocatedSubnet != resp2.AllocatedSubnet {
+			t.Errorf("expected same subnet for same agent, got %q and %q", resp1.AllocatedSubnet, resp2.AllocatedSubnet)
+		}
+	})
+
+	t.Run("no VPC config when allocator is nil", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+		}
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-3",
+			SessionToken: "token-3",
+			ApiAddress:   "worker-3:9090",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if resp.AllocatedSubnet != "" {
+			t.Errorf("expected empty allocated_subnet, got %q", resp.AllocatedSubnet)
+		}
+		if resp.VpcCidr != "" {
+			t.Errorf("expected empty vpc_cidr, got %q", resp.VpcCidr)
+		}
+	})
+}
+
+func TestHeartbeat_VPCPeers(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns VPC peers from peer tracker", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		allocator, _ := overlay.NewSubnetAllocator("10.0.0.0/16")
+		peerTracker := overlay.NewPeerTracker()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+			allocator:   allocator,
+			peerTracker: peerTracker,
+			vpcCIDR:     "10.0.0.0/16",
+		}
+
+		// Register two agents to populate allocator and peer tracker
+		srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName: "worker-1", SessionToken: "token-1", ApiAddress: "w1:9090",
+		})
+		srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName: "worker-2", SessionToken: "token-2", ApiAddress: "w2:9090",
+		})
+
+		// Manually update peer tracker with known IPs since test gRPC
+		// context doesn't have real peer addresses
+		subnet1, _ := allocator.Allocate("worker-1")
+		subnet2, _ := allocator.Allocate("worker-2")
+		peerTracker.Update("worker-1", overlay.Peer{
+			Subnet: *subnet1,
+			HostIP: net.ParseIP("192.168.1.10"),
+			VTEPIP: overlay.VTEPIP(*subnet1),
+			MAC:    overlay.DeterministicMAC(*subnet1),
+		})
+		peerTracker.Update("worker-2", overlay.Peer{
+			Subnet: *subnet2,
+			HostIP: net.ParseIP("192.168.1.20"),
+			VTEPIP: overlay.VTEPIP(*subnet2),
+			MAC:    overlay.DeterministicMAC(*subnet2),
+		})
+
+		// Heartbeat from worker-1 should see worker-2 as a peer
+		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+		resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		if len(resp.VpcPeers) != 1 {
+			t.Fatalf("expected 1 VPC peer, got %d", len(resp.VpcPeers))
+		}
+		if resp.VpcPeers[0].HostIp != "192.168.1.20" {
+			t.Errorf("expected peer host IP '192.168.1.20', got %q", resp.VpcPeers[0].HostIp)
+		}
+	})
+
+	t.Run("no peers when tracker is nil", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+		}
+
+		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+		resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		if len(resp.VpcPeers) != 0 {
+			t.Errorf("expected 0 VPC peers when tracker is nil, got %d", len(resp.VpcPeers))
+		}
+	})
+}
+
+func TestExtractPeerIP(t *testing.T) {
+	t.Run("returns nil for context without peer", func(t *testing.T) {
+		ip := extractPeerIP(context.Background())
+		if ip != nil {
+			t.Errorf("expected nil IP for context without peer, got %v", ip)
+		}
+	})
 }
 
 func TestHeartbeat_SaveError(t *testing.T) {

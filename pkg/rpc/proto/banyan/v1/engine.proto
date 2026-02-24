@@ -34,6 +34,9 @@ message RegisterRequest {
 
 message RegisterResponse {
   string registry_url = 1;
+  repeated string store_endpoints = 2;  // DEPRECATED: was etcd endpoints for Flannel
+  string vpc_cidr = 3;                  // VPC network CIDR (e.g., "10.0.0.0/16")
+  string allocated_subnet = 4;          // /24 subnet for this agent (e.g., "10.0.45.0/24")
 }
 
 message HeartbeatRequest {
@@ -42,7 +45,15 @@ message HeartbeatRequest {
   repeated string tags = 3;
 }
 
-message HeartbeatResponse {}
+message HeartbeatResponse {
+  repeated VPCPeer vpc_peers = 1;       // all other agents' network info
+}
+
+message VPCPeer {
+  string subnet = 1;                    // peer's allocated subnet
+  string host_ip = 2;                   // peer's reachable IP
+  string vtep_mac = 3;                  // deterministic VTEP MAC
+}
 
 message PollTasksRequest {
   string agent_name = 1;

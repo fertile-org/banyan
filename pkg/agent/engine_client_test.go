@@ -273,22 +273,115 @@ func TestEngineClient_Register(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
-	registryURL, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil)
+	registryURL, vpcConfig, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil)
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
 	if registryURL != "localhost:5000" {
 		t.Errorf("expected registry URL 'localhost:5000', got %q", registryURL)
 	}
+	// testEngineServer doesn't set VPC fields, so vpcConfig should be nil
+	if vpcConfig != nil {
+		t.Errorf("expected nil VPC config from test server, got %+v", vpcConfig)
+	}
+}
+
+func TestEngineClient_Register_WithVPCConfig(t *testing.T) {
+	store := storage.NewMemoryStore()
+
+	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
+	validator := &testTokenValidator{validHash: banyanrpc.HashPassword(testToken)}
+
+	lis := bufconn.Listen(testBufSize)
+	srv := grpc.NewServer(
+		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
+	)
+
+	// Use a server that returns VPC config
+	engineSrv := &vpcTestEngineServer{
+		store:           store,
+		registryURL:     "localhost:5000",
+		allocatedSubnet: "10.0.0.0/24",
+		vpcCIDR:         "10.0.0.0/16",
+	}
+	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
+
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: testToken}),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer func() {
+		conn.Close()
+		srv.Stop()
+	}()
+
+	client := &EngineClient{
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}
+
+	registryURL, vpcConfig, registerErr := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil)
+	if registerErr != nil {
+		t.Fatalf("Register failed: %v", registerErr)
+	}
+	if registryURL != "localhost:5000" {
+		t.Errorf("expected registry URL 'localhost:5000', got %q", registryURL)
+	}
+	if vpcConfig == nil {
+		t.Fatal("expected non-nil VPC config")
+	}
+	if vpcConfig.AllocatedSubnet != "10.0.0.0/24" {
+		t.Errorf("expected allocated subnet '10.0.0.0/24', got %q", vpcConfig.AllocatedSubnet)
+	}
+	if vpcConfig.VPCCIDR != "10.0.0.0/16" {
+		t.Errorf("expected VPC CIDR '10.0.0.0/16', got %q", vpcConfig.VPCCIDR)
+	}
+}
+
+// vpcTestEngineServer returns VPC config in Register responses.
+type vpcTestEngineServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	store           storage.StateStore
+	registryURL     string
+	allocatedSubnet string
+	vpcCIDR         string
+}
+
+func (s *vpcTestEngineServer) Register(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
+	return &banyanpb.RegisterResponse{
+		RegistryUrl:     s.registryURL,
+		AllocatedSubnet: s.allocatedSubnet,
+		VpcCidr:         s.vpcCIDR,
+	}, nil
+}
+
+func (s *vpcTestEngineServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
 }
 
 func TestEngineClient_Heartbeat(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t, testToken)
 	defer cleanup()
 
-	err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	peers, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
+	}
+	// testEngineServer returns empty response, so no peers expected
+	if len(peers) != 0 {
+		t.Errorf("expected 0 peers, got %d", len(peers))
 	}
 }
 
@@ -391,14 +484,14 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Register error", func(t *testing.T) {
-		_, err := client.Register(ctx, "worker-1", "addr", "token", nil)
+		_, _, err := client.Register(ctx, "worker-1", "addr", "token", nil)
 		if err == nil {
 			t.Error("expected error from Register on stopped server")
 		}
 	})
 
 	t.Run("Heartbeat error", func(t *testing.T) {
-		err := client.Heartbeat(ctx, "worker-1", "token", nil)
+		_, err := client.Heartbeat(ctx, "worker-1", "token", nil)
 		if err == nil {
 			t.Error("expected error from Heartbeat on stopped server")
 		}

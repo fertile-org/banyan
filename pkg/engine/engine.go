@@ -13,7 +13,7 @@ import (
 
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
-	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // Options configures the Engine.
@@ -72,15 +72,20 @@ func (e *Engine) Run(ctx context.Context) error {
 		fmt.Println("WARNING: No authentication configured")
 	}
 
-	// Initialize VPC network (etcd only — Flannel requires etcd natively)
-	if e.opts.StoreBackend == "etcd" {
-		fmt.Printf("Initializing VPC network with CIDR %s...\n", e.opts.VPCCIDR)
-		if vpcErr := vpc.InitializeNetwork(ctx, []string{e.opts.StoreAddress}, e.opts.VPCCIDR); vpcErr != nil {
-			fmt.Printf("Warning: VPC initialization: %v\n", vpcErr)
+	// Initialize VPC overlay networking (subnet allocation + peer tracking)
+	var allocator *overlay.SubnetAllocator
+	var peerTracker *overlay.PeerTracker
+	if e.opts.VPCCIDR != "" {
+		if err := checkCIDRConflict(e.opts.VPCCIDR); err != nil {
+			return fmt.Errorf("VPC CIDR conflict: %w", err)
 		}
-		fmt.Println("VPC initialized")
-	} else {
-		fmt.Println("VPC networking skipped (requires etcd backend for Flannel)")
+		var allocErr error
+		allocator, allocErr = overlay.NewSubnetAllocator(e.opts.VPCCIDR)
+		if allocErr != nil {
+			return fmt.Errorf("failed to create subnet allocator: %w", allocErr)
+		}
+		peerTracker = overlay.NewPeerTracker()
+		fmt.Printf("VPC overlay networking enabled (CIDR: %s)\n", e.opts.VPCCIDR)
 	}
 
 	// Start embedded OCI registry
@@ -105,7 +110,7 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Start Engine gRPC server
 	fmt.Printf("Starting Engine gRPC server on port %s...\n", e.opts.GRPCPort)
-	grpcSrv, err := startEngineGRPC(ctx, e.store, e.opts.GRPCPort, e.opts.PasswordHash, e.registryURL)
+	grpcSrv, err := startEngineGRPC(ctx, e.store, e.opts.GRPCPort, e.opts.PasswordHash, e.registryURL, allocator, peerTracker, e.opts.VPCCIDR)
 	if err != nil {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
@@ -479,4 +484,34 @@ func findNonLoopbackIPv4(addrs []net.Addr) (string, error) {
 		return ip.String(), nil
 	}
 	return "", fmt.Errorf("no non-loopback IPv4 address found")
+}
+
+// interfaceAddrsFunc is a variable for testing.
+var interfaceAddrsFunc = net.InterfaceAddrs
+
+// checkCIDRConflict verifies the VPC CIDR doesn't overlap with any host network interfaces.
+func checkCIDRConflict(vpcCIDR string) error {
+	_, vpcNet, err := net.ParseCIDR(vpcCIDR)
+	if err != nil {
+		return fmt.Errorf("invalid VPC CIDR: %w", err)
+	}
+
+	addrs, err := interfaceAddrsFunc()
+	if err != nil {
+		return fmt.Errorf("failed to get interface addresses: %w", err)
+	}
+
+	for _, addr := range addrs {
+		ipNet, ok := addr.(*net.IPNet)
+		if !ok {
+			continue
+		}
+		if ipNet.IP.To4() == nil {
+			continue
+		}
+		if vpcNet.Contains(ipNet.IP) || ipNet.Contains(vpcNet.IP) {
+			return fmt.Errorf("VPC CIDR %s overlaps with host interface %s", vpcCIDR, ipNet.String())
+		}
+	}
+	return nil
 }

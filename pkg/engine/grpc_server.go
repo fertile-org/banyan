@@ -12,12 +12,14 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // engineGRPCServer implements the EngineService gRPC server.
@@ -27,10 +29,13 @@ type engineGRPCServer struct {
 	sessions     sync.Map // map[agentName]sessionToken
 	registryURL  string
 	passwordHash string
+	allocator    *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
+	peerTracker  *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
+	vpcCIDR      string                   // VPC network CIDR (e.g., "10.0.0.0/16")
 }
 
 // startEngineGRPC starts the gRPC server for agent communication.
-func startEngineGRPC(ctx context.Context, store storage.StateStore, port, passwordHash, registryURL string) (*engineGRPCServer, error) {
+func startEngineGRPC(ctx context.Context, store storage.StateStore, port, passwordHash, registryURL string, allocator *overlay.SubnetAllocator, peerTracker *overlay.PeerTracker, vpcCIDR string) (*engineGRPCServer, error) {
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on gRPC port %s: %w", port, err)
@@ -40,6 +45,9 @@ func startEngineGRPC(ctx context.Context, store storage.StateStore, port, passwo
 		store:        store,
 		registryURL:  registryURL,
 		passwordHash: passwordHash,
+		allocator:    allocator,
+		peerTracker:  peerTracker,
+		vpcCIDR:      vpcCIDR,
 	}
 
 	srv := grpc.NewServer(
@@ -97,9 +105,35 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 
 	fmt.Printf("[Engine] Agent registered: %s (api: %s)\n", req.AgentName, req.ApiAddress)
 
-	return &banyanpb.RegisterResponse{
+	resp := &banyanpb.RegisterResponse{
 		RegistryUrl: s.registryURL,
-	}, nil
+	}
+
+	// Allocate VPC subnet for this agent
+	if s.allocator != nil && s.vpcCIDR != "" {
+		subnet, allocErr := s.allocator.Allocate(req.AgentName)
+		if allocErr != nil {
+			return nil, status.Errorf(codes.Internal, "failed to allocate subnet: %v", allocErr)
+		}
+		resp.VpcCidr = s.vpcCIDR
+		resp.AllocatedSubnet = subnet.String()
+
+		// Record peer info using the agent's reachable IP from gRPC connection
+		if s.peerTracker != nil {
+			hostIP := extractPeerIP(ctx)
+			if hostIP != nil {
+				peer := overlay.Peer{
+					Subnet: *subnet,
+					HostIP: hostIP,
+					VTEPIP: overlay.VTEPIP(*subnet),
+					MAC:    overlay.DeterministicMAC(*subnet),
+				}
+				s.peerTracker.Update(req.AgentName, peer)
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error) {
@@ -128,7 +162,38 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 		return nil, status.Errorf(codes.Internal, "failed to update heartbeat: %v", err)
 	}
 
-	return &banyanpb.HeartbeatResponse{}, nil
+	resp := &banyanpb.HeartbeatResponse{}
+
+	// Return VPC peer list if overlay networking is enabled
+	if s.peerTracker != nil {
+		// Update peer's host IP from gRPC connection (in case it changed)
+		hostIP := extractPeerIP(ctx)
+		if hostIP != nil {
+			if s.allocator != nil {
+				subnet, allocErr := s.allocator.Allocate(req.AgentName)
+				if allocErr == nil {
+					p := overlay.Peer{
+						Subnet: *subnet,
+						HostIP: hostIP,
+						VTEPIP: overlay.VTEPIP(*subnet),
+						MAC:    overlay.DeterministicMAC(*subnet),
+					}
+					s.peerTracker.Update(req.AgentName, p)
+				}
+			}
+		}
+
+		peers := s.peerTracker.GetPeersExcluding(req.AgentName)
+		for _, p := range peers {
+			resp.VpcPeers = append(resp.VpcPeers, &banyanpb.VPCPeer{
+				Subnet:  p.Subnet.String(),
+				HostIp:  p.HostIP.String(),
+				VtepMac: p.MAC.String(),
+			})
+		}
+	}
+
+	return resp, nil
 }
 
 func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTasksRequest) (*banyanpb.PollTasksResponse, error) {
@@ -940,4 +1005,17 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 		Version:  m.Version,
 		Services: services,
 	}
+}
+
+// extractPeerIP extracts the remote IP address from the gRPC connection context.
+func extractPeerIP(ctx context.Context) net.IP {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return nil
+	}
+	addr, ok := p.Addr.(*net.TCPAddr)
+	if !ok {
+		return nil
+	}
+	return addr.IP
 }

@@ -1774,6 +1774,82 @@ func TestHasConflictingDeployment_WithTags(t *testing.T) {
 	})
 }
 
+func TestCheckCIDRConflict(t *testing.T) {
+	origFunc := interfaceAddrsFunc
+	t.Cleanup(func() { interfaceAddrsFunc = origFunc })
+
+	t.Run("no conflict with non-overlapping CIDR", func(t *testing.T) {
+		interfaceAddrsFunc = func() ([]net.Addr, error) {
+			return []net.Addr{
+				&net.IPNet{IP: net.ParseIP("192.168.1.100"), Mask: net.CIDRMask(24, 32)},
+			}, nil
+		}
+
+		err := checkCIDRConflict("10.0.0.0/16")
+		if err != nil {
+			t.Errorf("expected no conflict, got: %v", err)
+		}
+	})
+
+	t.Run("conflict when CIDR overlaps host interface", func(t *testing.T) {
+		interfaceAddrsFunc = func() ([]net.Addr, error) {
+			return []net.Addr{
+				&net.IPNet{IP: net.ParseIP("10.0.1.5"), Mask: net.CIDRMask(24, 32)},
+			}, nil
+		}
+
+		err := checkCIDRConflict("10.0.0.0/16")
+		if err == nil {
+			t.Fatal("expected conflict error")
+		}
+	})
+
+	t.Run("skips loopback and IPv6", func(t *testing.T) {
+		interfaceAddrsFunc = func() ([]net.Addr, error) {
+			return []net.Addr{
+				&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+				&net.IPNet{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},
+			}, nil
+		}
+
+		err := checkCIDRConflict("10.0.0.0/16")
+		if err != nil {
+			t.Errorf("expected no conflict with loopback/IPv6, got: %v", err)
+		}
+	})
+
+	t.Run("returns error for invalid CIDR", func(t *testing.T) {
+		err := checkCIDRConflict("not-a-cidr")
+		if err == nil {
+			t.Fatal("expected error for invalid CIDR")
+		}
+	})
+
+	t.Run("returns error when interface addrs fails", func(t *testing.T) {
+		interfaceAddrsFunc = func() ([]net.Addr, error) {
+			return nil, fmt.Errorf("no interfaces")
+		}
+
+		err := checkCIDRConflict("10.0.0.0/16")
+		if err == nil {
+			t.Fatal("expected error when interface addrs fails")
+		}
+	})
+
+	t.Run("skips non-IPNet addresses", func(t *testing.T) {
+		interfaceAddrsFunc = func() ([]net.Addr, error) {
+			return []net.Addr{
+				&mockAddr{network: "tcp", str: "not-an-ipnet"},
+			}, nil
+		}
+
+		err := checkCIDRConflict("10.0.0.0/16")
+		if err != nil {
+			t.Errorf("expected no conflict with non-IPNet addr, got: %v", err)
+		}
+	})
+}
+
 func TestSchedulePendingDeployment_RecreateWaitsForStopTasks(t *testing.T) {
 	ctx := context.Background()
 

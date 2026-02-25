@@ -12,6 +12,7 @@ import (
 	"net"
 	"os/exec"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/proxy"
@@ -33,7 +34,9 @@ type PortProxy interface {
 type Options struct {
 	NodeName       string
 	EngineEndpoint string
-	AuthToken      string
+	PublicKey      string // WireGuard public key (for pubkey auth)
+	WGPrivateKey   string // WireGuard private key (for overlay)
+	WGPublicKey    string // WireGuard public key (for overlay)
 	APIPort        string
 	APIAddress     string
 	PidFile        string
@@ -42,19 +45,28 @@ type Options struct {
 
 // Agent is the Banyan data-plane worker.
 type Agent struct {
-	opts           Options
-	client         *EngineClient
-	containers     *containerTracker
-	sessionToken   string
-	proxy          PortProxy
-	vpcEnabled     bool
-	overlayDriver  overlay.OverlayDriver
-	remoteBackends map[string]ServiceBackend // key: containerName
-	dnsManager     *dns.Manager
-	dnsServer      *dns.Server
-	gatewayIP      string          // bridge gateway IP (e.g., "10.0.45.1")
-	registeredDNS  map[string]bool // tracked DNS hostnames for stale cleanup
+	opts            Options
+	client          *EngineClient
+	containers      *containerTracker
+	sessionToken    string
+	proxy           PortProxy
+	vpcEnabled      bool
+	overlayDriver   overlay.OverlayDriver
+	remoteBackends  map[string]ServiceBackend // key: containerName
+	dnsManager      *dns.Manager
+	dnsServer       *dns.Server
+	gatewayIP       string          // bridge gateway IP (e.g., "10.0.45.1")
+	registeredDNS   map[string]bool // tracked DNS hostnames for stale cleanup
+	connected       atomic.Bool     // true when registered and heartbeat is healthy
+	allocatedSubnet string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
 }
+
+// Reconnection constants.
+const (
+	maxConsecutiveHeartbeatFails = 3
+	reconnectBackoffInitial      = 2 * time.Second
+	reconnectBackoffMax          = 60 * time.Second
+)
 
 // Package-level function variables for testing.
 var (
@@ -97,7 +109,10 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	// Connect to engine via gRPC
 	fmt.Printf("Connecting to Engine at %s...\n", a.opts.EngineEndpoint)
-	client, err := NewEngineClient(a.opts.EngineEndpoint, a.opts.AuthToken)
+	if a.opts.PublicKey == "" {
+		return fmt.Errorf("no authentication configured (missing WireGuard public key)")
+	}
+	client, err := NewEngineClient(a.opts.EngineEndpoint, a.opts.PublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}
@@ -118,11 +133,12 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// Register node
-	registryURL, vpcConfig, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags)
+	registryURL, vpcConfig, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
 	fmt.Printf("Node registered: %s (registry: %s)\n", a.opts.NodeName, registryURL)
+	a.connected.Store(true)
 
 	// Initialize VPC overlay networking after registration
 	if vpcConfig != nil && vpcConfig.AllocatedSubnet != "" {
@@ -131,6 +147,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			return fmt.Errorf("VPC networking init failed: %w", vpcErr)
 		}
 		a.vpcEnabled = true
+		a.allocatedSubnet = vpcConfig.AllocatedSubnet
 		vpcNetworkEnabled = true
 		fmt.Println("VPC overlay networking ready")
 
@@ -189,6 +206,9 @@ func (a *Agent) agentLoop(ctx context.Context) {
 
 // processTasks polls and executes pending tasks for this agent.
 func (a *Agent) processTasks(ctx context.Context) {
+	if !a.connected.Load() {
+		return
+	}
 	tasks, err := a.client.PollTasks(ctx, a.opts.NodeName)
 	if err != nil {
 		return
@@ -404,6 +424,8 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
+	var consecutiveFails int
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -411,9 +433,25 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 		case <-ticker.C:
 			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags)
 			if err != nil {
-				fmt.Printf("[Agent] WARNING: heartbeat failed: %v\n", err)
+				consecutiveFails++
+				if consecutiveFails < maxConsecutiveHeartbeatFails {
+					fmt.Printf("[Agent] WARNING: heartbeat failed (%d/%d): %v\n", consecutiveFails, maxConsecutiveHeartbeatFails, err)
+					continue
+				}
+
+				fmt.Printf("[Agent] Heartbeat failed %d consecutive times, reconnecting...\n", consecutiveFails)
+				a.connected.Store(false)
+				a.reconnect(ctx)
+				if ctx.Err() != nil {
+					return
+				}
+				a.connected.Store(true)
+				consecutiveFails = 0
+				fmt.Println("[Agent] Reconnected, resuming heartbeat")
 				continue
 			}
+			consecutiveFails = 0
+
 			if a.vpcEnabled && len(peers) > 0 {
 				if reconcileErr := a.reconcileVPCPeers(ctx, peers); reconcileErr != nil {
 					fmt.Printf("[Agent] WARNING: peer reconciliation failed: %v\n", reconcileErr)
@@ -444,6 +482,9 @@ func (a *Agent) containerHealthLoop(ctx context.Context) {
 }
 
 func (a *Agent) checkContainerHealth(ctx context.Context) {
+	if !a.connected.Load() {
+		return
+	}
 	tracked := a.containers.List()
 	if len(tracked) == 0 {
 		return
@@ -506,6 +547,82 @@ func (a *Agent) waitForEngineGRPC(ctx context.Context, timeout time.Duration) er
 		}
 	}
 	return fmt.Errorf("timeout waiting for engine gRPC")
+}
+
+// reconnect re-registers with the engine after persistent heartbeat failures.
+// It blocks until reconnection succeeds or ctx is cancelled.
+// The heartbeat goroutine calls this — no extra goroutine is needed.
+func (a *Agent) reconnect(ctx context.Context) {
+	backoff := reconnectBackoffInitial
+
+	for {
+		fmt.Printf("[Agent] Waiting for engine at %s...\n", a.opts.EngineEndpoint)
+		if err := a.waitForEngineGRPC(ctx, 30*time.Second); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			fmt.Printf("[Agent] Engine not ready: %v, retrying in %s...\n", err, backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > reconnectBackoffMax {
+				backoff = reconnectBackoffMax
+			}
+			continue
+		}
+
+		apiAddr := a.opts.APIAddress
+		if apiAddr == "" {
+			apiAddr = a.opts.NodeName + ":" + a.opts.APIPort
+		}
+
+		_, vpcConfig, err := a.client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			fmt.Printf("[Agent] Re-registration failed: %v, retrying in %s...\n", err, backoff)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(backoff):
+			}
+			backoff *= 2
+			if backoff > reconnectBackoffMax {
+				backoff = reconnectBackoffMax
+			}
+			continue
+		}
+
+		// Handle VPC re-initialization if subnet changed
+		if a.vpcEnabled && vpcConfig != nil && vpcConfig.AllocatedSubnet != "" {
+			if a.allocatedSubnet != vpcConfig.AllocatedSubnet {
+				fmt.Printf("[Agent] VPC subnet changed (%s → %s), re-initializing overlay...\n", a.allocatedSubnet, vpcConfig.AllocatedSubnet)
+				if a.overlayDriver != nil {
+					if cleanupErr := a.overlayDriver.Cleanup(ctx); cleanupErr != nil {
+						fmt.Printf("[Agent] WARNING: overlay cleanup failed: %v\n", cleanupErr)
+					}
+				}
+				if a.dnsServer != nil {
+					a.dnsServer.Stop() //nolint:errcheck // best-effort cleanup before re-init
+				}
+				if vpcErr := a.initializeVPCNetworking(ctx, vpcConfig); vpcErr != nil {
+					fmt.Printf("[Agent] WARNING: VPC re-init failed: %v\n", vpcErr)
+				}
+				if dnsErr := a.initializeDNS(ctx, vpcConfig.AllocatedSubnet); dnsErr != nil {
+					fmt.Printf("[Agent] WARNING: DNS re-init failed: %v\n", dnsErr)
+				}
+				a.allocatedSubnet = vpcConfig.AllocatedSubnet
+				dnsGatewayIPAddr = a.gatewayIP
+			}
+		}
+
+		fmt.Println("[Agent] Reconnected and re-registered successfully")
+		return
+	}
 }
 
 // ServiceBackend represents a container backend for cross-host load balancing.

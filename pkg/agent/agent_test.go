@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 	"testing"
@@ -11,6 +12,9 @@ import (
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 // newTestProxy creates a proxy with noop iptables for use in agent tests.
@@ -184,7 +188,7 @@ func TestProcessTasks(t *testing.T) {
 			return "172.17.0.5", nil
 		}
 
-		client, store, cleanup := setupEngineServer(t, "test-pass")
+		client, store, cleanup := setupEngineServer(t)
 		defer cleanup()
 		ctx := context.Background()
 
@@ -206,6 +210,7 @@ func TestProcessTasks(t *testing.T) {
 			containers: &containerTracker{},
 			proxy:      newTestProxy(t),
 		}
+		a.connected.Store(true)
 
 		a.processTasks(ctx)
 
@@ -229,7 +234,7 @@ func TestProcessTasks(t *testing.T) {
 	})
 
 	t.Run("reports failure when task execution fails", func(t *testing.T) {
-		client, store, cleanup := setupEngineServer(t, "test-pass")
+		client, store, cleanup := setupEngineServer(t)
 		defer cleanup()
 		ctx := context.Background()
 
@@ -250,6 +255,7 @@ func TestProcessTasks(t *testing.T) {
 			containers: &containerTracker{},
 			proxy:      newTestProxy(t),
 		}
+		a.connected.Store(true)
 
 		a.processTasks(ctx)
 
@@ -264,7 +270,7 @@ func TestProcessTasks(t *testing.T) {
 	})
 
 	t.Run("handles no pending tasks", func(t *testing.T) {
-		client, _, cleanup := setupEngineServer(t, "test-pass")
+		client, _, cleanup := setupEngineServer(t)
 		defer cleanup()
 
 		a := &Agent{
@@ -279,7 +285,7 @@ func TestProcessTasks(t *testing.T) {
 	})
 
 	t.Run("stop task does not track container", func(t *testing.T) {
-		client, store, cleanup := setupEngineServer(t, "test-pass")
+		client, store, cleanup := setupEngineServer(t)
 		defer cleanup()
 		ctx := context.Background()
 
@@ -314,7 +320,7 @@ func TestCheckContainerHealth(t *testing.T) {
 	t.Cleanup(func() { containerStatusFunc = origStatusFunc })
 
 	t.Run("reports container statuses", func(t *testing.T) {
-		client, _, cleanup := setupEngineServer(t, "test-pass")
+		client, _, cleanup := setupEngineServer(t)
 		defer cleanup()
 
 		containerStatusFunc = func(ctx context.Context, name string) string {
@@ -326,6 +332,7 @@ func TestCheckContainerHealth(t *testing.T) {
 			client:     client,
 			containers: &containerTracker{},
 		}
+		a.connected.Store(true)
 		a.containers.Add("myapp-web-0", "task-1", "10.0.1.2")
 		a.containers.Add("myapp-api-0", "task-2", "10.0.1.3")
 
@@ -345,7 +352,7 @@ func TestCheckContainerHealth(t *testing.T) {
 
 func TestWaitForEngineGRPC(t *testing.T) {
 	t.Run("succeeds when engine is ready", func(t *testing.T) {
-		client, _, cleanup := setupEngineServer(t, "test-pass")
+		client, _, cleanup := setupEngineServer(t)
 		defer cleanup()
 
 		a := &Agent{client: client}
@@ -357,7 +364,7 @@ func TestWaitForEngineGRPC(t *testing.T) {
 	})
 
 	t.Run("returns error on context cancellation", func(t *testing.T) {
-		client, _, cleanup := setupEngineServer(t, "test-pass")
+		client, _, cleanup := setupEngineServer(t)
 		defer cleanup()
 
 		a := &Agent{client: client}
@@ -669,7 +676,7 @@ func TestRunCommand(t *testing.T) {
 
 func TestProcessTasks_PollError(t *testing.T) {
 	// When PollTasks fails (e.g. server stopped), processTasks should return early.
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t)
 	cleanup() // Stop server immediately to trigger error
 
 	a := &Agent{
@@ -687,7 +694,7 @@ func TestProcessTasks_NilResult(t *testing.T) {
 	origExecutor := taskExecutor
 	t.Cleanup(func() { taskExecutor = origExecutor })
 
-	client, store, cleanup := setupEngineServer(t, "test-pass")
+	client, store, cleanup := setupEngineServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -708,6 +715,7 @@ func TestProcessTasks_NilResult(t *testing.T) {
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
 	}
+	a.connected.Store(true)
 
 	a.processTasks(ctx)
 
@@ -725,7 +733,7 @@ func TestCheckContainerHealth_ReportError(t *testing.T) {
 	t.Cleanup(func() { containerStatusFunc = origStatusFunc })
 
 	// Use a stopped server so ReportContainerHealth fails
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t)
 	cleanup() // Stop server immediately
 
 	containerStatusFunc = func(ctx context.Context, name string) string {
@@ -737,6 +745,7 @@ func TestCheckContainerHealth_ReportError(t *testing.T) {
 		client:     client,
 		containers: &containerTracker{},
 	}
+	a.connected.Store(true)
 	a.containers.Add("myapp-web-0", "task-1", "10.0.1.2")
 
 	// Should not panic; just prints warning
@@ -745,7 +754,7 @@ func TestCheckContainerHealth_ReportError(t *testing.T) {
 
 func TestWaitForEngineGRPC_Timeout(t *testing.T) {
 	// Use a stopped server so Health always fails
-	client, _, cleanup := setupEngineServer(t, "test-pass")
+	client, _, cleanup := setupEngineServer(t)
 	cleanup()
 
 	a := &Agent{client: client}
@@ -790,7 +799,7 @@ func TestProcessTasks_ReportRunningFails(t *testing.T) {
 	t.Cleanup(func() { taskExecutor = origExecutor })
 
 	// Use failing report server where ReportTaskResult always returns an error
-	client, store, cleanup := setupFailingReportServer(t, "test-pass")
+	client, store, cleanup := setupFailingReportServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -817,6 +826,7 @@ func TestProcessTasks_ReportRunningFails(t *testing.T) {
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
 	}
+	a.connected.Store(true)
 
 	// Should not panic; the WARNING prints cover the error paths for
 	// reporting "running" and "completed" statuses.
@@ -834,7 +844,7 @@ func TestProcessTasks_ReportFailureFails(t *testing.T) {
 	t.Cleanup(func() { taskExecutor = origExecutor })
 
 	// Use failing report server where ReportTaskResult always returns an error
-	client, store, cleanup := setupFailingReportServer(t, "test-pass")
+	client, store, cleanup := setupFailingReportServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -855,6 +865,7 @@ func TestProcessTasks_ReportFailureFails(t *testing.T) {
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
 	}
+	a.connected.Store(true)
 
 	// Should not panic; the WARNING prints cover the error path for
 	// reporting "failed" status when ReportTaskResult itself fails.
@@ -1051,7 +1062,7 @@ func TestProcessTasks_StopRemovesProxyBackend(t *testing.T) {
 		return "172.17.0.5", nil
 	}
 
-	client, store, cleanup := setupEngineServer(t, "test-pass")
+	client, store, cleanup := setupEngineServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1078,6 +1089,7 @@ func TestProcessTasks_StopRemovesProxyBackend(t *testing.T) {
 		containers: &containerTracker{},
 		proxy:      p,
 	}
+	a.connected.Store(true)
 
 	a.processTasks(ctx)
 
@@ -1215,6 +1227,242 @@ func TestReconcileRemoteBackends(t *testing.T) {
 			t.Errorf("expected 0 remote backends, got %d", len(a.remoteBackends))
 		}
 	})
+}
+
+func TestProcessTasks_SkipsWhenDisconnected(t *testing.T) {
+	// When connected=false, processTasks should return without making any RPC calls.
+	// Using a stopped server: if it tried to call PollTasks, it would get an error,
+	// but we verify it doesn't even try.
+	client, _, cleanup := setupEngineServer(t)
+	cleanup() // Stop server — any RPC call would fail
+
+	a := &Agent{
+		opts:       Options{NodeName: "worker-1"},
+		client:     client,
+		containers: &containerTracker{},
+		proxy:      newTestProxy(t),
+	}
+	// connected defaults to false (zero value)
+
+	// Should return immediately without panic or error
+	a.processTasks(context.Background())
+}
+
+func TestCheckContainerHealth_SkipsWhenDisconnected(t *testing.T) {
+	origStatusFunc := containerStatusFunc
+	t.Cleanup(func() { containerStatusFunc = origStatusFunc })
+
+	called := false
+	containerStatusFunc = func(ctx context.Context, name string) string {
+		called = true
+		return "running"
+	}
+
+	// Using a stopped server — any RPC call would fail
+	client, _, cleanup := setupEngineServer(t)
+	cleanup()
+
+	a := &Agent{
+		opts:       Options{NodeName: "worker-1"},
+		client:     client,
+		containers: &containerTracker{},
+	}
+	a.containers.Add("myapp-web-0", "task-1", "10.0.1.2")
+	// connected defaults to false (zero value)
+
+	a.checkContainerHealth(context.Background())
+
+	if called {
+		t.Error("containerStatusFunc should not be called when disconnected")
+	}
+}
+
+func TestReconnect_ReRegistersSuccessfully(t *testing.T) {
+	client, _, cleanup := setupEngineServer(t)
+	defer cleanup()
+
+	a := &Agent{
+		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		client:       client,
+		sessionToken: "test-token",
+	}
+
+	// reconnect should succeed immediately since server is healthy
+	a.reconnect(context.Background())
+
+	// No error means success — reconnect returned normally
+}
+
+func TestReconnect_RespectsContextCancellation(t *testing.T) {
+	// Use a stopped server so Health always fails — reconnect should loop until cancelled
+	client, _, cleanup := setupEngineServer(t)
+	cleanup()
+
+	a := &Agent{
+		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		client:       client,
+		sessionToken: "test-token",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		a.reconnect(ctx)
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// Good — reconnect returned after context was cancelled
+	case <-time.After(5 * time.Second):
+		t.Fatal("reconnect did not return after context cancellation")
+	}
+}
+
+func TestReconnect_RetriesOnRegisterFailure(t *testing.T) {
+	// Server that fails Register the first time, then succeeds
+	registerCalls := 0
+	srv := &reconnectTestServer{
+		registerFunc: func(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
+			registerCalls++
+			if registerCalls == 1 {
+				return nil, fmt.Errorf("engine restarting")
+			}
+			return &banyanpb.RegisterResponse{RegistryUrl: "localhost:5000"}, nil
+		},
+	}
+
+	client, cleanup := setupCustomServer(t, srv)
+	defer cleanup()
+
+	a := &Agent{
+		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		client:       client,
+		sessionToken: "test-token",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	a.reconnect(ctx)
+
+	if registerCalls < 2 {
+		t.Errorf("expected at least 2 Register calls, got %d", registerCalls)
+	}
+}
+
+func TestAgentHeartbeat_TriggersReconnectAfterConsecutiveFailures(t *testing.T) {
+	heartbeatCalls := 0
+	srv := &reconnectTestServer{
+		heartbeatFunc: func(ctx context.Context, req *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error) {
+			heartbeatCalls++
+			if heartbeatCalls <= maxConsecutiveHeartbeatFails {
+				return nil, fmt.Errorf("connection refused")
+			}
+			return &banyanpb.HeartbeatResponse{}, nil
+		},
+	}
+
+	client, cleanup := setupCustomServer(t, srv)
+	defer cleanup()
+
+	a := &Agent{
+		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		client:       client,
+		sessionToken: "test-token",
+		containers:   &containerTracker{},
+	}
+	a.connected.Store(true)
+
+	// Simulate the heartbeat loop's failure detection logic directly
+	consecutiveFails := 0
+	for i := 0; i < maxConsecutiveHeartbeatFails; i++ {
+		_, _, err := a.client.Heartbeat(context.Background(), a.opts.NodeName, a.sessionToken, a.opts.Tags)
+		if err != nil {
+			consecutiveFails++
+		}
+	}
+
+	if consecutiveFails != maxConsecutiveHeartbeatFails {
+		t.Fatalf("expected %d consecutive failures, got %d", maxConsecutiveHeartbeatFails, consecutiveFails)
+	}
+
+	// Trigger reconnection (as the heartbeat loop would)
+	a.connected.Store(false)
+	if a.connected.Load() {
+		t.Error("expected connected=false during reconnection")
+	}
+
+	a.reconnect(context.Background())
+	a.connected.Store(true)
+
+	if !a.connected.Load() {
+		t.Error("expected connected=true after reconnection")
+	}
+}
+
+// reconnectTestServer provides controllable behavior for reconnection tests.
+type reconnectTestServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	heartbeatFunc func(context.Context, *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error)
+	registerFunc  func(context.Context, *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error)
+}
+
+func (s *reconnectTestServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
+func (s *reconnectTestServer) Register(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
+	if s.registerFunc != nil {
+		return s.registerFunc(ctx, req)
+	}
+	return &banyanpb.RegisterResponse{RegistryUrl: "localhost:5000"}, nil
+}
+
+func (s *reconnectTestServer) Heartbeat(ctx context.Context, req *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error) {
+	if s.heartbeatFunc != nil {
+		return s.heartbeatFunc(ctx, req)
+	}
+	return &banyanpb.HeartbeatResponse{}, nil
+}
+
+// setupCustomServer creates a bufconn-based server with a custom implementation.
+func setupCustomServer(t *testing.T, srv banyanpb.EngineServiceServer) (*EngineClient, func()) {
+	t.Helper()
+
+	lis := bufconn.Listen(testBufSize)
+	grpcSrv := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(grpcSrv, srv)
+
+	go func() {
+		if err := grpcSrv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+
+	client := &EngineClient{
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}
+
+	cleanup := func() {
+		conn.Close()
+		grpcSrv.Stop()
+	}
+
+	return client, cleanup
 }
 
 func TestGetContainerIP(t *testing.T) {

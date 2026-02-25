@@ -1,5 +1,5 @@
 ---
-name: user-docs
+name: banyan-document-writer
 description: Write user-facing documentation for Banyan that speaks to the target audience — teams who want container orchestration without Kubernetes complexity. Use when creating, updating, or reviewing any user documentation, guides, quickstarts, or reference pages. Triggers on "write docs", "update docs", "user guide", "documentation for users", "doc review", or any work in website/.
 ---
 

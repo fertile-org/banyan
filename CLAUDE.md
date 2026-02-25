@@ -36,7 +36,7 @@ These patterns creep in from Kubernetes and enterprise software. They are wrong 
 
 ### Documentation
 
-User-facing docs live in `website/src/content/docs/`. When writing or updating documentation, use the user-docs skill (`.claude/skills/user-docs/SKILL.md`) which defines the voice, tone, audience, and quality standards.
+User-facing docs live in `website/src/content/docs/`. When writing or updating documentation, use the banyan-document-writer skill (`.claude/skills/banyan-document-writer/SKILL.md`) which defines the voice, tone, audience, and quality standards.
 
 ## **IMPORTANT: Development Rules**
 

@@ -165,7 +165,20 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 		}
 	}
 
-	// Return active containers so agent can restore proxy rules after restart
+	// Return active containers so agent can restore proxy rules after restart.
+	// Only include containers from deployments that are still running.
+	runningDeployments := make(map[string]bool)
+	depKeys, _ := s.store.List(ctx, types.KeyDeployments)
+	for _, key := range depKeys {
+		var dep types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &dep); err != nil {
+			continue
+		}
+		if dep.Status == types.StatusRunning {
+			runningDeployments[dep.ID] = true
+		}
+	}
+
 	taskPrefix := types.KeyTasks + req.AgentName + "/"
 	taskKeys, _ := s.store.List(ctx, taskPrefix)
 	for _, key := range taskKeys {
@@ -177,6 +190,9 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 			continue
 		}
 		if task.ContainerStatus != types.StatusRunning {
+			continue
+		}
+		if !runningDeployments[task.DeploymentID] {
 			continue
 		}
 		resp.ActiveContainers = append(resp.ActiveContainers, &banyanpb.ActiveContainer{

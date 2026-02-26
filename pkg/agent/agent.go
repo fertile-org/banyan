@@ -550,13 +550,14 @@ func (a *Agent) restoreActiveContainers(ctx context.Context, containers []Active
 	}
 
 	restored := 0
+	skipped := 0
 	for i := range containers {
 		ac := &containers[i]
 
 		// Verify the container is actually still running
 		status := containerStatusFunc(ctx, ac.ContainerName)
 		if status != "running" {
-			fmt.Printf("[Agent] Skipping container %s (status: %s)\n", ac.ContainerName, status)
+			skipped++
 			continue
 		}
 
@@ -593,8 +594,8 @@ func (a *Agent) restoreActiveContainers(ctx context.Context, containers []Active
 		restored++
 	}
 
-	if restored > 0 {
-		fmt.Printf("[Agent] Restored proxy rules for %d running containers\n", restored)
+	if restored > 0 || skipped > 0 {
+		fmt.Printf("[Agent] Container restore: %d restored, %d skipped (not running)\n", restored, skipped)
 	}
 }
 

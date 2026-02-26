@@ -3908,16 +3908,23 @@ func TestReconcileDeploymentStatus(t *testing.T) {
 
 func TestRegister_ReturnsActiveContainers(t *testing.T) {
 	ctx := context.Background()
-	memStore := storage.NewMemoryStore()
-	events := NewEventBuffer(10)
-	srv := &engineGRPCServer{
-		store:       memStore,
-		registryURL: "localhost:5000",
-		events:      events,
-	}
 
-	t.Run("returns running containers for agent", func(t *testing.T) {
-		// Seed tasks for worker-1
+	t.Run("returns running containers from running deployments", func(t *testing.T) {
+		memStore := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       memStore,
+			registryURL: "localhost:5000",
+			events:      NewEventBuffer(10),
+		}
+
+		// Running deployment
+		memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
+			ID:     "deploy-1",
+			Name:   "myapp",
+			Status: types.StatusRunning,
+		})
+
+		// Task from running deployment — should be returned
 		memStore.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
 			ID:              "task-1",
 			Type:            types.TaskTypeCreateAndStart,
@@ -3931,32 +3938,15 @@ func TestRegister_ReturnsActiveContainers(t *testing.T) {
 			AgentID:         "worker-1",
 		})
 
-		// Completed but container stopped — should NOT be returned
+		// Task with stopped container — should NOT be returned
 		memStore.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
 			ID:              "task-2",
 			Type:            types.TaskTypeCreateAndStart,
 			Status:          types.StatusCompleted,
 			ContainerStatus: types.StatusStopped,
 			ContainerName:   "myapp-db-1",
+			DeploymentID:    "deploy-1",
 			AgentID:         "worker-1",
-		})
-
-		// Pending task — should NOT be returned
-		memStore.Save(ctx, types.KeyTasks+"worker-1/task-3", &types.TaskRecord{
-			ID:      "task-3",
-			Type:    types.TaskTypeCreateAndStart,
-			Status:  types.StatusPending,
-			AgentID: "worker-1",
-		})
-
-		// Different agent — should NOT be returned
-		memStore.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
-			ID:              "task-4",
-			Type:            types.TaskTypeCreateAndStart,
-			Status:          types.StatusCompleted,
-			ContainerStatus: types.StatusRunning,
-			ContainerName:   "other-web-1",
-			AgentID:         "worker-2",
 		})
 
 		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
@@ -3993,7 +3983,46 @@ func TestRegister_ReturnsActiveContainers(t *testing.T) {
 		}
 	})
 
-	t.Run("returns empty when no running containers", func(t *testing.T) {
+	t.Run("excludes containers from stopped deployments", func(t *testing.T) {
+		memStore := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       memStore,
+			registryURL: "localhost:5000",
+			events:      NewEventBuffer(10),
+		}
+
+		// Stopped deployment
+		memStore.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID:     "deploy-old",
+			Name:   "myapp",
+			Status: types.StatusStopped,
+		})
+
+		// Task from stopped deployment — should NOT be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-old", &types.TaskRecord{
+			ID:              "task-old",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			ContainerName:   "myapp-web-old",
+			DeploymentID:    "deploy-old",
+			AgentID:         "worker-1",
+		})
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			ApiAddress:   "worker-1:9090",
+			SessionToken: "token-abc",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if len(resp.ActiveContainers) != 0 {
+			t.Errorf("expected 0 active containers from stopped deployment, got %d", len(resp.ActiveContainers))
+		}
+	})
+
+	t.Run("returns empty when no tasks exist", func(t *testing.T) {
 		freshStore := storage.NewMemoryStore()
 		freshSrv := &engineGRPCServer{
 			store:       freshStore,

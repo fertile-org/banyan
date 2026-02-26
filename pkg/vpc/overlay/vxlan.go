@@ -69,14 +69,13 @@ func NewVXLANDriverWithOps(ops LinkOperations) *VXLANDriver {
 }
 
 // Init creates the VXLAN interface, bridge, and sets up networking.
-// If interfaces exist from a previous run, they are cleaned up first.
+// The VXLAN tunnel interface is always recreated (containers don't connect to it).
+// The bridge is preserved if it already exists, since running containers have
+// veth pairs attached to it — deleting it would break their networking.
 func (d *VXLANDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP) error {
-	// Clean up any leftover interfaces from a previous run
+	// Always recreate the VXLAN tunnel interface (safe — no container veths attached)
 	if exists, _ := d.linkOps.LinkExists(d.vxlanName); exists {
 		_ = d.linkOps.DeleteLink(d.vxlanName)
-	}
-	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
-		_ = d.linkOps.DeleteLink(d.bridgeName)
 	}
 
 	// 1. Create VXLAN interface
@@ -84,34 +83,38 @@ func (d *VXLANDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP)
 		return fmt.Errorf("create VXLAN interface: %w", err)
 	}
 
-	// 2. Create bridge
-	if err := d.linkOps.CreateBridge(d.bridgeName); err != nil {
-		return fmt.Errorf("create bridge: %w", err)
+	// 2. Create bridge if it doesn't exist (containers connect via bridge;
+	//    preserving it keeps existing container veth pairs connected)
+	bridgeExists, _ := d.linkOps.LinkExists(d.bridgeName)
+	if !bridgeExists {
+		if err := d.linkOps.CreateBridge(d.bridgeName); err != nil {
+			return fmt.Errorf("create bridge: %w", err)
+		}
+
+		// 3. Set bridge MAC to deterministic VTEP MAC so the bridge recognizes
+		// incoming VXLAN-decapsulated frames (whose dst MAC is the VTEP MAC)
+		// as "for me" and delivers them to the IP stack for L3 forwarding.
+		// Without this, the bridge floods unknown-unicast frames but never
+		// passes them up to the kernel for routing to containers.
+		vtepMAC := DeterministicMAC(subnet)
+		if err := d.linkOps.SetLinkAddress(d.bridgeName, vtepMAC); err != nil {
+			return fmt.Errorf("set bridge MAC: %w", err)
+		}
+
+		// 4. Assign VTEP IP to bridge (gateway IP for this agent's subnet)
+		vtepIP := VTEPIP(subnet)
+		bridgeAddr := &net.IPNet{
+			IP:   vtepIP,
+			Mask: subnet.Mask,
+		}
+		if err := d.linkOps.AddAddress(d.bridgeName, bridgeAddr); err != nil {
+			return fmt.Errorf("assign IP to bridge: %w", err)
+		}
 	}
 
-	// 3. Set bridge MAC to deterministic VTEP MAC so the bridge recognizes
-	// incoming VXLAN-decapsulated frames (whose dst MAC is the VTEP MAC)
-	// as "for me" and delivers them to the IP stack for L3 forwarding.
-	// Without this, the bridge floods unknown-unicast frames but never
-	// passes them up to the kernel for routing to containers.
-	vtepMAC := DeterministicMAC(subnet)
-	if err := d.linkOps.SetLinkAddress(d.bridgeName, vtepMAC); err != nil {
-		return fmt.Errorf("set bridge MAC: %w", err)
-	}
-
-	// 4. Attach VXLAN to bridge
+	// 5. Attach VXLAN to bridge (always needed after VXLAN recreation)
 	if err := d.linkOps.SetLinkMaster(d.vxlanName, d.bridgeName); err != nil {
 		return fmt.Errorf("attach VXLAN to bridge: %w", err)
-	}
-
-	// 5. Assign VTEP IP to bridge (gateway IP for this agent's subnet)
-	vtepIP := VTEPIP(subnet)
-	bridgeAddr := &net.IPNet{
-		IP:   vtepIP,
-		Mask: subnet.Mask,
-	}
-	if err := d.linkOps.AddAddress(d.bridgeName, bridgeAddr); err != nil {
-		return fmt.Errorf("assign IP to bridge: %w", err)
 	}
 
 	// 6. Bring up both interfaces
@@ -215,16 +218,12 @@ func (d *VXLANDriver) WriteCNIConfig(subnet net.IPNet) error {
 
 // Cleanup removes the VXLAN and bridge interfaces.
 func (d *VXLANDriver) Cleanup(ctx context.Context) error {
-	// Delete VXLAN first (it's attached to the bridge)
+	// Delete VXLAN interface only — the bridge must be preserved
+	// because running containers have veth pairs attached to it.
+	// Deleting the bridge would orphan those veths and break networking.
 	if exists, _ := d.linkOps.LinkExists(d.vxlanName); exists {
 		if err := d.linkOps.DeleteLink(d.vxlanName); err != nil {
 			return fmt.Errorf("delete VXLAN interface: %w", err)
-		}
-	}
-
-	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
-		if err := d.linkOps.DeleteLink(d.bridgeName); err != nil {
-			return fmt.Errorf("delete bridge: %w", err)
 		}
 	}
 

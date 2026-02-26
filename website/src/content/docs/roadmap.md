@@ -113,6 +113,25 @@ Run Banyan without root. Today every component needs `sudo` — the engine to ma
 
 ---
 
+## Milestone 4.6 — Live Terminal Dashboard
+
+Status: **Done**
+
+Monitor the entire cluster from your terminal — no browser, no Grafana, no setup.
+
+- **`banyan-cli dashboard`**: Live terminal UI built with [Bubbletea](https://github.com/charmbracelet/bubbletea) showing real-time cluster state
+- **Overview screen**: Engine health (CPU, memory, disk), cluster summary, agent table, deployment table, and recent events — all on one screen
+- **Agent and deployment drill-down**: Select any agent or deployment to see detailed metrics, container status, service breakdown, and resource usage
+- **Container list**: Flat view of every container across the cluster with status, image, agent, and replica info
+- **Command palette**: Press `p` to fuzzy-search and jump between views
+- **Keyboard navigation**: htop-style scrolling, vim keys (`j`/`k`), number keys to switch views, `Enter` to drill in, `Esc` to go back
+- **Floating overlays**: Help and command palette float over the dashboard without hiding the underlying view
+- Auto-refresh with configurable interval (`--refresh` flag, default 5s)
+
+See [CLI Reference — dashboard](/reference/cli/#dashboard) for details.
+
+---
+
 ## Milestone 5 — Metrics Collection
 
 Collect and expose resource metrics from every node and container in Prometheus-compatible format.
@@ -122,7 +141,6 @@ Collect and expose resource metrics from every node and container in Prometheus-
 - Container-level metrics: per-container CPU%, memory usage, restart count
 - Node-level metrics: total CPU, memory, disk usage per agent
 - Service-level metrics: request throughput, error rate per service
-- **Terminal monitoring dashboard**: `banyan-cli monitor` — a live terminal UI (built with [Bubbletea](https://github.com/charmbracelet/bubbletea)) showing real-time cluster metrics
 - Metric storage in etcd for short-term retention
 - Metric retrieval API for other components to consume
 
@@ -165,7 +183,7 @@ Scale services based on metrics and support automatic rollback.
 
 ---
 
-## Milestone 9 — Monitoring Dashboard
+## Milestone 9 — Web Monitoring Dashboard
 
 Web-based dashboard for cluster visualization and monitoring.
 
@@ -176,7 +194,7 @@ Web-based dashboard for cluster visualization and monitoring.
 - Real-time metrics and live updates
 - Container log viewer with filtering
 
-The terminal monitoring dashboard (`banyan-cli monitor`) is delivered in Milestone 5.
+The terminal dashboard (`banyan-cli dashboard`) is already available — see [Milestone 4.6](#milestone-46--live-terminal-dashboard). This milestone adds a web-based UI for teams that prefer browser-based monitoring.
 
 ---
 

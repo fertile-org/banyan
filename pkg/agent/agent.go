@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -57,8 +58,9 @@ type Agent struct {
 	dnsServer       *dns.Server
 	gatewayIP       string          // bridge gateway IP (e.g., "10.0.45.1")
 	registeredDNS   map[string]bool // tracked DNS hostnames for stale cleanup
-	connected       atomic.Bool     // true when registered and heartbeat is healthy
-	allocatedSubnet string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
+	connected        atomic.Bool     // true when registered and heartbeat is healthy
+	allocatedSubnet  string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
+	metricsCollector *metrics.SystemCollector
 }
 
 // Reconnection constants.
@@ -99,6 +101,11 @@ func New(opts *Options) (*Agent, error) {
 // Run connects to the engine, registers, and starts all loops.
 // It blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	// Initialize system metrics collector
+	a.metricsCollector = metrics.NewSystemCollector()
+	// Seed the CPU sample so the first heartbeat gets a real reading
+	a.metricsCollector.Collect()
+
 	// Initialize iptables proxy for port management
 	p, err := proxy.New()
 	if err != nil {
@@ -133,7 +140,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// Register node
-	registryURL, vpcConfig, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
+	registryURL, vpcConfig, activeContainers, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
@@ -157,6 +164,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		}
 		dnsGatewayIPAddr = a.gatewayIP
 	}
+
+	// Restore proxy rules and tracking for containers that survived the restart
+	a.restoreActiveContainers(ctx, activeContainers)
 
 	// Start the task execution loop
 	go a.agentLoop(ctx)
@@ -431,7 +441,8 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags)
+			sysMetrics := a.metricsCollector.Collect()
+			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags, sysMetrics)
 			if err != nil {
 				consecutiveFails++
 				if consecutiveFails < maxConsecutiveHeartbeatFails {
@@ -530,6 +541,64 @@ func (a *Agent) setupProxyForContainer(ctx context.Context, task *types.TaskReco
 	return containerIP, nil
 }
 
+// restoreActiveContainers re-establishes proxy rules and container tracking for containers
+// that were running before the agent restarted. It verifies each container is still running
+// via nerdctl inspect before restoring.
+func (a *Agent) restoreActiveContainers(ctx context.Context, containers []ActiveContainer) {
+	if len(containers) == 0 {
+		return
+	}
+
+	restored := 0
+	skipped := 0
+	for i := range containers {
+		ac := &containers[i]
+
+		// Verify the container is actually still running
+		status := containerStatusFunc(ctx, ac.ContainerName)
+		if status != "running" {
+			skipped++
+			continue
+		}
+
+		// Re-fetch container IP (may have changed if network was recreated)
+		containerIP, err := containerIPGetter(ctx, ac.ContainerName)
+		if err != nil {
+			fmt.Printf("[Agent] WARNING: could not get IP for %s: %v\n", ac.ContainerName, err)
+			continue
+		}
+
+		// Restore proxy DNAT rules
+		if a.proxy != nil && len(ac.Ports) > 0 {
+			for _, portStr := range ac.Ports {
+				hostPort, containerPort, parseErr := proxy.ParsePort(portStr)
+				if parseErr != nil {
+					fmt.Printf("[Agent] WARNING: bad port %q for %s: %v\n", portStr, ac.ContainerName, parseErr)
+					continue
+				}
+				if addErr := a.proxy.AddBackend(hostPort, containerPort, ac.ContainerName, containerIP); addErr != nil {
+					fmt.Printf("[Agent] WARNING: proxy restore failed for %s port %s: %v\n", ac.ContainerName, portStr, addErr)
+				}
+			}
+		}
+
+		// Restore container tracking (for health checks)
+		a.containers.Add(ac.ContainerName, ac.TaskID, containerIP)
+
+		// Restore DNS registration
+		if a.dnsManager != nil && ac.ServiceName != "" && containerIP != "" {
+			hostname := ac.ServiceName + ".internal"
+			a.dnsManager.RegisterHost(ctx, hostname, net.ParseIP(containerIP)) //nolint:errcheck // best-effort
+		}
+
+		restored++
+	}
+
+	if restored > 0 || skipped > 0 {
+		fmt.Printf("[Agent] Container restore: %d restored, %d skipped (not running)\n", restored, skipped)
+	}
+}
+
 // waitForEngineGRPC retries a health check to verify the engine gRPC server is ready.
 func (a *Agent) waitForEngineGRPC(ctx context.Context, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
@@ -579,7 +648,7 @@ func (a *Agent) reconnect(ctx context.Context) {
 			apiAddr = a.opts.NodeName + ":" + a.opts.APIPort
 		}
 
-		_, vpcConfig, err := a.client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
+		_, vpcConfig, activeContainers, err := a.client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -619,6 +688,9 @@ func (a *Agent) reconnect(ctx context.Context) {
 				dnsGatewayIPAddr = a.gatewayIP
 			}
 		}
+
+		// Restore proxy rules for containers that survived the disconnect
+		a.restoreActiveContainers(ctx, activeContainers)
 
 		fmt.Println("[Agent] Reconnected and re-registered successfully")
 		return

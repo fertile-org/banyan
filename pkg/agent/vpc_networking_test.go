@@ -497,6 +497,250 @@ func TestInitializeDNS(t *testing.T) {
 	})
 }
 
+func TestFindUDPListenerPID(t *testing.T) {
+	t.Run("finds PID from proc net udp", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// 10.0.0.1:53 → little-endian hex: 0100000A:0035
+		procFile := filepath.Join(tmpDir, "udp")
+		content := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n" +
+			"   0: 0100000A:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 12345 2 0000000000000000 0\n"
+		os.WriteFile(procFile, []byte(content), 0o644)
+
+		// Create fake /proc/<pid>/fd/ with a socket symlink
+		fakeProcDir := filepath.Join(tmpDir, "proc")
+		os.MkdirAll(filepath.Join(fakeProcDir, "999", "fd"), 0o755)
+		os.Symlink("socket:[12345]", filepath.Join(fakeProcDir, "999", "fd", "3"))
+
+		origProcNetUDP := procNetUDP
+		origProcDir := procDir
+		t.Cleanup(func() {
+			procNetUDP = origProcNetUDP
+			procDir = origProcDir
+		})
+		procNetUDP = procFile
+		procDir = fakeProcDir
+
+		pid, err := findUDPListenerPID("10.0.0.1", 53)
+		if err != nil {
+			t.Fatalf("findUDPListenerPID failed: %v", err)
+		}
+		if pid != 999 {
+			t.Errorf("expected PID 999, got %d", pid)
+		}
+	})
+
+	t.Run("returns error when no matching socket", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		procFile := filepath.Join(tmpDir, "udp")
+		// Header only, no matching entry
+		os.WriteFile(procFile, []byte("  sl  local_address rem_address\n"), 0o644)
+
+		orig := procNetUDP
+		t.Cleanup(func() { procNetUDP = orig })
+		procNetUDP = procFile
+
+		_, err := findUDPListenerPID("10.0.0.1", 53)
+		if err == nil {
+			t.Fatal("expected error when no socket found")
+		}
+		if !strings.Contains(err.Error(), "no UDP socket found") {
+			t.Errorf("expected 'no UDP socket found' in error, got: %v", err)
+		}
+	})
+
+	t.Run("returns error when no process owns inode", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		procFile := filepath.Join(tmpDir, "udp")
+		content := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n" +
+			"   0: 0100000A:0035 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 99999 2 0000000000000000 0\n"
+		os.WriteFile(procFile, []byte(content), 0o644)
+
+		// Empty fake /proc dir — no PIDs
+		fakeProcDir := filepath.Join(tmpDir, "proc")
+		os.MkdirAll(fakeProcDir, 0o755)
+
+		origProcNetUDP := procNetUDP
+		origProcDir := procDir
+		t.Cleanup(func() {
+			procNetUDP = origProcNetUDP
+			procDir = origProcDir
+		})
+		procNetUDP = procFile
+		procDir = fakeProcDir
+
+		_, err := findUDPListenerPID("10.0.0.1", 53)
+		if err == nil {
+			t.Fatal("expected error when no process owns inode")
+		}
+		if !strings.Contains(err.Error(), "no process found") {
+			t.Errorf("expected 'no process found' in error, got: %v", err)
+		}
+	})
+
+	t.Run("rejects invalid IPv4", func(t *testing.T) {
+		_, err := findUDPListenerPID("not-an-ip", 53)
+		if err == nil {
+			t.Fatal("expected error for invalid IP")
+		}
+		if !strings.Contains(err.Error(), "invalid IPv4") {
+			t.Errorf("expected 'invalid IPv4' in error, got: %v", err)
+		}
+	})
+
+	t.Run("handles different IP and port correctly", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		// 192.168.1.100:8080 → little-endian: 6401A8C0:1F90
+		procFile := filepath.Join(tmpDir, "udp")
+		content := "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n" +
+			"   0: 6401A8C0:1F90 00000000:0000 07 00000000:00000000 00:00000000 00000000     0        0 55555 2 0000000000000000 0\n"
+		os.WriteFile(procFile, []byte(content), 0o644)
+
+		fakeProcDir := filepath.Join(tmpDir, "proc")
+		os.MkdirAll(filepath.Join(fakeProcDir, "42", "fd"), 0o755)
+		os.Symlink("socket:[55555]", filepath.Join(fakeProcDir, "42", "fd", "5"))
+
+		origProcNetUDP := procNetUDP
+		origProcDir := procDir
+		t.Cleanup(func() {
+			procNetUDP = origProcNetUDP
+			procDir = origProcDir
+		})
+		procNetUDP = procFile
+		procDir = fakeProcDir
+
+		pid, err := findUDPListenerPID("192.168.1.100", 8080)
+		if err != nil {
+			t.Fatalf("findUDPListenerPID failed: %v", err)
+		}
+		if pid != 42 {
+			t.Errorf("expected PID 42, got %d", pid)
+		}
+	})
+}
+
+func TestInitializeDNS_ReclaimsPort(t *testing.T) {
+	origManagerFactory := dnsManagerFactory
+	origServerFactory := dnsServerFactory
+	origReclaim := reclaimDNSPort
+	t.Cleanup(func() {
+		dnsManagerFactory = origManagerFactory
+		dnsServerFactory = origServerFactory
+		reclaimDNSPort = origReclaim
+	})
+
+	t.Run("retries after reclaiming port on address-in-use", func(t *testing.T) {
+		reclaimCalled := false
+
+		// Occupy both UDP and TCP on port 19853 to make the first Start() fail
+		blocker, err := net.ListenPacket("udp", "127.0.0.1:19853")
+		if err != nil {
+			t.Fatalf("could not occupy test port: %v", err)
+		}
+		tcpBlocker, err := net.Listen("tcp", "127.0.0.1:19853")
+		if err != nil {
+			blocker.Close()
+			t.Fatalf("could not occupy TCP test port: %v", err)
+		}
+		t.Cleanup(func() {
+			blocker.Close()
+			tcpBlocker.Close()
+		})
+
+		// First call uses blocked port; retry uses a free port
+		calls := 0
+		dnsManagerFactory = func() *dns.Manager { return dns.NewManager() }
+		dnsServerFactory = func(m *dns.Manager, c dns.ServerConfig) *dns.Server {
+			calls++
+			if calls == 1 {
+				c.BindAddr = "127.0.0.1:19853"
+			} else {
+				c.BindAddr = "127.0.0.1:19855"
+			}
+			return dns.NewServer(m, c)
+		}
+		reclaimDNSPort = func(ip string, port int) error {
+			reclaimCalled = true
+			return nil
+		}
+
+		a := &Agent{registeredDNS: make(map[string]bool)}
+		initErr := a.initializeDNS(context.Background(), "10.0.0.0/24")
+		if initErr != nil {
+			t.Fatalf("initializeDNS should succeed after reclaim: %v", initErr)
+		}
+		if !reclaimCalled {
+			t.Error("expected reclaimDNSPort to be called")
+		}
+		if calls != 2 {
+			t.Errorf("expected 2 factory calls (initial + retry), got %d", calls)
+		}
+		if a.dnsServer != nil {
+			a.dnsServer.Stop()
+		}
+	})
+
+	t.Run("fails on non-recoverable error", func(t *testing.T) {
+		dnsManagerFactory = func() *dns.Manager { return dns.NewManager() }
+		dnsServerFactory = func(m *dns.Manager, c dns.ServerConfig) *dns.Server {
+			// Use an IP we can't bind to (not assigned to this host)
+			c.BindAddr = "192.0.2.99:53"
+			return dns.NewServer(m, c)
+		}
+		reclaimDNSPort = func(ip string, port int) error {
+			t.Error("reclaimDNSPort should not be called for non-address-in-use errors")
+			return nil
+		}
+
+		a := &Agent{registeredDNS: make(map[string]bool)}
+		initErr := a.initializeDNS(context.Background(), "10.0.0.0/24")
+		if initErr == nil {
+			t.Fatal("expected error for non-recoverable bind failure")
+		}
+		if strings.Contains(initErr.Error(), "after reclaim") {
+			t.Error("should not have attempted reclaim for non-address-in-use error")
+		}
+	})
+
+	t.Run("fails when reclaim does not free port", func(t *testing.T) {
+		// Occupy a port and DON'T free it in the reclaim mock
+		blocker, err := net.ListenPacket("udp", "127.0.0.1:19854")
+		if err != nil {
+			t.Fatalf("could not occupy test port: %v", err)
+		}
+		tcpBlocker, err := net.Listen("tcp", "127.0.0.1:19854")
+		if err != nil {
+			blocker.Close()
+			t.Fatalf("could not occupy TCP test port: %v", err)
+		}
+		t.Cleanup(func() {
+			blocker.Close()
+			tcpBlocker.Close()
+		})
+
+		dnsManagerFactory = func() *dns.Manager { return dns.NewManager() }
+		dnsServerFactory = func(m *dns.Manager, c dns.ServerConfig) *dns.Server {
+			c.BindAddr = "127.0.0.1:19854"
+			return dns.NewServer(m, c)
+		}
+		reclaimDNSPort = func(ip string, port int) error {
+			// Don't free the port — reclaim "failed"
+			return nil
+		}
+
+		a := &Agent{registeredDNS: make(map[string]bool)}
+		initErr := a.initializeDNS(context.Background(), "10.0.0.0/24")
+		if initErr == nil {
+			t.Fatal("expected error when reclaim doesn't free port")
+		}
+		if !strings.Contains(initErr.Error(), "after reclaim") {
+			t.Errorf("expected 'after reclaim' in error, got: %v", initErr)
+		}
+	})
+}
+
 func TestReconcileDNS(t *testing.T) {
 	t.Run("registers backends by service name", func(t *testing.T) {
 		manager := dns.NewManager()

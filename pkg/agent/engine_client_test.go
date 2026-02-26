@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -225,7 +226,7 @@ func TestEngineClient_Register(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t)
 	defer cleanup()
 
-	registryURL, vpcConfig, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
+	registryURL, vpcConfig, _, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -278,7 +279,7 @@ func TestEngineClient_Register_WithVPCConfig(t *testing.T) {
 		client: banyanpb.NewEngineServiceClient(conn),
 	}
 
-	registryURL, vpcConfig, registerErr := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
+	registryURL, vpcConfig, _, registerErr := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
 	if registerErr != nil {
 		t.Fatalf("Register failed: %v", registerErr)
 	}
@@ -336,7 +337,7 @@ func TestEngineClient_Heartbeat(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t)
 	defer cleanup()
 
-	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil, metrics.SystemMetrics{})
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
 		client: banyanpb.NewEngineServiceClient(conn),
 	}
 
-	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil, metrics.SystemMetrics{})
 	if hbErr != nil {
 		t.Fatalf("Heartbeat failed: %v", hbErr)
 	}
@@ -512,14 +513,14 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Register error", func(t *testing.T) {
-		_, _, err := client.Register(ctx, "worker-1", "addr", "token", nil, "")
+		_, _, _, err := client.Register(ctx, "worker-1", "addr", "token", nil, "")
 		if err == nil {
 			t.Error("expected error from Register on stopped server")
 		}
 	})
 
 	t.Run("Heartbeat error", func(t *testing.T) {
-		_, _, err := client.Heartbeat(ctx, "worker-1", "token", nil)
+		_, _, err := client.Heartbeat(ctx, "worker-1", "token", nil, metrics.SystemMetrics{})
 		if err == nil {
 			t.Error("expected error from Heartbeat on stopped server")
 		}

@@ -146,8 +146,43 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// --- WireGuard keypair generation ---
+	// --- Check for existing config ---
 	existingCfg, _ := types.LoadConfig(configPath)
+	if existingCfg.Agent.EngineHost != "" && existingCfg.Agent.WGPublicKey != "" {
+		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
+		fmt.Printf("         Engine: %s:%s\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
+
+		var overwrite bool
+		overwriteForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Overwrite existing configuration?").
+					Value(&overwrite),
+			),
+		)
+		if err := overwriteForm.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("confirm prompt: %w", err)
+		}
+		if !overwrite {
+			fmt.Println("Aborted.")
+			return nil
+		}
+
+		// Clear config sections so all prompts run fresh
+		existingCfg.Agent.WGPrivateKeyFile = ""
+		existingCfg.Agent.WGPublicKey = ""
+		existingCfg.Agent.EngineHost = ""
+		existingCfg.Agent.EnginePort = ""
+		existingCfg.Agent.NodeName = ""
+		existingCfg.Agent.EngineWGPublicKey = ""
+		existingCfg.Agent.Tags = nil
+	}
+
+	// --- WireGuard keypair generation ---
 	fmt.Println(styleInfo.Render("\nGenerating WireGuard keypair..."))
 	if existingCfg.Agent.WGPrivateKeyFile != "" && existingCfg.Agent.WGPublicKey != "" {
 		fmt.Printf("  %s WireGuard keypair already configured\n", styleOK.Render("[OK]"))
@@ -170,63 +205,58 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 
 	// --- Engine connection + config ---
 	fmt.Println()
-	if existingCfg.Agent.EngineHost != "" && existingCfg.Agent.WGPublicKey != "" {
-		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
-		fmt.Printf("         Engine: %s:%s\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
-	} else {
-		hostname, _ := os.Hostname()
-		engineHost := existingCfg.Agent.EngineHost
-		if engineHost == "" {
-			engineHost = "localhost"
-		}
-		enginePort := existingCfg.Agent.EnginePort
-		if enginePort == "" {
-			enginePort = "50051"
-		}
-		nodeName := existingCfg.Agent.NodeName
-		if nodeName == "" {
-			nodeName = hostname
-		}
-		engineWGPubKey := existingCfg.Agent.EngineWGPublicKey
-		var tagsInput string
-
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Engine host").
-					Description("Hostname or IP of the Banyan engine").
-					Value(&engineHost),
-				huh.NewInput().
-					Title("Engine gRPC port").
-					Value(&enginePort),
-				huh.NewInput().
-					Title("Node name").
-					Description("Unique name for this agent node").
-					Value(&nodeName),
-				huh.NewInput().
-					Title("Engine WireGuard public key").
-					Description("Displayed during 'banyan-engine init' (optional, enables encrypted tunnel)").
-					Value(&engineWGPubKey),
-				huh.NewInput().
-					Title("Tags").
-					Description("Comma-separated tags for environment isolation (optional)").
-					Value(&tagsInput),
-			),
-		)
-		if err := form.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println("\nInitialization cancelled.")
-				return nil
-			}
-			return fmt.Errorf("agent config input: %w", err)
-		}
-
-		existingCfg.Agent.EngineHost = engineHost
-		existingCfg.Agent.EnginePort = enginePort
-		existingCfg.Agent.NodeName = nodeName
-		existingCfg.Agent.EngineWGPublicKey = engineWGPubKey
-		existingCfg.Agent.Tags = parseTags(tagsInput)
+	hostname, _ := os.Hostname()
+	engineHost := existingCfg.Agent.EngineHost
+	if engineHost == "" {
+		engineHost = "localhost"
 	}
+	enginePort := existingCfg.Agent.EnginePort
+	if enginePort == "" {
+		enginePort = "50051"
+	}
+	nodeName := existingCfg.Agent.NodeName
+	if nodeName == "" {
+		nodeName = hostname
+	}
+	engineWGPubKey := existingCfg.Agent.EngineWGPublicKey
+	var tagsInput string
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Engine host").
+				Description("Hostname or IP of the Banyan engine").
+				Value(&engineHost),
+			huh.NewInput().
+				Title("Engine gRPC port").
+				Value(&enginePort),
+			huh.NewInput().
+				Title("Node name").
+				Description("Unique name for this agent node").
+				Value(&nodeName),
+			huh.NewInput().
+				Title("Engine WireGuard public key").
+				Description("Displayed during 'banyan-engine init' (optional, enables encrypted tunnel)").
+				Value(&engineWGPubKey),
+			huh.NewInput().
+				Title("Tags").
+				Description("Comma-separated tags for environment isolation (optional)").
+				Value(&tagsInput),
+		),
+	)
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println("\nInitialization cancelled.")
+			return nil
+		}
+		return fmt.Errorf("agent config input: %w", err)
+	}
+
+	existingCfg.Agent.EngineHost = engineHost
+	existingCfg.Agent.EnginePort = enginePort
+	existingCfg.Agent.NodeName = nodeName
+	existingCfg.Agent.EngineWGPublicKey = engineWGPubKey
+	existingCfg.Agent.Tags = parseTags(tagsInput)
 
 	// --- Save config ---
 	if err := types.SaveConfig(configPath, &existingCfg); err != nil {
@@ -264,7 +294,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		<-sigCh
 		fmt.Println("\nShutting down...")

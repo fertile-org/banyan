@@ -43,6 +43,7 @@ type BanyanConfig struct {
 type EngineConfig struct {
 	APIPort            string `yaml:"api_port,omitempty"`
 	GRPCPort           string `yaml:"grpc_port,omitempty"`
+	MetricsPort        string `yaml:"metrics_port,omitempty"`
 	StoreBackend       string `yaml:"store_backend,omitempty"`
 	StoreAddress       string `yaml:"store_address,omitempty"`
 	EtcdUsername       string `yaml:"etcd_username,omitempty"`

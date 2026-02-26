@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 )
@@ -48,7 +49,17 @@ type VPCPeer struct {
 	PublicKey string // WireGuard
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey string) (string, *VPCConfig, error) {
+// ActiveContainer describes a container previously running on this agent.
+type ActiveContainer struct {
+	ContainerName string
+	ContainerIP   string
+	Ports         []string
+	ServiceName   string
+	DeploymentID  string
+	TaskID        string
+}
+
+func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey string) (string, *VPCConfig, []ActiveContainer, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:    name,
 		ApiAddress:   apiAddr,
@@ -57,7 +68,7 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 		WgPublicKey:  wgPublicKey,
 	})
 	if err != nil {
-		return "", nil, fmt.Errorf("register failed: %w", err)
+		return "", nil, nil, fmt.Errorf("register failed: %w", err)
 	}
 
 	var vpcConfig *VPCConfig
@@ -69,14 +80,34 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 		}
 	}
 
-	return resp.RegistryUrl, vpcConfig, nil
+	var activeContainers []ActiveContainer
+	for _, ac := range resp.ActiveContainers {
+		activeContainers = append(activeContainers, ActiveContainer{
+			ContainerName: ac.ContainerName,
+			ContainerIP:   ac.ContainerIp,
+			Ports:         ac.Ports,
+			ServiceName:   ac.ServiceName,
+			DeploymentID:  ac.DeploymentId,
+			TaskID:        ac.TaskId,
+		})
+	}
+
+	return resp.RegistryUrl, vpcConfig, activeContainers, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) ([]VPCPeer, []ServiceBackend, error) {
+func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string, sysMetrics metrics.SystemMetrics) ([]VPCPeer, []ServiceBackend, error) {
 	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    name,
 		SessionToken: sessionToken,
 		Tags:         tags,
+		SystemMetrics: &banyanpb.SystemMetrics{
+			CpuUsageRatio:    sysMetrics.CPUUsageRatio,
+			MemoryUsedBytes:  sysMetrics.MemoryUsedBytes,
+			MemoryTotalBytes: sysMetrics.MemoryTotalBytes,
+			DiskUsedBytes:    sysMetrics.DiskUsedBytes,
+			DiskTotalBytes:   sysMetrics.DiskTotalBytes,
+			CpuCores:         sysMetrics.CPUCores,
+		},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("heartbeat failed: %w", err)

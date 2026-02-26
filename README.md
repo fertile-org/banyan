@@ -43,6 +43,12 @@
 
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
+<div align="center">
+  <img src="website/public/dashboard/demo-dashboard.gif" alt="Banyan CLI dashboard — live cluster monitoring in your terminal" width="100%">
+  <br>
+  <sub><code>banyan-cli dashboard</code> — monitor your entire cluster from the terminal</sub>
+</div>
+
 ## From one server to many
 
 You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and it works — on one machine.
@@ -88,7 +94,7 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
 - **Three binaries, nothing else** — No package managers, no plugins, no Helm charts. Download `banyan-engine`, `banyan-agent`, and `banyan-cli`. That's the entire stack.
 - **Built-in image registry** — Use `build:` in your manifest and Banyan builds, stores, and distributes images across your cluster. No Docker Hub account, no Harbor, no ECR setup.
 - **Containers talk across servers** — Services on different machines communicate as if they were on the same network. Banyan handles the overlay network and DNS.
-- **Monitor from your terminal** — `banyan-cli status` shows every container, which server it's on, and whether it's healthy. `banyan-cli logs` streams from any container, any node. A live terminal dashboard (`banyan-cli monitor`) is coming soon.
+- **Live terminal dashboard** — `banyan-cli dashboard` opens a real-time TUI that shows engine health, agents, deployments, container status, and cluster events — all updating live. Navigate with keyboard shortcuts, drill into any agent or deployment, and use the command palette to jump between views. No Grafana setup, no browser, no YAML config. Your monitoring is one command away.
 - **Open source, self-hosted** — Apache 2.0. No vendor lock-in, no usage-based pricing. Run it on your own servers.
 
 ## Who is Banyan for?
@@ -196,7 +202,7 @@ Full documentation at **[getbanyan.dev](https://getbanyan.dev/)**.
 
 ## Roadmap
 
-See the [Roadmap](https://getbanyan.dev/roadmap/) — Prometheus metrics, terminal UI monitoring, resource-aware scheduling, auto-scaling, and more.
+See the [Roadmap](https://getbanyan.dev/roadmap/) — Prometheus metrics, resource-aware scheduling, auto-scaling, and more.
 
 ## Contributing
 

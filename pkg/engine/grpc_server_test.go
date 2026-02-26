@@ -3416,3 +3416,630 @@ func TestHeartbeat_NoBackendsWithoutPeerTracker(t *testing.T) {
 		t.Errorf("expected 0 service backends without VPC, got %d", len(resp.ServiceBackends))
 	}
 }
+
+func TestCountAgentContainers(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: memStore}
+	ctx := context.Background()
+
+	t.Run("counts completed create_and_start tasks", func(t *testing.T) {
+		memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", AgentID: "agent-1", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+		memStore.Save(ctx, types.KeyTasks+"agent-1/task-2", &types.TaskRecord{
+			ID: "task-2", AgentID: "agent-1", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+		// Pending task should not count
+		memStore.Save(ctx, types.KeyTasks+"agent-1/task-3", &types.TaskRecord{
+			ID: "task-3", AgentID: "agent-1", Type: types.TaskTypeCreateAndStart, Status: types.StatusPending,
+		})
+		// Stop task should not count
+		memStore.Save(ctx, types.KeyTasks+"agent-1/task-4", &types.TaskRecord{
+			ID: "task-4", AgentID: "agent-1", Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		})
+
+		count := srv.countAgentContainers(ctx, "agent-1")
+		if count != 2 {
+			t.Errorf("expected 2 containers, got %d", count)
+		}
+	})
+
+	t.Run("returns 0 for unknown agent", func(t *testing.T) {
+		count := srv.countAgentContainers(ctx, "unknown-agent")
+		if count != 0 {
+			t.Errorf("expected 0 containers, got %d", count)
+		}
+	})
+
+	t.Run("returns 0 on store error", func(t *testing.T) {
+		errSrv := &engineGRPCServer{store: &errorStore{MemoryStore: memStore, listErr: true}}
+		count := errSrv.countAgentContainers(ctx, "agent-1")
+		if count != 0 {
+			t.Errorf("expected 0 on error, got %d", count)
+		}
+	})
+}
+
+func TestEmitEvent(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	events := NewEventBuffer(10)
+	srv := &engineGRPCServer{
+		store:  memStore,
+		events: events,
+	}
+
+	t.Run("adds event to buffer", func(t *testing.T) {
+		srv.emitEvent("test.event", "something happened", "info")
+		recent := events.Recent(1)
+		if len(recent) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(recent))
+		}
+		if recent[0].Type != "test.event" {
+			t.Errorf("expected type 'test.event', got %q", recent[0].Type)
+		}
+		if recent[0].Message != "something happened" {
+			t.Errorf("expected message 'something happened', got %q", recent[0].Message)
+		}
+		if recent[0].Severity != "info" {
+			t.Errorf("expected severity 'info', got %q", recent[0].Severity)
+		}
+	})
+
+	t.Run("safe with nil events and registry", func(t *testing.T) {
+		nilSrv := &engineGRPCServer{store: memStore}
+		nilSrv.emitEvent("test.event", "should not panic", "info") // should not panic
+	})
+}
+
+func TestGetDashboardData(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	events := NewEventBuffer(10)
+
+	srv := &engineGRPCServer{
+		store:     memStore,
+		events:    events,
+		startedAt: time.Now().Add(-5 * time.Minute),
+	}
+	ctx := context.Background()
+
+	// Set up test data
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{
+		Name: "worker-1", Status: "ready", APIAddress: "worker-1:9090",
+		LastSeen: time.Now(), CreatedAt: time.Now().Add(-1 * time.Hour),
+		Tags: []string{"zone:us-west"},
+	})
+	memStore.Save(ctx, types.KeyDeployments+"myapp-1", &types.DeploymentRecord{
+		ID: "myapp-1", Name: "myapp", Status: types.StatusRunning,
+		Services: map[string]types.ServiceRecord{
+			"web": {Image: "nginx:alpine", Replicas: 2, Ports: []string{"80:80"}},
+		},
+		CreatedAt: time.Now().Add(-30 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+	memStore.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
+		ID: "task-1", DeploymentID: "myapp-1", AgentID: "worker-1",
+		ServiceName: "web", Type: types.TaskTypeCreateAndStart,
+		Status: types.StatusCompleted, ContainerStatus: types.StatusRunning,
+		ContainerName: "myapp-web-0", Image: "nginx:alpine",
+		CreatedAt: time.Now().Add(-25 * time.Minute),
+		UpdatedAt: time.Now(),
+	})
+
+	// Add an event
+	events.Add(Event{
+		Timestamp: time.Now(),
+		Type:      "deployment.running",
+		Message:   "Deployment myapp is running",
+		Severity:  "info",
+	})
+
+	t.Run("returns complete dashboard data", func(t *testing.T) {
+		resp, err := srv.GetDashboardData(ctx, &banyanpb.GetDashboardDataRequest{})
+		if err != nil {
+			t.Fatalf("GetDashboardData failed: %v", err)
+		}
+
+		// Engine status
+		if resp.Engine == nil {
+			t.Fatal("expected engine status")
+		}
+		if resp.Engine.Status != "running" {
+			t.Errorf("expected engine status 'running', got %q", resp.Engine.Status)
+		}
+		if resp.Engine.StartedAtUnix == 0 {
+			t.Error("expected non-zero started_at_unix")
+		}
+
+		// Agents
+		if len(resp.Agents) != 1 {
+			t.Fatalf("expected 1 agent, got %d", len(resp.Agents))
+		}
+		if resp.Agents[0].Name != "worker-1" {
+			t.Errorf("expected agent name 'worker-1', got %q", resp.Agents[0].Name)
+		}
+		if resp.Agents[0].ContainerCount != 1 {
+			t.Errorf("expected 1 container, got %d", resp.Agents[0].ContainerCount)
+		}
+
+		// Deployments
+		if len(resp.Deployments) != 1 {
+			t.Fatalf("expected 1 deployment, got %d", len(resp.Deployments))
+		}
+		if resp.Deployments[0].Name != "myapp" {
+			t.Errorf("expected deployment name 'myapp', got %q", resp.Deployments[0].Name)
+		}
+		if resp.Deployments[0].Healthy != 1 {
+			t.Errorf("expected 1 healthy, got %d", resp.Deployments[0].Healthy)
+		}
+
+		// Summary
+		if resp.Summary == nil {
+			t.Fatal("expected cluster summary")
+		}
+		if resp.Summary.TotalAgents != 1 {
+			t.Errorf("expected 1 total agent, got %d", resp.Summary.TotalAgents)
+		}
+		if resp.Summary.ConnectedAgents != 1 {
+			t.Errorf("expected 1 connected agent, got %d", resp.Summary.ConnectedAgents)
+		}
+		if resp.Summary.TotalDeployments != 1 {
+			t.Errorf("expected 1 total deployment, got %d", resp.Summary.TotalDeployments)
+		}
+		if resp.Summary.RunningDeployments != 1 {
+			t.Errorf("expected 1 running deployment, got %d", resp.Summary.RunningDeployments)
+		}
+		if resp.Summary.TotalContainers != 1 {
+			t.Errorf("expected 1 total container, got %d", resp.Summary.TotalContainers)
+		}
+		if resp.Summary.HealthyContainers != 1 {
+			t.Errorf("expected 1 healthy container, got %d", resp.Summary.HealthyContainers)
+		}
+
+		// Events
+		if len(resp.RecentEvents) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(resp.RecentEvents))
+		}
+		if resp.RecentEvents[0].Type != "deployment.running" {
+			t.Errorf("expected event type 'deployment.running', got %q", resp.RecentEvents[0].Type)
+		}
+	})
+
+	t.Run("marks stale agents", func(t *testing.T) {
+		memStore.Save(ctx, types.KeyNodes+"stale-worker", &types.NodeRecord{
+			Name: "stale-worker", Status: "ready",
+			LastSeen: time.Now().Add(-2 * time.Minute), // older than 60s
+		})
+
+		resp, err := srv.GetDashboardData(ctx, &banyanpb.GetDashboardDataRequest{})
+		if err != nil {
+			t.Fatalf("GetDashboardData failed: %v", err)
+		}
+
+		for _, agent := range resp.Agents {
+			if agent.Name == "stale-worker" {
+				if agent.Status != "stale" {
+					t.Errorf("expected stale-worker status 'stale', got %q", agent.Status)
+				}
+				return
+			}
+		}
+		t.Error("stale-worker not found in response")
+	})
+
+	t.Run("empty store returns valid response", func(t *testing.T) {
+		emptySrv := &engineGRPCServer{
+			store:     storage.NewMemoryStore(),
+			events:    NewEventBuffer(10),
+			startedAt: time.Now(),
+		}
+		resp, err := emptySrv.GetDashboardData(ctx, &banyanpb.GetDashboardDataRequest{})
+		if err != nil {
+			t.Fatalf("GetDashboardData failed: %v", err)
+		}
+		if resp.Engine == nil {
+			t.Fatal("expected engine status even on empty store")
+		}
+		if resp.Summary == nil {
+			t.Fatal("expected summary even on empty store")
+		}
+		if resp.Summary.TotalAgents != 0 {
+			t.Errorf("expected 0 agents, got %d", resp.Summary.TotalAgents)
+		}
+	})
+}
+
+func TestRegister_EmitsEvent(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	events := NewEventBuffer(10)
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		events:      events,
+	}
+
+	ctx := context.Background()
+	_, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName:    "worker-1",
+		ApiAddress:   "worker-1:9090",
+		SessionToken: "token-abc",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	recent := events.Recent(1)
+	if len(recent) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(recent))
+	}
+	if recent[0].Type != "agent.registered" {
+		t.Errorf("expected event type 'agent.registered', got %q", recent[0].Type)
+	}
+}
+
+func TestDeploy_EmitsEvent(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	events := NewEventBuffer(10)
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		events:      events,
+	}
+
+	ctx := context.Background()
+	_, err := srv.Deploy(ctx, &banyanpb.DeployRPCRequest{
+		Manifest: &banyanpb.Manifest{
+			Name:    "myapp",
+			Version: "1",
+			Services: map[string]*banyanpb.ManifestService{
+				"web": {Image: "nginx:alpine"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+
+	recent := events.Recent(1)
+	if len(recent) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(recent))
+	}
+	if recent[0].Type != "deployment.created" {
+		t.Errorf("expected event type 'deployment.created', got %q", recent[0].Type)
+	}
+}
+
+func TestDown_EmitsEvent(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	events := NewEventBuffer(10)
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		events:      events,
+	}
+
+	ctx := context.Background()
+
+	// Create a deployment to stop
+	memStore.Save(ctx, types.KeyDeployments+"myapp-1", &types.DeploymentRecord{
+		ID: "myapp-1", Name: "myapp", Status: types.StatusRunning,
+		Services: map[string]types.ServiceRecord{
+			"web": {Image: "nginx:alpine", Replicas: 1},
+		},
+		CreatedAt: time.Now(),
+	})
+
+	_, err := srv.Down(ctx, &banyanpb.DownRPCRequest{Name: "myapp"})
+	if err != nil {
+		t.Fatalf("Down failed: %v", err)
+	}
+
+	recent := events.Recent(1)
+	if len(recent) != 1 {
+		t.Fatalf("expected 1 event, got %d", len(recent))
+	}
+	if recent[0].Type != "deployment.stopped" {
+		t.Errorf("expected event type 'deployment.stopped', got %q", recent[0].Type)
+	}
+}
+
+func TestHeartbeat_UpdatesAgentMetrics(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register agent first
+	_, err := client.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName:    "worker-1",
+		ApiAddress:   "worker-1:9090",
+		SessionToken: "token-1",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	// Heartbeat without metrics (no metricsRegistry on test server) — should not panic
+	_, err = client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+		AgentName:    "worker-1",
+		SessionToken: "token-1",
+		SystemMetrics: &banyanpb.SystemMetrics{
+			CpuUsageRatio:    0.42,
+			MemoryUsedBytes:  1000000,
+			MemoryTotalBytes: 2000000,
+			DiskUsedBytes:    5000000,
+			DiskTotalBytes:   10000000,
+			CpuCores:         4,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Heartbeat failed: %v", err)
+	}
+}
+
+func TestReconcileDeploymentStatus(t *testing.T) {
+	t.Run("marks deployment stopped when all containers dead", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+		events := NewEventBuffer(10)
+
+		srv := &engineGRPCServer{
+			store:  store,
+			events: events,
+		}
+
+		// Register the agent node so CollectDeploymentTasks can find tasks
+		_ = store.Save(ctx, types.KeyNodes+"agent1", &types.NodeRecord{Name: "agent1"})
+
+		// Create a running deployment
+		depID := "dep-reconcile-1"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID:     depID,
+			Name:   "test-app",
+			Status: types.StatusRunning,
+		})
+
+		// Create tasks with dead containers
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "not_found",
+			AgentID:         "agent1",
+		})
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-2", &types.TaskRecord{
+			ID:              "task-2",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "exited",
+			AgentID:         "agent1",
+		})
+
+		srv.reconcileDeploymentStatus(ctx, depID)
+
+		var record types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
+		if record.Status != types.StatusStopped {
+			t.Errorf("deployment status = %q, want stopped", record.Status)
+		}
+
+		// Check event was emitted
+		recent := events.Recent(10)
+		if len(recent) == 0 {
+			t.Error("expected event to be emitted")
+		}
+	})
+
+	t.Run("keeps deployment running when some containers alive", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+
+		srv := &engineGRPCServer{store: store}
+
+		// Register the agent node so CollectDeploymentTasks can find tasks
+		_ = store.Save(ctx, types.KeyNodes+"agent1", &types.NodeRecord{Name: "agent1"})
+
+		depID := "dep-reconcile-2"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID:     depID,
+			Name:   "test-app",
+			Status: types.StatusRunning,
+		})
+
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			AgentID:         "agent1",
+		})
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-2", &types.TaskRecord{
+			ID:              "task-2",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "not_found",
+			AgentID:         "agent1",
+		})
+
+		srv.reconcileDeploymentStatus(ctx, depID)
+
+		var record types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
+		if record.Status != types.StatusRunning {
+			t.Errorf("deployment status = %q, want running (some containers still alive)", record.Status)
+		}
+	})
+
+	t.Run("skips non-running deployments", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+
+		srv := &engineGRPCServer{store: store}
+
+		depID := "dep-reconcile-3"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID:     depID,
+			Name:   "test-app",
+			Status: types.StatusStopped,
+		})
+
+		// Even with dead containers, shouldn't change already-stopped deployment
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "not_found",
+			AgentID:         "agent1",
+		})
+
+		srv.reconcileDeploymentStatus(ctx, depID)
+
+		var record types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
+		if record.Status != types.StatusStopped {
+			t.Errorf("deployment status = %q, want stopped (unchanged)", record.Status)
+		}
+	})
+}
+
+func TestRegister_ReturnsActiveContainers(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns running containers from running deployments", func(t *testing.T) {
+		memStore := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       memStore,
+			registryURL: "localhost:5000",
+			events:      NewEventBuffer(10),
+		}
+
+		// Running deployment
+		memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
+			ID:     "deploy-1",
+			Name:   "myapp",
+			Status: types.StatusRunning,
+		})
+
+		// Task from running deployment — should be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			ContainerName:   "myapp-web-1",
+			ContainerIP:     "10.0.1.2",
+			Ports:           []string{"8080:80"},
+			ServiceName:     "web",
+			DeploymentID:    "deploy-1",
+			AgentID:         "worker-1",
+		})
+
+		// Task with stopped container — should NOT be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
+			ID:              "task-2",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusStopped,
+			ContainerName:   "myapp-db-1",
+			DeploymentID:    "deploy-1",
+			AgentID:         "worker-1",
+		})
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			ApiAddress:   "worker-1:9090",
+			SessionToken: "token-abc",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+
+		if len(resp.ActiveContainers) != 1 {
+			t.Fatalf("expected 1 active container, got %d", len(resp.ActiveContainers))
+		}
+
+		ac := resp.ActiveContainers[0]
+		if ac.ContainerName != "myapp-web-1" {
+			t.Errorf("container name = %q, want myapp-web-1", ac.ContainerName)
+		}
+		if ac.ContainerIp != "10.0.1.2" {
+			t.Errorf("container IP = %q, want 10.0.1.2", ac.ContainerIp)
+		}
+		if len(ac.Ports) != 1 || ac.Ports[0] != "8080:80" {
+			t.Errorf("ports = %v, want [8080:80]", ac.Ports)
+		}
+		if ac.ServiceName != "web" {
+			t.Errorf("service name = %q, want web", ac.ServiceName)
+		}
+		if ac.DeploymentId != "deploy-1" {
+			t.Errorf("deployment ID = %q, want deploy-1", ac.DeploymentId)
+		}
+		if ac.TaskId != "task-1" {
+			t.Errorf("task ID = %q, want task-1", ac.TaskId)
+		}
+	})
+
+	t.Run("excludes containers from stopped deployments", func(t *testing.T) {
+		memStore := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       memStore,
+			registryURL: "localhost:5000",
+			events:      NewEventBuffer(10),
+		}
+
+		// Stopped deployment
+		memStore.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+			ID:     "deploy-old",
+			Name:   "myapp",
+			Status: types.StatusStopped,
+		})
+
+		// Task from stopped deployment — should NOT be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-old", &types.TaskRecord{
+			ID:              "task-old",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			ContainerName:   "myapp-web-old",
+			DeploymentID:    "deploy-old",
+			AgentID:         "worker-1",
+		})
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			ApiAddress:   "worker-1:9090",
+			SessionToken: "token-abc",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if len(resp.ActiveContainers) != 0 {
+			t.Errorf("expected 0 active containers from stopped deployment, got %d", len(resp.ActiveContainers))
+		}
+	})
+
+	t.Run("returns empty when no tasks exist", func(t *testing.T) {
+		freshStore := storage.NewMemoryStore()
+		freshSrv := &engineGRPCServer{
+			store:       freshStore,
+			registryURL: "localhost:5000",
+			events:      NewEventBuffer(10),
+		}
+
+		resp, err := freshSrv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-3",
+			ApiAddress:   "worker-3:9090",
+			SessionToken: "token-xyz",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if len(resp.ActiveContainers) != 0 {
+			t.Errorf("expected 0 active containers, got %d", len(resp.ActiveContainers))
+		}
+	})
+}

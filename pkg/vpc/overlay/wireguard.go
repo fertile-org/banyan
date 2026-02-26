@@ -56,14 +56,13 @@ func NewWireGuardDriverWithOps(linkOps LinkOperations, wgOps WireGuardOps, priva
 }
 
 // Init creates the WireGuard interface, bridge, and sets up networking.
-// If interfaces exist from a previous run, they are cleaned up first.
+// The WireGuard tunnel interface is always recreated (containers don't connect to it).
+// The bridge is preserved if it already exists, since running containers have
+// veth pairs attached to it — deleting it would break their networking.
 func (d *WireGuardDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP) error {
-	// Clean up any leftover interfaces from a previous run
+	// Always recreate the WireGuard tunnel interface (safe — no container veths attached)
 	if exists, _ := d.linkOps.LinkExists(d.wgName); exists {
 		_ = d.linkOps.DeleteLink(d.wgName)
-	}
-	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
-		_ = d.linkOps.DeleteLink(d.bridgeName)
 	}
 
 	// 1. Create WireGuard interface
@@ -76,25 +75,29 @@ func (d *WireGuardDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net
 		return fmt.Errorf("configure WireGuard interface: %w", err)
 	}
 
-	// 3. Create bridge (still needed for CNI — containers connect via bridge)
-	if err := d.linkOps.CreateBridge(d.bridgeName); err != nil {
-		return fmt.Errorf("create bridge: %w", err)
-	}
+	// 3. Create bridge if it doesn't exist (containers connect via bridge;
+	//    preserving it keeps existing container veth pairs connected)
+	bridgeExists, _ := d.linkOps.LinkExists(d.bridgeName)
+	if !bridgeExists {
+		if err := d.linkOps.CreateBridge(d.bridgeName); err != nil {
+			return fmt.Errorf("create bridge: %w", err)
+		}
 
-	// 4. Set bridge MAC to deterministic VTEP MAC
-	vtepMAC := DeterministicMAC(subnet)
-	if err := d.linkOps.SetLinkAddress(d.bridgeName, vtepMAC); err != nil {
-		return fmt.Errorf("set bridge MAC: %w", err)
-	}
+		// 4. Set bridge MAC to deterministic VTEP MAC
+		vtepMAC := DeterministicMAC(subnet)
+		if err := d.linkOps.SetLinkAddress(d.bridgeName, vtepMAC); err != nil {
+			return fmt.Errorf("set bridge MAC: %w", err)
+		}
 
-	// 5. Assign VTEP IP to bridge (gateway IP for this agent's subnet)
-	vtepIP := VTEPIP(subnet)
-	bridgeAddr := &net.IPNet{
-		IP:   vtepIP,
-		Mask: subnet.Mask,
-	}
-	if err := d.linkOps.AddAddress(d.bridgeName, bridgeAddr); err != nil {
-		return fmt.Errorf("assign IP to bridge: %w", err)
+		// 5. Assign VTEP IP to bridge (gateway IP for this agent's subnet)
+		vtepIP := VTEPIP(subnet)
+		bridgeAddr := &net.IPNet{
+			IP:   vtepIP,
+			Mask: subnet.Mask,
+		}
+		if err := d.linkOps.AddAddress(d.bridgeName, bridgeAddr); err != nil {
+			return fmt.Errorf("assign IP to bridge: %w", err)
+		}
 	}
 
 	// 6. Bring up both interfaces
@@ -173,17 +176,12 @@ func (d *WireGuardDriver) WriteCNIConfig(subnet net.IPNet) error {
 
 // Cleanup removes the WireGuard and bridge interfaces.
 func (d *WireGuardDriver) Cleanup(ctx context.Context) error {
-	// Delete WireGuard interface
+	// Delete WireGuard interface only — the bridge must be preserved
+	// because running containers have veth pairs attached to it.
+	// Deleting the bridge would orphan those veths and break networking.
 	if exists, _ := d.linkOps.LinkExists(d.wgName); exists {
 		if err := d.linkOps.DeleteLink(d.wgName); err != nil {
 			return fmt.Errorf("delete WireGuard interface: %w", err)
-		}
-	}
-
-	// Delete bridge
-	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
-		if err := d.linkOps.DeleteLink(d.bridgeName); err != nil {
-			return fmt.Errorf("delete bridge: %w", err)
 		}
 	}
 

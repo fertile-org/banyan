@@ -43,6 +43,12 @@
 
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
+<div align="center">
+  <img src="website/public/dashboard/demo-dashboard.gif" alt="Banyan CLI dashboard — live cluster monitoring in your terminal" width="100%">
+  <br>
+  <sub><code>banyan-cli dashboard</code> — monitor your entire cluster from the terminal</sub>
+</div>
+
 ## From one server to many
 
 You know Docker Compose. You write a `docker-compose.yml`, run `docker compose up`, and it works — on one machine.

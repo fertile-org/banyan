@@ -359,25 +359,7 @@ Navigate lists with arrow keys or `j`/`k`, press `Enter` to drill into agent or 
 |------|---------|-------------|
 | `--refresh` | `5s` | Auto-refresh interval |
 
-```
-╭─ Engine ────────────────────╮╭─ Cluster ───────────────────╮
-│ ● Running  2d 5h            ││ Agents        2/2 ●●        │
-│ CPU  ██░░░░░░░░░░░░░░  12%  ││ Deployments   3 running     │
-│ Mem  ████░░░░░░░░░░░░  28%  ││ Containers    8/8 healthy   │
-│ Disk ██████░░░░░░░░░░  42%  │╰─────────────────────────────╯
-╰─────────────────────────────╯
-╭─ Agents (2) ────────────────────────────────────────────────╮
-│  Name        Status    CPU          Mem          Containers  │
-│  worker-1    ● ready   ████░░  22%  ██░░░░  15%  5          │
-│  worker-2    ● ready   ███░░░  18%  ██░░░░  12%  3          │
-╰─────────────────────────────────────────────────────────────╯
-╭─ Deployments (3 active) ────────────────────────────────────╮
-│  Name        Status      Healthy  Services  Age             │
-│  my-app      ● running   5/5      3         2d 5h           │
-│  staging     ● running   2/2      2         1d 3h           │
-│  jobs        ● running   1/1      1         4h 20m          │
-╰─────────────────────────────────────────────────────────────╯
-```
+![Dashboard overview screen](/dashboard/dashboard-overview.png)
 
 Examples:
 

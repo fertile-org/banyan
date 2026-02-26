@@ -11,7 +11,8 @@ import (
 
 // mockLinkOps records all calls to verify correct operation order and args.
 type mockLinkOps struct {
-	calls []mockCall
+	calls    []mockCall
+	existsFor map[string]bool // override LinkExists per name; nil means all return true
 }
 
 type mockCall struct {
@@ -75,6 +76,9 @@ func (m *mockLinkOps) DeleteLink(name string) error {
 
 func (m *mockLinkOps) LinkExists(name string) (bool, error) {
 	m.record("LinkExists", name)
+	if m.existsFor != nil {
+		return m.existsFor[name], nil
+	}
 	return true, nil
 }
 
@@ -98,67 +102,97 @@ func (m *mockLinkOps) callCount(method string) int {
 }
 
 func TestVXLANDriver_Init(t *testing.T) {
-	ops := &mockLinkOps{}
-	driver := NewVXLANDriverWithOps(ops)
-
 	subnet := net.IPNet{
 		IP:   net.ParseIP("10.0.45.0"),
 		Mask: net.CIDRMask(24, 32),
 	}
 	hostIP := net.ParseIP("192.168.1.10")
 
-	err := driver.Init(context.Background(), subnet, hostIP)
-	if err != nil {
-		t.Fatalf("Init failed: %v", err)
-	}
+	t.Run("fresh start creates bridge", func(t *testing.T) {
+		ops := &mockLinkOps{existsFor: map[string]bool{
+			"banyan.1": true,  // leftover VXLAN from previous run
+			"banyan0":  false, // no bridge (fresh start)
+		}}
+		driver := NewVXLANDriverWithOps(ops)
 
-	// Verify call sequence (includes cleanup of leftover interfaces)
-	expectedMethods := []string{
-		"LinkExists",     // 0. Check VXLAN exists (cleanup)
-		"DeleteLink",     // 1. Delete old VXLAN (mock returns exists=true)
-		"LinkExists",     // 2. Check bridge exists (cleanup)
-		"DeleteLink",     // 3. Delete old bridge
-		"CreateVXLAN",    // 4. Create VXLAN interface
-		"CreateBridge",   // 5. Create bridge
-		"SetLinkAddress", // 6. Set bridge MAC to deterministic VTEP MAC
-		"SetLinkMaster",  // 7. Attach VXLAN to bridge
-		"AddAddress",     // 8. Assign VTEP IP
-		"SetLinkUp",      // 9. Bring up VXLAN
-		"SetLinkUp",      // 10. Bring up bridge
-	}
-
-	if len(ops.calls) != len(expectedMethods) {
-		t.Fatalf("expected %d calls, got %d: %v", len(expectedMethods), len(ops.calls), ops.calls)
-	}
-
-	for i, expected := range expectedMethods {
-		if ops.calls[i].method != expected {
-			t.Errorf("call %d: expected %s, got %s", i, expected, ops.calls[i].method)
+		err := driver.Init(context.Background(), subnet, hostIP)
+		if err != nil {
+			t.Fatalf("Init failed: %v", err)
 		}
-	}
 
-	// Verify VXLAN was created with correct name (after cleanup)
-	if ops.calls[4].args[0] != "banyan.1" {
-		t.Errorf("expected VXLAN name 'banyan.1', got %q", ops.calls[4].args[0])
-	}
+		expectedMethods := []string{
+			"LinkExists",     // Check VXLAN exists
+			"DeleteLink",     // Delete old VXLAN
+			"CreateVXLAN",    // Create VXLAN interface
+			"LinkExists",     // Check bridge exists
+			"CreateBridge",   // Create bridge (doesn't exist)
+			"SetLinkAddress", // Set bridge MAC
+			"AddAddress",     // Assign VTEP IP
+			"SetLinkMaster",  // Attach VXLAN to bridge
+			"SetLinkUp",      // Bring up VXLAN
+			"SetLinkUp",      // Bring up bridge
+		}
 
-	// Verify bridge was created with correct name
-	if ops.calls[5].args[0] != "banyan0" {
-		t.Errorf("expected bridge name 'banyan0', got %q", ops.calls[5].args[0])
-	}
+		if len(ops.calls) != len(expectedMethods) {
+			t.Fatalf("expected %d calls, got %d: %v", len(expectedMethods), len(ops.calls), ops.calls)
+		}
+		for i, expected := range expectedMethods {
+			if ops.calls[i].method != expected {
+				t.Errorf("call %d: expected %s, got %s", i, expected, ops.calls[i].method)
+			}
+		}
 
-	// Verify bridge MAC was set to deterministic VTEP MAC (02:42:0a:00:2d:01 for 10.0.45.0/24)
-	if ops.calls[6].args[0] != "banyan0" {
-		t.Errorf("expected SetLinkAddress on 'banyan0', got %q", ops.calls[6].args[0])
-	}
-	if ops.calls[6].args[1] != "02:42:0a:00:2d:01" {
-		t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", ops.calls[6].args[1])
-	}
+		// Verify bridge name and config
+		if ops.calls[4].args[0] != "banyan0" {
+			t.Errorf("expected bridge name 'banyan0', got %q", ops.calls[4].args[0])
+		}
+		if ops.calls[5].args[1] != "02:42:0a:00:2d:01" {
+			t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", ops.calls[5].args[1])
+		}
+		if ops.calls[6].args[1] != "10.0.45.1/24" {
+			t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", ops.calls[6].args[1])
+		}
+	})
 
-	// Verify VTEP IP was assigned correctly (10.0.45.1/24)
-	if ops.calls[8].args[1] != "10.0.45.1/24" {
-		t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", ops.calls[8].args[1])
-	}
+	t.Run("restart preserves existing bridge", func(t *testing.T) {
+		ops := &mockLinkOps{} // all LinkExists return true (bridge + VXLAN exist)
+		driver := NewVXLANDriverWithOps(ops)
+
+		err := driver.Init(context.Background(), subnet, hostIP)
+		if err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+
+		// Bridge should NOT be deleted or recreated
+		expectedMethods := []string{
+			"LinkExists",  // Check VXLAN exists
+			"DeleteLink",  // Delete old VXLAN
+			"CreateVXLAN", // Create VXLAN interface
+			"LinkExists",  // Check bridge exists → true → skip creation
+			"SetLinkMaster", // Attach VXLAN to bridge
+			"SetLinkUp",   // Bring up VXLAN
+			"SetLinkUp",   // Bring up bridge
+		}
+
+		if len(ops.calls) != len(expectedMethods) {
+			t.Fatalf("expected %d calls, got %d: %v", len(expectedMethods), len(ops.calls), ops.calls)
+		}
+		for i, expected := range expectedMethods {
+			if ops.calls[i].method != expected {
+				t.Errorf("call %d: expected %s, got %s", i, expected, ops.calls[i].method)
+			}
+		}
+
+		// Verify no CreateBridge or DeleteLink for bridge
+		if ops.hasCall("CreateBridge") {
+			t.Error("should not create bridge when it already exists")
+		}
+		for _, c := range ops.calls {
+			if c.method == "DeleteLink" && c.args[0] == "banyan0" {
+				t.Error("should not delete bridge when it already exists")
+			}
+		}
+	})
 }
 
 func TestVXLANDriver_ReconcilePeers(t *testing.T) {

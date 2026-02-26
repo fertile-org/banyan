@@ -7,70 +7,103 @@ import (
 )
 
 func TestWireGuardDriver_Init(t *testing.T) {
-	linkOps := &mockLinkOps{}
-	wgOps := &mockWireGuardOps{}
-	driver := NewWireGuardDriverWithOps(linkOps, wgOps, "privkey-base64", "pubkey-base64")
-
 	subnet := net.IPNet{
 		IP:   net.ParseIP("10.0.45.0"),
 		Mask: net.CIDRMask(24, 32),
 	}
 	hostIP := net.ParseIP("192.168.1.10")
 
-	err := driver.Init(context.Background(), subnet, hostIP)
-	if err != nil {
-		t.Fatalf("Init failed: %v", err)
-	}
+	t.Run("fresh start creates bridge", func(t *testing.T) {
+		linkOps := &mockLinkOps{existsFor: map[string]bool{
+			"banyan-wg": true,  // leftover WG from previous run
+			"banyan0":   false, // no bridge (fresh start)
+		}}
+		wgOps := &mockWireGuardOps{}
+		driver := NewWireGuardDriverWithOps(linkOps, wgOps, "privkey-base64", "pubkey-base64")
 
-	// Verify WireGuard operations
-	if wgOps.callCount("CreateInterface") != 1 {
-		t.Errorf("expected 1 CreateInterface call, got %d", wgOps.callCount("CreateInterface"))
-	}
-	if wgOps.calls[0].args[0] != "banyan-wg" {
-		t.Errorf("expected WG interface 'banyan-wg', got %q", wgOps.calls[0].args[0])
-	}
-
-	if wgOps.callCount("ConfigureInterface") != 1 {
-		t.Errorf("expected 1 ConfigureInterface call, got %d", wgOps.callCount("ConfigureInterface"))
-	}
-
-	// Verify link operations sequence (includes cleanup of leftover interfaces)
-	expectedLinkMethods := []string{
-		"LinkExists",     // 0. Check WG exists (cleanup)
-		"DeleteLink",     // 1. Delete old WG (mock returns exists=true)
-		"LinkExists",     // 2. Check bridge exists (cleanup)
-		"DeleteLink",     // 3. Delete old bridge
-		"CreateBridge",   // 4. Create bridge
-		"SetLinkAddress", // 5. Set bridge MAC
-		"AddAddress",     // 6. Assign VTEP IP
-		"SetLinkUp",      // 7. Bring up WireGuard
-		"SetLinkUp",      // 8. Bring up bridge
-	}
-
-	if len(linkOps.calls) != len(expectedLinkMethods) {
-		t.Fatalf("expected %d link calls, got %d: %v", len(expectedLinkMethods), len(linkOps.calls), linkOps.calls)
-	}
-
-	for i, expected := range expectedLinkMethods {
-		if linkOps.calls[i].method != expected {
-			t.Errorf("link call %d: expected %s, got %s", i, expected, linkOps.calls[i].method)
+		err := driver.Init(context.Background(), subnet, hostIP)
+		if err != nil {
+			t.Fatalf("Init failed: %v", err)
 		}
-	}
 
-	// Verify bridge name (after cleanup calls)
-	if linkOps.calls[4].args[0] != "banyan0" {
-		t.Errorf("expected bridge name 'banyan0', got %q", linkOps.calls[4].args[0])
-	}
+		// Verify WireGuard operations
+		if wgOps.callCount("CreateInterface") != 1 {
+			t.Errorf("expected 1 CreateInterface call, got %d", wgOps.callCount("CreateInterface"))
+		}
+		if wgOps.callCount("ConfigureInterface") != 1 {
+			t.Errorf("expected 1 ConfigureInterface call, got %d", wgOps.callCount("ConfigureInterface"))
+		}
 
-	// Verify bridge MAC was set to deterministic VTEP MAC
-	if linkOps.calls[5].args[1] != "02:42:0a:00:2d:01" {
-		t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", linkOps.calls[5].args[1])
-	}
+		expectedLinkMethods := []string{
+			"LinkExists",     // Check WG exists
+			"DeleteLink",     // Delete old WG
+			"LinkExists",     // Check bridge exists
+			"CreateBridge",   // Create bridge (doesn't exist)
+			"SetLinkAddress", // Set bridge MAC
+			"AddAddress",     // Assign VTEP IP
+			"SetLinkUp",      // Bring up WireGuard
+			"SetLinkUp",      // Bring up bridge
+		}
 
-	// Verify VTEP IP was assigned correctly
-	if linkOps.calls[6].args[1] != "10.0.45.1/24" {
-		t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", linkOps.calls[6].args[1])
-	}
+		if len(linkOps.calls) != len(expectedLinkMethods) {
+			t.Fatalf("expected %d link calls, got %d: %v", len(expectedLinkMethods), len(linkOps.calls), linkOps.calls)
+		}
+		for i, expected := range expectedLinkMethods {
+			if linkOps.calls[i].method != expected {
+				t.Errorf("link call %d: expected %s, got %s", i, expected, linkOps.calls[i].method)
+			}
+		}
+
+		// Verify bridge config
+		if linkOps.calls[3].args[0] != "banyan0" {
+			t.Errorf("expected bridge name 'banyan0', got %q", linkOps.calls[3].args[0])
+		}
+		if linkOps.calls[4].args[1] != "02:42:0a:00:2d:01" {
+			t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", linkOps.calls[4].args[1])
+		}
+		if linkOps.calls[5].args[1] != "10.0.45.1/24" {
+			t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", linkOps.calls[5].args[1])
+		}
+	})
+
+	t.Run("restart preserves existing bridge", func(t *testing.T) {
+		linkOps := &mockLinkOps{} // all LinkExists return true
+		wgOps := &mockWireGuardOps{}
+		driver := NewWireGuardDriverWithOps(linkOps, wgOps, "privkey-base64", "pubkey-base64")
+
+		err := driver.Init(context.Background(), subnet, hostIP)
+		if err != nil {
+			t.Fatalf("Init failed: %v", err)
+		}
+
+		// WG should be recreated, bridge preserved
+		expectedLinkMethods := []string{
+			"LinkExists", // Check WG exists → true → delete
+			"DeleteLink", // Delete old WG
+			"LinkExists", // Check bridge exists → true → skip creation
+			"SetLinkUp",  // Bring up WireGuard
+			"SetLinkUp",  // Bring up bridge
+		}
+
+		if len(linkOps.calls) != len(expectedLinkMethods) {
+			t.Fatalf("expected %d link calls, got %d: %v", len(expectedLinkMethods), len(linkOps.calls), linkOps.calls)
+		}
+		for i, expected := range expectedLinkMethods {
+			if linkOps.calls[i].method != expected {
+				t.Errorf("link call %d: expected %s, got %s", i, expected, linkOps.calls[i].method)
+			}
+		}
+
+		// Verify no bridge deletion or creation
+		if linkOps.hasCall("CreateBridge") {
+			t.Error("should not create bridge when it already exists")
+		}
+		for _, c := range linkOps.calls {
+			if c.method == "DeleteLink" && c.args[0] == "banyan0" {
+				t.Error("should not delete bridge when it already exists")
+			}
+		}
+	})
 }
 
 func TestWireGuardDriver_ReconcilePeers(t *testing.T) {

@@ -63,16 +63,16 @@ func TestProgressBar(t *testing.T) {
 
 func TestFormatDuration(t *testing.T) {
 	tests := []struct {
-		dur  time.Duration
 		want string
+		dur  time.Duration
 	}{
-		{0, "0s"},
-		{30 * time.Second, "30s"},
-		{time.Minute + 30*time.Second, "1m 30s"},
-		{2*time.Hour + 15*time.Minute, "2h 15m"},
-		{25 * time.Hour, "1d 1h"},
-		{49 * time.Hour, "2d 1h"},
-		{-5 * time.Second, "0s"},
+		{"0s", 0},
+		{"30s", 30 * time.Second},
+		{"1m 30s", time.Minute + 30*time.Second},
+		{"2h 15m", 2*time.Hour + 15*time.Minute},
+		{"1d 1h", 25 * time.Hour},
+		{"2d 1h", 49 * time.Hour},
+		{"0s", -5 * time.Second},
 	}
 
 	for _, tt := range tests {
@@ -87,15 +87,15 @@ func TestFormatDuration(t *testing.T) {
 
 func TestFormatBytes(t *testing.T) {
 	tests := []struct {
-		bytes uint64
 		want  string
+		bytes uint64
 	}{
-		{0, "0 B"},
-		{512, "512 B"},
-		{1024, "1 KB"},
-		{1024 * 1024, "1 MB"},
-		{1024 * 1024 * 1024, "1.0 GB"},
-		{1024*1024*1024*5 + 1024*1024*512, "5.5 GB"},
+		{"0 B", 0},
+		{"512 B", 512},
+		{"1 KB", 1024},
+		{"1 MB", 1024 * 1024},
+		{"1.0 GB", 1024 * 1024 * 1024},
+		{"5.5 GB", 1024*1024*1024*5 + 1024*1024*512},
 	}
 
 	for _, tt := range tests {
@@ -111,14 +111,14 @@ func TestFormatBytes(t *testing.T) {
 func TestTruncate(t *testing.T) {
 	tests := []struct {
 		input  string
-		maxLen int
 		want   string
+		maxLen int
 	}{
-		{"hello", 10, "hello"},
-		{"hello world", 5, "hell…"},
-		{"hi", 2, "hi"},
-		{"hello", 1, "…"},
-		{"", 5, ""},
+		{"hello", "hello", 10},
+		{"hello world", "hell…", 5},
+		{"hi", "hi", 2},
+		{"hello", "…", 1},
+		{"", "", 5},
 	}
 
 	for _, tt := range tests {
@@ -182,6 +182,46 @@ func TestRenderBox_MultilineContent(t *testing.T) {
 	lines := strings.Split(got, "\n")
 	if len(lines) != 5 { // top + 3 content lines + bottom
 		t.Errorf("renderBox multiline lines = %d, want 5", len(lines))
+	}
+}
+
+func TestHealthBar(t *testing.T) {
+	tests := []struct {
+		name  string
+		ratio float64
+		width int
+	}{
+		{"zero", 0, 10},
+		{"half", 0.5, 10},
+		{"full", 1.0, 10},
+		{"over", 1.5, 10},
+		{"negative", -0.1, 10},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := healthBar(tt.ratio, tt.width)
+			if got == "" {
+				t.Error("healthBar returned empty string")
+			}
+			if !strings.Contains(got, "█") && !strings.Contains(got, "░") {
+				t.Errorf("healthBar does not contain expected block characters: %q", got)
+			}
+		})
+	}
+}
+
+func TestHealthBar_ColorInversion(t *testing.T) {
+	// Full health (1.0) should contain green (color 42), not red
+	full := healthBar(1.0, 10)
+	if strings.Contains(full, "196") {
+		t.Error("healthBar(1.0) should not use red color")
+	}
+
+	// Empty health (0.0) should contain red, not green
+	empty := healthBar(0.0, 10)
+	if strings.Contains(empty, "42") {
+		t.Error("healthBar(0.0) should not use green color")
 	}
 }
 

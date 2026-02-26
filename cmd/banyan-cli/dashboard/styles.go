@@ -10,24 +10,25 @@ import (
 
 // Colors
 var (
-	colorGreen  = lipgloss.Color("42")
-	colorYellow = lipgloss.Color("214")
-	colorRed    = lipgloss.Color("196")
-	colorGray   = lipgloss.Color("241")
-	colorBlue   = lipgloss.Color("39")
-	colorPurple = lipgloss.Color("212")
-	colorDim    = lipgloss.Color("245")
-	colorBorder = lipgloss.Color("63")
+	colorGreen   = lipgloss.Color("42")
+	colorYellow  = lipgloss.Color("214")
+	colorRed     = lipgloss.Color("196")
+	colorGray    = lipgloss.Color("241")
+	colorBlue    = lipgloss.Color("39")
+	colorPrimary = lipgloss.Color("#7CB342")
+	colorDim     = lipgloss.Color("245")
+	colorBorder  = lipgloss.Color("#558B2F")
 )
 
 // Text styles
 var (
 	styleBold     = lipgloss.NewStyle().Bold(true)
 	styleDim      = lipgloss.NewStyle().Foreground(colorDim)
-	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+	styleTitle    = lipgloss.NewStyle().Bold(true).Foreground(colorPrimary)
 	styleLabel    = lipgloss.NewStyle().Foreground(colorDim)
 	styleError    = lipgloss.NewStyle().Foreground(colorRed)
 	styleSelected = lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	styleNone     = lipgloss.NewStyle()
 )
 
 // statusDot returns a colored dot for the given status.
@@ -64,6 +65,32 @@ func progressBar(ratio float64, width int) string {
 		color = colorYellow
 	default:
 		color = colorGreen
+	}
+
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	return lipgloss.NewStyle().Foreground(color).Render(bar)
+}
+
+// healthBar renders a colored bar where green means fully healthy.
+// Unlike progressBar (where high = bad), here high ratio = good.
+func healthBar(ratio float64, width int) string {
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	filled := min(int(ratio*float64(width)), width)
+	empty := width - filled
+
+	var color lipgloss.Color
+	switch {
+	case ratio >= 1.0:
+		color = colorGreen
+	case ratio >= 0.5:
+		color = colorYellow
+	default:
+		color = colorRed
 	}
 
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
@@ -110,7 +137,7 @@ func formatBytes(b uint64) string {
 
 // renderBox draws a bordered box with a title embedded in the top border.
 func renderBox(title, content string, width int) string {
-	stTitle := lipgloss.NewStyle().Bold(true).Foreground(colorPurple)
+	stTitle := lipgloss.NewStyle().Bold(true).Foreground(colorPrimary)
 	stBorder := lipgloss.NewStyle().Foreground(colorBorder)
 
 	renderedTitle := stTitle.Render(title)

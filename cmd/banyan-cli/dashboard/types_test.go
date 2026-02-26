@@ -42,15 +42,23 @@ func TestConvertFromProto(t *testing.T) {
 		},
 		Deployments: []*banyanpb.DeploymentInfo{
 			{
-				Id:            "dep-001",
-				Name:          "my-app",
-				Status:        "running",
-				Healthy:       2,
-				Total:         2,
-				Services:      map[string]*banyanpb.ServiceInfo{"web": {}, "db": {}},
+				Id:      "dep-001",
+				Name:    "my-app",
+				Status:  "running",
+				Healthy: 2,
+				Total:   2,
+				Services: map[string]*banyanpb.ServiceInfo{
+					"web": {Image: "nginx:latest", Replicas: 2, Ports: []string{"8080:80"}},
+					"db":  {Image: "postgres:15", Replicas: 1, Ports: []string{"5432:5432"}, DependsOn: []string{"web"}},
+				},
 				Tags:          []string{"production"},
 				CreatedAtUnix: now - 600,
 				UpdatedAtUnix: now - 60,
+				Tasks: []*banyanpb.TaskInfo{
+					{Type: "create_and_start", ContainerName: "app-web-0", ServiceName: "web", AgentId: "agent-1", Status: "completed", ContainerStatus: "running", Image: "nginx:latest", Ports: []string{"8080:80"}, ReplicaIndex: 0, CreatedAtUnix: now - 500},
+					{Type: "create_and_start", ContainerName: "app-db-0", ServiceName: "db", AgentId: "agent-1", Status: "completed", ContainerStatus: "running", Image: "postgres:15", Ports: []string{"5432:5432"}, ReplicaIndex: 0, CreatedAtUnix: now - 500},
+					{Type: "stop_and_remove", ContainerName: "old-web-0", ServiceName: "web", AgentId: "agent-1", Status: "completed"},
+				},
 			},
 		},
 		Summary: &banyanpb.ClusterSummary{
@@ -119,6 +127,43 @@ func TestConvertFromProto(t *testing.T) {
 	}
 	if d.Services != 2 {
 		t.Errorf("deployment services = %d, want 2", d.Services)
+	}
+
+	// Service details (sorted by name)
+	if len(d.ServiceDetails) != 2 {
+		t.Fatalf("service details = %d, want 2", len(d.ServiceDetails))
+	}
+	if d.ServiceDetails[0].Name != "db" {
+		t.Errorf("first service = %q, want db (sorted)", d.ServiceDetails[0].Name)
+	}
+	if d.ServiceDetails[1].Name != "web" {
+		t.Errorf("second service = %q, want web (sorted)", d.ServiceDetails[1].Name)
+	}
+	if d.ServiceDetails[1].Image != "nginx:latest" {
+		t.Errorf("web image = %q, want nginx:latest", d.ServiceDetails[1].Image)
+	}
+	if d.ServiceDetails[0].Replicas != 1 {
+		t.Errorf("db replicas = %d, want 1", d.ServiceDetails[0].Replicas)
+	}
+
+	// Container data from tasks (only create_and_start, not stop_and_remove)
+	if len(d.Containers) != 2 {
+		t.Fatalf("deployment containers = %d, want 2", len(d.Containers))
+	}
+	if d.Containers[0].Name != "app-web-0" {
+		t.Errorf("first container = %q, want app-web-0", d.Containers[0].Name)
+	}
+	if d.Containers[0].AgentName != "agent-1" {
+		t.Errorf("container agent = %q, want agent-1", d.Containers[0].AgentName)
+	}
+
+	// Global containers (same as deployment containers since single deployment)
+	if len(data.Containers) != 2 {
+		t.Fatalf("global containers = %d, want 2", len(data.Containers))
+	}
+	// Should be sorted by deployment, service, replica
+	if data.Containers[0].ServiceName != "db" {
+		t.Errorf("first global container service = %q, want db", data.Containers[0].ServiceName)
 	}
 
 	// Summary

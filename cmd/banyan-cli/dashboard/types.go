@@ -2,6 +2,7 @@
 package dashboard
 
 import (
+	"sort"
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
@@ -12,6 +13,7 @@ type DashboardData struct {
 	FetchedAt   time.Time
 	Agents      []AgentData
 	Deployments []DeploymentData
+	Containers  []ContainerData
 	Events      []EventData
 	Engine      EngineData
 	Summary     ClusterSummary
@@ -49,16 +51,43 @@ type AgentData struct {
 
 // DeploymentData holds deployment status and service details.
 type DeploymentData struct {
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	ID        string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ID             string
+	Name           string
+	Status         string
+	Error          string
+	Tags           []string
+	ServiceDetails []ServiceData
+	Containers     []ContainerData
+	Services       int
+	Healthy        int32
+	Total          int32
+}
+
+// ServiceData holds per-service details within a deployment.
+type ServiceData struct {
 	Name      string
-	Status    string
-	Error     string
-	Tags      []string
-	Services  int
-	Healthy   int32
-	Total     int32
+	Image     string
+	Ports     []string
+	DependsOn []string
+	Replicas  int32
+}
+
+// ContainerData holds per-container info derived from tasks.
+type ContainerData struct {
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	Name            string
+	ServiceName     string
+	AgentName       string
+	DeploymentName  string
+	DeploymentID    string
+	Status          string
+	ContainerStatus string
+	Image           string
+	Ports           []string
+	ReplicaIndex    int32
 }
 
 // ClusterSummary holds aggregated cluster statistics.
@@ -126,7 +155,7 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 
 	// Deployments
 	for _, d := range resp.Deployments {
-		data.Deployments = append(data.Deployments, DeploymentData{
+		dd := DeploymentData{
 			ID:        d.Id,
 			Name:      d.Name,
 			Status:    d.Status,
@@ -137,8 +166,62 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 			CreatedAt: time.Unix(d.CreatedAtUnix, 0),
 			UpdatedAt: time.Unix(d.UpdatedAtUnix, 0),
 			Error:     d.Error,
-		})
+		}
+
+		// Service details (sorted by name for stable display)
+		var serviceNames []string
+		for name := range d.Services {
+			serviceNames = append(serviceNames, name)
+		}
+		sort.Strings(serviceNames)
+		for _, name := range serviceNames {
+			svc := d.Services[name]
+			dd.ServiceDetails = append(dd.ServiceDetails, ServiceData{
+				Name:      name,
+				Image:     svc.Image,
+				Replicas:  svc.Replicas,
+				Ports:     svc.Ports,
+				DependsOn: svc.DependsOn,
+			})
+		}
+
+		// Container data from create_and_start tasks
+		for _, t := range d.Tasks {
+			if t.Type != "create_and_start" {
+				continue
+			}
+			c := ContainerData{
+				Name:            t.ContainerName,
+				ServiceName:     t.ServiceName,
+				AgentName:       t.AgentId,
+				DeploymentName:  d.Name,
+				DeploymentID:    d.Id,
+				Status:          t.Status,
+				ContainerStatus: t.ContainerStatus,
+				Image:           t.Image,
+				Ports:           t.Ports,
+				ReplicaIndex:    t.ReplicaIndex,
+				CreatedAt:       time.Unix(t.CreatedAtUnix, 0),
+				UpdatedAt:       time.Unix(t.UpdatedAtUnix, 0),
+			}
+			dd.Containers = append(dd.Containers, c)
+			data.Containers = append(data.Containers, c)
+		}
+
+		data.Deployments = append(data.Deployments, dd)
 	}
+
+	// Sort global containers: deployment → service → replica
+	sort.Slice(data.Containers, func(i, j int) bool {
+		ci, cj := &data.Containers[i], &data.Containers[j]
+		if ci.DeploymentName != cj.DeploymentName {
+			return ci.DeploymentName < cj.DeploymentName
+		}
+		if ci.ServiceName != cj.ServiceName {
+			return ci.ServiceName < cj.ServiceName
+		}
+		return ci.ReplicaIndex < cj.ReplicaIndex
+	})
 
 	// Summary
 	if s := resp.Summary; s != nil {

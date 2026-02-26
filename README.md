@@ -44,7 +44,9 @@
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
 <div align="center">
-  <img src="website/public/dashboard/demo-dashboard.gif" alt="Banyan CLI dashboard — live cluster monitoring in your terminal" width="100%">
+  <video src="website/public/dashboard/demo-dashboard.mp4" autoplay loop muted playsinline>
+    <img src="website/public/dashboard/dashboard-overview.png" alt="Banyan CLI dashboard">
+  </video>
   <br>
   <sub><code>banyan-cli dashboard</code> — monitor your entire cluster from the terminal</sub>
 </div>

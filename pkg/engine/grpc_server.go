@@ -982,9 +982,15 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 			}
 		}
 		if svc.Deploy != nil {
-			ms.Deploy = &types.ManifestDeploy{
+			md := &types.ManifestDeploy{
 				Replicas: int(svc.Deploy.Replicas),
 			}
+			if svc.Deploy.Placement != nil && svc.Deploy.Placement.Node != "" {
+				md.Placement = &types.ManifestPlacement{
+					Node: svc.Deploy.Placement.Node,
+				}
+			}
+			ms.Deploy = md
 		}
 		services[name] = ms
 	}

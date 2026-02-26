@@ -166,9 +166,15 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 			}
 		}
 		if svc.Deploy != nil {
-			ms.Deploy = &banyanpb.ManifestDeploy{
+			md := &banyanpb.ManifestDeploy{
 				Replicas: int32(svc.Deploy.Replicas), //nolint:gosec // replica count is always small
 			}
+			if svc.Deploy.Placement != nil && svc.Deploy.Placement.Node != "" {
+				md.Placement = &banyanpb.ManifestPlacement{
+					Node: svc.Deploy.Placement.Node,
+				}
+			}
+			ms.Deploy = md
 		}
 		services[name] = ms
 	}

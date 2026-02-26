@@ -23,7 +23,13 @@ type ManifestService struct {
 
 // ManifestDeploy represents deploy configuration (matches Docker Compose).
 type ManifestDeploy struct {
-	Replicas int `yaml:"replicas,omitempty"`
+	Placement *ManifestPlacement `yaml:"placement,omitempty"`
+	Replicas  int                `yaml:"replicas,omitempty"`
+}
+
+// ManifestPlacement represents placement constraints for a service.
+type ManifestPlacement struct {
+	Node string `yaml:"node,omitempty"`
 }
 
 // GetReplicas returns the replica count from deploy config, defaulting to 0 (caller handles default).

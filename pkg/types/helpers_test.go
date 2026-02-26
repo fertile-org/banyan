@@ -74,7 +74,7 @@ func TestBuildTasksForDeployment(t *testing.T) {
 				"web": {Image: "nginx", Replicas: 3},
 			},
 		}
-		tasks := BuildTasksForDeployment(deployment, agents)
+		tasks, _ := BuildTasksForDeployment(deployment, agents)
 		if len(tasks) != 3 {
 			t.Errorf("expected 3 tasks, got %d", len(tasks))
 		}
@@ -88,7 +88,7 @@ func TestBuildTasksForDeployment(t *testing.T) {
 				"web": {Image: "nginx", Replicas: 4},
 			},
 		}
-		tasks := BuildTasksForDeployment(deployment, agents)
+		tasks, _ := BuildTasksForDeployment(deployment, agents)
 
 		agentCounts := map[string]int{}
 		for _, task := range tasks {
@@ -113,7 +113,7 @@ func TestBuildTasksForDeployment(t *testing.T) {
 				},
 			},
 		}
-		tasks := BuildTasksForDeployment(deployment, agents)
+		tasks, _ := BuildTasksForDeployment(deployment, agents)
 		task := tasks[0]
 
 		if task.DeploymentID != "deploy-1" {
@@ -148,7 +148,7 @@ func TestBuildTasksForDeployment(t *testing.T) {
 				"api": {Image: "myapi", Replicas: 1},
 			},
 		}
-		tasks := BuildTasksForDeployment(deployment, agents)
+		tasks, _ := BuildTasksForDeployment(deployment, agents)
 		if len(tasks) != 3 {
 			t.Errorf("expected 3 tasks, got %d", len(tasks))
 		}
@@ -163,7 +163,7 @@ func TestBuildTasksForDeployment(t *testing.T) {
 				"web": {Image: "nginx:latest", Replicas: 1},
 			},
 		}
-		tasks := BuildTasksForDeployment(deployment, agents)
+		tasks, _ := BuildTasksForDeployment(deployment, agents)
 		task := tasks[0]
 
 		// Container name should use deployment ID as prefix (for blue-green uniqueness)
@@ -181,7 +181,7 @@ func TestBuildTasksForDeployment(t *testing.T) {
 				"web": {Image: "nginx:latest", Replicas: 1},
 			},
 		}
-		tasks := BuildTasksForDeployment(deployment, agents)
+		tasks, _ := BuildTasksForDeployment(deployment, agents)
 		task := tasks[0]
 
 		expected := "myapp-web-0"
@@ -189,6 +189,115 @@ func TestBuildTasksForDeployment(t *testing.T) {
 			t.Errorf("expected container_name %q, got %q", expected, task.ContainerName)
 		}
 	})
+
+	t.Run("placement pins service to matching agents", func(t *testing.T) {
+		allAgents := []NodeRecord{
+			{Name: "gateway-1"},
+			{Name: "gateway-2"},
+			{Name: "worker-1"},
+			{Name: "worker-2"},
+		}
+		deployment := &DeploymentRecord{
+			ID:   "deploy-1",
+			Name: "myapp",
+			Services: map[string]ServiceRecord{
+				"proxy": {Image: "caddy", Replicas: 2, Placement: "gateway-*"},
+				"api":   {Image: "myapi", Replicas: 2},
+			},
+		}
+		tasks, err := BuildTasksForDeployment(deployment, allAgents)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		for _, task := range tasks {
+			if task.ServiceName == "proxy" {
+				if task.AgentID != "gateway-1" && task.AgentID != "gateway-2" {
+					t.Errorf("proxy task scheduled on %s, expected gateway-*", task.AgentID)
+				}
+			}
+		}
+	})
+
+	t.Run("placement exact match", func(t *testing.T) {
+		allAgents := []NodeRecord{
+			{Name: "gateway-1"},
+			{Name: "worker-1"},
+		}
+		deployment := &DeploymentRecord{
+			ID:   "deploy-1",
+			Name: "myapp",
+			Services: map[string]ServiceRecord{
+				"db": {Image: "postgres", Replicas: 1, Placement: "worker-1"},
+			},
+		}
+		tasks, err := BuildTasksForDeployment(deployment, allAgents)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(tasks))
+		}
+		if tasks[0].AgentID != "worker-1" {
+			t.Errorf("expected agent worker-1, got %s", tasks[0].AgentID)
+		}
+	})
+
+	t.Run("placement error when no agents match", func(t *testing.T) {
+		allAgents := []NodeRecord{
+			{Name: "worker-1"},
+			{Name: "worker-2"},
+		}
+		deployment := &DeploymentRecord{
+			ID:   "deploy-1",
+			Name: "myapp",
+			Services: map[string]ServiceRecord{
+				"proxy": {Image: "caddy", Replicas: 1, Placement: "gateway-*"},
+			},
+		}
+		_, err := BuildTasksForDeployment(deployment, allAgents)
+		if err == nil {
+			t.Fatal("expected error when no agents match placement, got nil")
+		}
+	})
+}
+
+func TestFilterAgentsByPlacement(t *testing.T) {
+	agents := []NodeRecord{
+		{Name: "gateway-1"},
+		{Name: "gateway-2"},
+		{Name: "worker-1"},
+		{Name: "worker-us-east"},
+		{Name: "db-primary"},
+	}
+
+	tests := []struct {
+		name     string
+		pattern  string
+		expected []string
+	}{
+		{"glob wildcard", "gateway-*", []string{"gateway-1", "gateway-2"}},
+		{"exact match", "worker-1", []string{"worker-1"}},
+		{"single char wildcard", "gateway-?", []string{"gateway-1", "gateway-2"}},
+		{"prefix wildcard", "worker-*", []string{"worker-1", "worker-us-east"}},
+		{"no match", "staging-*", nil},
+		{"match all", "*", []string{"gateway-1", "gateway-2", "worker-1", "worker-us-east", "db-primary"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := filterAgentsByPlacement(agents, tt.pattern)
+			if len(result) != len(tt.expected) {
+				t.Errorf("pattern %q: expected %d agents, got %d", tt.pattern, len(tt.expected), len(result))
+				return
+			}
+			for i, agent := range result {
+				if agent.Name != tt.expected[i] {
+					t.Errorf("pattern %q: expected agent %q at index %d, got %q", tt.pattern, tt.expected[i], i, agent.Name)
+				}
+			}
+		})
+	}
 }
 
 func TestDetermineDeploymentStatus(t *testing.T) {

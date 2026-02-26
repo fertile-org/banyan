@@ -1,7 +1,7 @@
-# Example Banyan deployment file
+# Simple API server with database
 # Familiar docker-compose syntax with replicas for multi-server deployment
 #
-# Deploy: banyan-cli deploy -f examples/banyan.yml
+# Deploy: banyan-cli up -f examples/simple-api/banyan.yml
 
 name: my-app
 

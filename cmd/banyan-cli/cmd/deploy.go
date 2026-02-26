@@ -145,7 +145,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		services := types.BuildServiceRecords(manifest.Services)
 		fmt.Printf("Application: %s\n", manifest.Name)
 		fmt.Printf("Services: %d\n", len(manifest.Services))
-		for name, svc := range services {
+		for name, svc := range services { //nolint:gocritic // display-only loop
 			fmt.Printf("  - %s: %s (replicas: %d)\n", name, svc.Image, svc.Replicas)
 		}
 		fmt.Println("\n[DRY-RUN] Manifest is valid. No changes made.")
@@ -182,7 +182,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	services := types.BuildServiceRecords(manifest.Services)
 	fmt.Printf("\nApplication: %s\n", manifest.Name)
 	fmt.Printf("Services: %d\n", len(manifest.Services))
-	for name, svc := range services {
+	for name, svc := range services { //nolint:gocritic // display-only loop
 		fmt.Printf("  - %s: %s (replicas: %d)\n", name, svc.Image, svc.Replicas)
 	}
 

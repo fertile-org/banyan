@@ -3,6 +3,7 @@ package types
 import (
 	"context"
 	"fmt"
+	"path"
 	"sort"
 	"time"
 )
@@ -61,9 +62,14 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 		if replicas == 0 {
 			replicas = 1
 		}
+		var placement string
+		if svc.Deploy != nil && svc.Deploy.Placement != nil {
+			placement = svc.Deploy.Placement.Node
+		}
 		services[name] = ServiceRecord{
 			Image:       svc.Image,
 			Replicas:    replicas,
+			Placement:   placement,
 			Ports:       svc.Ports,
 			Environment: svc.Environment,
 			Command:     svc.Command,
@@ -77,7 +83,8 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 // replicas round-robin across the given agents.
 // When ReplacesID is set (blue-green deployment), container names use the deployment ID
 // as prefix to avoid naming conflicts with the still-running old deployment.
-func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) []*TaskRecord {
+// Services with deploy.placement.node are scheduled only on matching agents (glob pattern).
+func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) ([]*TaskRecord, error) {
 	containerPrefix := deployment.Name
 	if deployment.ReplacesID != "" {
 		containerPrefix = deployment.ID
@@ -85,9 +92,18 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 
 	var tasks []*TaskRecord
 	agentIdx := 0
-	for svcName, svc := range deployment.Services {
+	for svcName := range deployment.Services {
+		svc := deployment.Services[svcName]
+		eligible := agents
+		if svc.Placement != "" {
+			eligible = filterAgentsByPlacement(agents, svc.Placement)
+			if len(eligible) == 0 {
+				return nil, fmt.Errorf("service %q has placement %q but no agents match", svcName, svc.Placement)
+			}
+		}
+
 		for i := 0; i < svc.Replicas; i++ {
-			agent := agents[agentIdx%len(agents)]
+			agent := eligible[agentIdx%len(eligible)]
 			agentIdx++
 
 			now := time.Now()
@@ -109,7 +125,18 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 			})
 		}
 	}
-	return tasks
+	return tasks, nil
+}
+
+// filterAgentsByPlacement returns agents whose name matches the glob pattern.
+func filterAgentsByPlacement(agents []NodeRecord, pattern string) []NodeRecord {
+	var matched []NodeRecord
+	for _, agent := range agents {
+		if ok, _ := path.Match(pattern, agent.Name); ok {
+			matched = append(matched, agent)
+		}
+	}
+	return matched
 }
 
 // DetermineDeploymentStatus returns the new deployment status based on task counts.

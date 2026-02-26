@@ -59,6 +59,7 @@ type DeploymentRecord struct {
 // ServiceRecord describes a service within a deployment.
 type ServiceRecord struct {
 	Image       string   `json:"image"`
+	Placement   string   `json:"placement,omitempty"`
 	Ports       []string `json:"ports,omitempty"`
 	Environment []string `json:"env,omitempty"`
 	Command     []string `json:"command,omitempty"`

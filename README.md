@@ -51,38 +51,21 @@ Then you need more. More servers, more replicas, more availability. The usual ne
 
 **Banyan takes a different approach.** Same YAML syntax you already write, distributed across your servers. No new language to learn. No templating. No 50-page getting started guide.
 
-## Two lines of diff
-
-**docker-compose.yml** — everything on one machine:
+## One manifest, production-ready
 
 ```yaml
-services:
-  web:
-    build: ./web
-    ports:
-      - "80:80"
-
-  api:
-    build: ./api
-    ports:
-      - "8080:8080"
-    environment:
-      - DB_HOST=db
-
-  db:
-    image: postgres:15-alpine
-```
-
-**banyan.yaml** — distributed across your cluster:
-
-```yaml
-name: my-app                  # ← add a name
+name: my-app
 
 services:
-  web:
-    build: ./web
+  caddy:
+    image: caddy:latest
+    command: caddy reverse-proxy --from example.com --to api:8080
+    deploy:
+      placement:
+        node: gateway-*       # ← pin to your public-facing servers
     ports:
       - "80:80"
+      - "443:443"
 
   api:
     build: ./api
@@ -97,7 +80,7 @@ services:
     image: postgres:15-alpine
 ```
 
-Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and optionally `deploy.replicas`, and Banyan spreads your containers across your servers.
+Same `services`, `build`, `ports`, `environment` you already know from Docker Compose. Add `deploy.replicas` to scale, `deploy.placement.node` to pin services to specific servers. One command to deploy: `banyan-cli up -f banyan.yaml`.
 
 ## What you get
 
@@ -171,25 +154,25 @@ graph TD
     Engine -->|gRPC| AgentN
 
     subgraph VPC[fa:fa-network-wired Banyan VPC]
-        subgraph A1[Worker 1]
+        subgraph G1[Gateway]
             Agent1[fa:fa-cube banyan-agent]
-            C1{{fa:fa-box container: web-0}}
-            C2{{fa:fa-box container: api-0}}
+            C1{{fa:fa-box container: caddy-0}}
             Agent1 ~~~ C1
-            Agent1 ~~~ C2
         end
 
-        subgraph A2[Worker 2]
+        subgraph A2[Worker 1]
             Agent2[fa:fa-cube banyan-agent]
+            C2{{fa:fa-box container: api-0}}
             C3{{fa:fa-box container: api-1}}
-            C4{{fa:fa-box container: db-0}}
+            Agent2 ~~~ C2
             Agent2 ~~~ C3
-            Agent2 ~~~ C4
         end
 
-        subgraph AN[Worker N]
+        subgraph AN[Worker 2]
             AgentN[fa:fa-cube banyan-agent]
-            C5{{fa:fa-box container: api-2}}
+            C4{{fa:fa-box container: api-2}}
+            C5{{fa:fa-box container: db-0}}
+            AgentN ~~~ C4
             AgentN ~~~ C5
         end
     end

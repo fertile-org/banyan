@@ -18,6 +18,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Command | `command:` | `command:` | Same |
 | Dependencies | `depends_on:` | `depends_on:` | Same (informational for full deploys; validated for per-service deploys) |
 | Replicas | `deploy.replicas:` | `deploy.replicas:` | Same |
+| Placement | `deploy.placement.constraints:` | `deploy.placement.node:` | Glob pattern for node name matching |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
 | Build | `build:` | `build:` | Same syntax (context + dockerfile) |
 | Volumes | `volumes:` | -- | Not yet supported |
@@ -36,6 +37,8 @@ services:
     build: <context-path>   # Build from Dockerfile
     deploy:
       replicas: <number>    # Default: 1
+      placement:
+        node: <pattern>     # Glob pattern for node name
     ports:
       - "<host>:<container>"
     environment:
@@ -63,6 +66,7 @@ services:
 | `image` | string | Conditional | -- | Container image. Required unless `build` is set. Any registry works: `nginx:alpine`, `ghcr.io/org/app:v1`. |
 | `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
 | `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
+| `deploy.placement.node` | string | No | -- | Glob pattern to pin this service to specific nodes. Supports `*`, `?`, and `[abc]`. Example: `gateway-*` matches `gateway-1`, `gateway-2`. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
@@ -95,20 +99,23 @@ services:
 
 One container on one worker.
 
-### Full example (examples/banyan.yml)
+### Full example
 
-This is the example manifest included in the repository:
+A production-style manifest with a reverse proxy, scaled API, and database:
 
 ```yaml
 name: my-app
 
 services:
-  web:
-    build: ./web
+  caddy:
+    image: caddy:latest
+    command: caddy reverse-proxy --from example.com --to api:8080
+    deploy:
+      placement:
+        node: gateway-*
     ports:
       - "80:80"
-    depends_on:
-      - api
+      - "443:443"
 
   api:
     build: ./api
@@ -117,7 +124,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=my-app-db-0
+      - DB_HOST=db
       - DB_PORT=5432
     depends_on:
       - db
@@ -132,7 +139,7 @@ services:
       - POSTGRES_DB=app
 ```
 
-This shows `build:` for custom services, `image:` for off-the-shelf databases, `deploy.replicas` for scaling, `environment` for configuration, and `depends_on` for ordering.
+This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, and service DNS (`api:8080`, `db`) for cross-service communication.
 
 ### Build from source
 

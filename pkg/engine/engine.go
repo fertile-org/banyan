@@ -232,7 +232,15 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 	fmt.Printf("[Engine] Scheduling deployment '%s' (%d services, %d agents)\n",
 		deployment.Name, len(deployment.Services), len(agents))
 
-	tasks := types.BuildTasksForDeployment(deployment, agents)
+	tasks, err := types.BuildTasksForDeployment(deployment, agents)
+	if err != nil {
+		fmt.Printf("[Engine] Failed to schedule deployment '%s': %v\n", deployment.Name, err)
+		deployment.Status = types.StatusFailed
+		deployment.Error = err.Error()
+		deployment.UpdatedAt = time.Now()
+		_ = e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment)
+		return
+	}
 
 	taskCount := 0
 	for _, task := range tasks {

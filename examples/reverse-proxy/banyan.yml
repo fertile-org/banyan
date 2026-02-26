@@ -1,0 +1,45 @@
+# Reverse proxy with domain — production-style deployment
+# Caddy handles HTTPS (auto Let's Encrypt) and proxies to the API via service DNS.
+# The proxy is pinned to gateway servers; API replicas spread across all workers.
+#
+# Deploy: banyan-cli up -f examples/reverse-proxy/banyan.yml
+
+name: my-app
+
+services:
+  caddy:
+    image: caddy:latest
+    command:
+      - caddy
+      - reverse-proxy
+      - --from
+      - example.com
+      - --to
+      - api:8080
+    deploy:
+      placement:
+        node: gateway-*
+    ports:
+      - "80:80"
+      - "443:443"
+
+  api:
+    build: ./api
+    deploy:
+      replicas: 3
+    ports:
+      - "8080:8080"
+    environment:
+      - DB_HOST=db
+      - DB_PORT=5432
+    depends_on:
+      - db
+
+  db:
+    image: postgres:15-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      - POSTGRES_USER=banyan
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=app

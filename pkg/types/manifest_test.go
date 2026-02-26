@@ -66,3 +66,62 @@ func TestManifestBuildUnmarshalYAML(t *testing.T) {
 		}
 	})
 }
+
+func TestManifestPlacementParsing(t *testing.T) {
+	t.Run("parses placement node", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  proxy:
+    image: caddy:latest
+    deploy:
+      placement:
+        node: gateway-*
+      replicas: 2
+  api:
+    image: myapi
+    deploy:
+      replicas: 3
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+
+		proxy := manifest.Services["proxy"]
+		if proxy.Deploy == nil || proxy.Deploy.Placement == nil {
+			t.Fatal("expected proxy to have deploy.placement")
+		}
+		if proxy.Deploy.Placement.Node != "gateway-*" {
+			t.Errorf("expected placement node 'gateway-*', got %q", proxy.Deploy.Placement.Node)
+		}
+		if proxy.Deploy.Replicas != 2 {
+			t.Errorf("expected 2 replicas, got %d", proxy.Deploy.Replicas)
+		}
+
+		api := manifest.Services["api"]
+		if api.Deploy != nil && api.Deploy.Placement != nil {
+			t.Error("expected api to have no placement")
+		}
+	})
+
+	t.Run("no placement is nil", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    deploy:
+      replicas: 1
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+
+		web := manifest.Services["web"]
+		if web.Deploy.Placement != nil {
+			t.Error("expected nil placement")
+		}
+	})
+}

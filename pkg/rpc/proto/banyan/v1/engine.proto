@@ -151,6 +151,11 @@ message ManifestBuild {
 
 message ManifestDeploy {
   int32 replicas = 1;
+  ManifestPlacement placement = 2;
+}
+
+message ManifestPlacement {
+  string node = 1;
 }
 
 message DownRPCRequest {

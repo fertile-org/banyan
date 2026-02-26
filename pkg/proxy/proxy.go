@@ -12,6 +12,13 @@ import (
 // sysctlWriter allows tests to override sysctl writes.
 var sysctlWriter = writeSysctl
 
+// SetSysctlWriter overrides the sysctl writer for testing from external packages.
+func SetSysctlWriter(fn func(string, string) error) func() {
+	orig := sysctlWriter
+	sysctlWriter = fn
+	return func() { sysctlWriter = orig }
+}
+
 func writeSysctl(path, value string) error {
 	return os.WriteFile(path, []byte(value), 0o644)
 }

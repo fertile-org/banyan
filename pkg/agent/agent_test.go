@@ -17,9 +17,11 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-// newTestProxy creates a proxy with noop iptables for use in agent tests.
+// newTestProxy creates a proxy with noop iptables and noop sysctl for use in agent tests.
 func newTestProxy(t *testing.T) *proxy.Proxy {
 	t.Helper()
+	restore := proxy.SetSysctlWriter(func(string, string) error { return nil })
+	t.Cleanup(restore)
 	p, err := proxy.NewWithIPTables(proxy.NewNoopIPTables())
 	if err != nil {
 		t.Fatalf("failed to create test proxy: %v", err)

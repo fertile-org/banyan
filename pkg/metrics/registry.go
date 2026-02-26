@@ -3,6 +3,7 @@ package metrics
 import (
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -50,7 +51,8 @@ type EngineMetricsRegistry struct {
 	eventsTotal *prometheus.CounterVec
 
 	// Internal storage for dashboard data access (parallel to prometheus gauges)
-	agentMetrics sync.Map // map[string]*SystemMetrics
+	engineMetrics atomic.Pointer[SystemMetrics]
+	agentMetrics  sync.Map // map[string]*SystemMetrics
 }
 
 // NewEngineMetricsRegistry creates a new registry with all Banyan metrics defined.
@@ -202,6 +204,18 @@ func (r *EngineMetricsRegistry) UpdateEngine(m SystemMetrics, uptime time.Durati
 	r.engineDiskUsed.Set(float64(m.DiskUsedBytes))
 	r.engineDiskTotal.Set(float64(m.DiskTotalBytes))
 	r.engineCPUCores.Set(float64(m.CPUCores))
+
+	stored := m
+	r.engineMetrics.Store(&stored)
+}
+
+// GetEngineMetrics returns the latest engine system metrics.
+func (r *EngineMetricsRegistry) GetEngineMetrics() (SystemMetrics, bool) {
+	val := r.engineMetrics.Load()
+	if val == nil {
+		return SystemMetrics{}, false
+	}
+	return *val, true
 }
 
 // UpdateAgent updates per-agent system metrics in both Prometheus gauges

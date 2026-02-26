@@ -358,6 +358,9 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		return nil, status.Errorf(codes.Internal, "failed to list tasks: %v", err)
 	}
 
+	// Track which deployments have changed container status
+	affectedDeployments := make(map[string]bool)
+
 	for _, key := range keys {
 		var task types.TaskRecord
 		if err := s.store.Get(ctx, key, &task); err != nil {
@@ -375,10 +378,57 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 			if err := s.store.Save(ctx, key, &task); err != nil {
 				log.Printf("WARNING: failed to save container health for %s: %v", task.ContainerName, err)
 			}
+			if task.DeploymentID != "" {
+				affectedDeployments[task.DeploymentID] = true
+			}
 		}
 	}
 
+	// Reconcile deployment status: if all containers are dead, mark deployment as stopped
+	for deployID := range affectedDeployments {
+		s.reconcileDeploymentStatus(ctx, deployID)
+	}
+
 	return &banyanpb.ReportContainerHealthResponse{}, nil
+}
+
+// reconcileDeploymentStatus checks if all containers for a deployment are dead
+// and updates the deployment status to "stopped" if so. This handles the case
+// where containers are killed outside Banyan (e.g., nerdctl rm).
+func (s *engineGRPCServer) reconcileDeploymentStatus(ctx context.Context, deploymentID string) {
+	key := types.KeyDeployments + deploymentID
+	var record types.DeploymentRecord
+	if err := s.store.Get(ctx, key, &record); err != nil {
+		return
+	}
+
+	// Only reconcile deployments currently marked as running
+	if record.Status != types.StatusRunning {
+		return
+	}
+
+	tasks := types.CollectDeploymentTasks(ctx, s.store, deploymentID)
+	hasLiveContainer := false
+	for i := range tasks {
+		if tasks[i].Type != types.TaskTypeCreateAndStart {
+			continue
+		}
+		cs := tasks[i].ContainerStatus
+		if cs == types.StatusRunning || cs == "created" || cs == "paused" {
+			hasLiveContainer = true
+			break
+		}
+	}
+
+	if !hasLiveContainer {
+		record.Status = types.StatusStopped
+		record.UpdatedAt = time.Now()
+		if err := s.store.Save(ctx, key, &record); err != nil {
+			log.Printf("WARNING: failed to update deployment %s status to stopped: %v", deploymentID, err)
+		} else {
+			s.emitEvent("deployment.stopped", fmt.Sprintf("Deployment %s stopped (all containers dead)", record.Name), "warn")
+		}
+	}
 }
 
 // --- CLI RPC handlers ---
@@ -1125,11 +1175,69 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 
 	// Engine status
 	resp.Engine = &banyanpb.EngineStatus{
-		Status:       "running",
+		Status:        "running",
 		StartedAtUnix: s.startedAt.Unix(),
 	}
+	if s.metricsRegistry != nil {
+		if m, ok := s.metricsRegistry.GetEngineMetrics(); ok {
+			resp.Engine.SystemMetrics = &banyanpb.SystemMetrics{
+				CpuUsageRatio:    m.CPUUsageRatio,
+				MemoryUsedBytes:  m.MemoryUsedBytes,
+				MemoryTotalBytes: m.MemoryTotalBytes,
+				DiskUsedBytes:    m.DiskUsedBytes,
+				DiskTotalBytes:   m.DiskTotalBytes,
+				CpuCores:         m.CPUCores,
+			}
+		}
+	}
 
-	// Collect agents with system metrics
+	// --- Load all deployments and identify the latest per name ---
+	deployKeys, _ := s.store.List(ctx, types.KeyDeployments)
+	type deployInfo struct {
+		record types.DeploymentRecord
+		key    string
+	}
+	var allDeploys []deployInfo
+	latestByName := make(map[string]int) // name → index of latest in allDeploys
+
+	for _, key := range deployKeys {
+		var record types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		idx := len(allDeploys)
+		allDeploys = append(allDeploys, deployInfo{record: record, key: key})
+
+		if prevIdx, exists := latestByName[record.Name]; exists {
+			if record.CreatedAt.After(allDeploys[prevIdx].record.CreatedAt) {
+				latestByName[record.Name] = idx
+			}
+		} else {
+			latestByName[record.Name] = idx
+		}
+	}
+
+	// Build set of latest deployment IDs — only these count for cluster summary
+	latestDeployIDs := make(map[string]bool, len(latestByName))
+	for _, idx := range latestByName {
+		latestDeployIDs[allDeploys[idx].record.ID] = true
+	}
+
+	// Auto-reconcile: mark superseded "running" deployments as stopped in the store
+	for i := range allDeploys {
+		d := &allDeploys[i]
+		if d.record.Status == types.StatusRunning && !latestDeployIDs[d.record.ID] {
+			d.record.Status = types.StatusStopped
+			d.record.UpdatedAt = time.Now()
+			if err := s.store.Save(ctx, d.key, &d.record); err != nil {
+				log.Printf("WARNING: failed to mark superseded deployment %s as stopped: %v", d.record.ID, err)
+			} else {
+				s.emitEvent("deployment.stopped", fmt.Sprintf("Deployment %s superseded by newer version", d.record.Name), "info")
+			}
+		}
+	}
+
+	// --- Collect agents with system metrics ---
 	nodeKeys, _ := s.store.List(ctx, types.KeyNodes)
 	var totalAgents, connectedAgents, totalContainers, healthyContainers int32
 	tasksByStatus := make(map[string]int32)
@@ -1180,39 +1288,39 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 			}
 		}
 
-		// Container count + task status aggregation
-		containerCount := s.countAgentContainers(ctx, node.Name)
-		detail.ContainerCount = containerCount
-
-		// Aggregate tasks for this agent
+		// Agent container count + cluster summary: only count tasks from latest deployments
+		var agentContainerCount int32
 		taskKeys, _ := s.store.List(ctx, types.KeyTasks+node.Name+"/")
 		for _, taskKey := range taskKeys {
 			var task types.TaskRecord
 			if err := s.store.Get(ctx, taskKey, &task); err != nil {
 				continue
 			}
-			if task.Type == types.TaskTypeCreateAndStart {
-				tasksByStatus[task.Status]++
-				if task.Status == types.StatusCompleted {
-					totalContainers++
-					if task.ContainerStatus == types.StatusRunning {
-						healthyContainers++
-					}
+			if task.Type != types.TaskTypeCreateAndStart {
+				continue
+			}
+
+			// Task-level status counts (all deployments)
+			tasksByStatus[task.Status]++
+
+			// Container counts: only from latest deployment per name
+			if task.Status == types.StatusCompleted && latestDeployIDs[task.DeploymentID] {
+				agentContainerCount++
+				totalContainers++
+				if task.ContainerStatus == types.StatusRunning {
+					healthyContainers++
 				}
 			}
 		}
+		detail.ContainerCount = agentContainerCount
 
 		resp.Agents = append(resp.Agents, detail)
 	}
 
-	// Deployments (reuse existing GetStatus logic)
-	deployKeys, _ := s.store.List(ctx, types.KeyDeployments)
+	// --- Build deployment response ---
 	var totalDeployments, runningDeployments int32
-	for _, key := range deployKeys {
-		var record types.DeploymentRecord
-		if err := s.store.Get(ctx, key, &record); err != nil {
-			continue
-		}
+	for i := range allDeploys {
+		record := allDeploys[i].record
 		totalDeployments++
 		if record.Status == types.StatusRunning {
 			runningDeployments++
@@ -1220,15 +1328,15 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 
 		allTasks := types.CollectDeploymentTasks(ctx, s.store, record.ID)
 		var createTasks []types.TaskRecord
-		for i := range allTasks {
-			if allTasks[i].Type == types.TaskTypeCreateAndStart {
-				createTasks = append(createTasks, allTasks[i])
+		for j := range allTasks {
+			if allTasks[j].Type == types.TaskTypeCreateAndStart {
+				createTasks = append(createTasks, allTasks[j])
 			}
 		}
 
 		healthy := 0
-		for i := range createTasks {
-			if createTasks[i].ContainerStatus == types.StatusRunning {
+		for j := range createTasks {
+			if createTasks[j].ContainerStatus == types.StatusRunning {
 				healthy++
 			}
 		}
@@ -1246,25 +1354,25 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 		}
 
 		var taskInfos []*banyanpb.TaskInfo
-		for i := range allTasks {
+		for j := range allTasks {
 			taskInfos = append(taskInfos, &banyanpb.TaskInfo{
-				Id:                     allTasks[i].ID,
-				DeploymentId:           allTasks[i].DeploymentID,
-				ServiceName:            allTasks[i].ServiceName,
-				ReplicaIndex:           int32(allTasks[i].ReplicaIndex), //nolint:gosec // replica index is always small
-				AgentId:                allTasks[i].AgentID,
-				Type:                   allTasks[i].Type,
-				Status:                 allTasks[i].Status,
-				Image:                  allTasks[i].Image,
-				ContainerName:          allTasks[i].ContainerName,
-				Ports:                  allTasks[i].Ports,
-				Environment:            allTasks[i].Environment,
-				Command:                allTasks[i].Command,
-				ContainerStatus:        allTasks[i].ContainerStatus,
-				ContainerCheckedAtUnix: allTasks[i].ContainerCheckedAt.Unix(),
-				CreatedAtUnix:          allTasks[i].CreatedAt.Unix(),
-				UpdatedAtUnix:          allTasks[i].UpdatedAt.Unix(),
-				Error:                  allTasks[i].Error,
+				Id:                     allTasks[j].ID,
+				DeploymentId:           allTasks[j].DeploymentID,
+				ServiceName:            allTasks[j].ServiceName,
+				ReplicaIndex:           int32(allTasks[j].ReplicaIndex), //nolint:gosec // replica index is always small
+				AgentId:                allTasks[j].AgentID,
+				Type:                   allTasks[j].Type,
+				Status:                 allTasks[j].Status,
+				Image:                  allTasks[j].Image,
+				ContainerName:          allTasks[j].ContainerName,
+				Ports:                  allTasks[j].Ports,
+				Environment:            allTasks[j].Environment,
+				Command:                allTasks[j].Command,
+				ContainerStatus:        allTasks[j].ContainerStatus,
+				ContainerCheckedAtUnix: allTasks[j].ContainerCheckedAt.Unix(),
+				CreatedAtUnix:          allTasks[j].CreatedAt.Unix(),
+				UpdatedAtUnix:          allTasks[j].UpdatedAt.Unix(),
+				Error:                  allTasks[j].Error,
 			})
 		}
 
@@ -1285,13 +1393,13 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 
 	// Cluster summary
 	resp.Summary = &banyanpb.ClusterSummary{
-		TotalAgents:       totalAgents,
-		ConnectedAgents:   connectedAgents,
-		TotalDeployments:  totalDeployments,
+		TotalAgents:        totalAgents,
+		ConnectedAgents:    connectedAgents,
+		TotalDeployments:   totalDeployments,
 		RunningDeployments: runningDeployments,
-		TotalContainers:   totalContainers,
-		HealthyContainers: healthyContainers,
-		TasksByStatus:     tasksByStatus,
+		TotalContainers:    totalContainers,
+		HealthyContainers:  healthyContainers,
+		TasksByStatus:      tasksByStatus,
 	}
 
 	// Recent events

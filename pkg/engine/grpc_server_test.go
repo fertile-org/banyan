@@ -3775,3 +3775,133 @@ func TestHeartbeat_UpdatesAgentMetrics(t *testing.T) {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
 }
+
+func TestReconcileDeploymentStatus(t *testing.T) {
+	t.Run("marks deployment stopped when all containers dead", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+		events := NewEventBuffer(10)
+
+		srv := &engineGRPCServer{
+			store:  store,
+			events: events,
+		}
+
+		// Register the agent node so CollectDeploymentTasks can find tasks
+		_ = store.Save(ctx, types.KeyNodes+"agent1", &types.NodeRecord{Name: "agent1"})
+
+		// Create a running deployment
+		depID := "dep-reconcile-1"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID:     depID,
+			Name:   "test-app",
+			Status: types.StatusRunning,
+		})
+
+		// Create tasks with dead containers
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "not_found",
+			AgentID:         "agent1",
+		})
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-2", &types.TaskRecord{
+			ID:              "task-2",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "exited",
+			AgentID:         "agent1",
+		})
+
+		srv.reconcileDeploymentStatus(ctx, depID)
+
+		var record types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
+		if record.Status != types.StatusStopped {
+			t.Errorf("deployment status = %q, want stopped", record.Status)
+		}
+
+		// Check event was emitted
+		recent := events.Recent(10)
+		if len(recent) == 0 {
+			t.Error("expected event to be emitted")
+		}
+	})
+
+	t.Run("keeps deployment running when some containers alive", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+
+		srv := &engineGRPCServer{store: store}
+
+		// Register the agent node so CollectDeploymentTasks can find tasks
+		_ = store.Save(ctx, types.KeyNodes+"agent1", &types.NodeRecord{Name: "agent1"})
+
+		depID := "dep-reconcile-2"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID:     depID,
+			Name:   "test-app",
+			Status: types.StatusRunning,
+		})
+
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			AgentID:         "agent1",
+		})
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-2", &types.TaskRecord{
+			ID:              "task-2",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "not_found",
+			AgentID:         "agent1",
+		})
+
+		srv.reconcileDeploymentStatus(ctx, depID)
+
+		var record types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
+		if record.Status != types.StatusRunning {
+			t.Errorf("deployment status = %q, want running (some containers still alive)", record.Status)
+		}
+	})
+
+	t.Run("skips non-running deployments", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+
+		srv := &engineGRPCServer{store: store}
+
+		depID := "dep-reconcile-3"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID:     depID,
+			Name:   "test-app",
+			Status: types.StatusStopped,
+		})
+
+		// Even with dead containers, shouldn't change already-stopped deployment
+		_ = store.Save(ctx, types.KeyTasks+"agent1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			DeploymentID:    depID,
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: "not_found",
+			AgentID:         "agent1",
+		})
+
+		srv.reconcileDeploymentStatus(ctx, depID)
+
+		var record types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
+		if record.Status != types.StatusStopped {
+			t.Errorf("deployment status = %q, want stopped (unchanged)", record.Status)
+		}
+	})
+}

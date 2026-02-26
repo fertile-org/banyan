@@ -53,6 +53,41 @@ func TestUpdateEngine(t *testing.T) {
 	}
 }
 
+func TestGetEngineMetrics(t *testing.T) {
+	r := NewEngineMetricsRegistry()
+
+	// Before any update, should return false
+	_, ok := r.GetEngineMetrics()
+	if ok {
+		t.Error("GetEngineMetrics should return false before any update")
+	}
+
+	// After update, should return the metrics
+	m := SystemMetrics{
+		CPUUsageRatio:    0.55,
+		MemoryUsedBytes:  1024,
+		MemoryTotalBytes: 2048,
+		DiskUsedBytes:    4096,
+		DiskTotalBytes:   8192,
+		CPUCores:         8,
+	}
+	r.UpdateEngine(m, time.Hour)
+
+	got, ok := r.GetEngineMetrics()
+	if !ok {
+		t.Fatal("GetEngineMetrics should return true after update")
+	}
+	if got.CPUUsageRatio != 0.55 {
+		t.Errorf("CPU = %f, want 0.55", got.CPUUsageRatio)
+	}
+	if got.MemoryUsedBytes != 1024 {
+		t.Errorf("MemUsed = %d, want 1024", got.MemoryUsedBytes)
+	}
+	if got.CPUCores != 8 {
+		t.Errorf("Cores = %d, want 8", got.CPUCores)
+	}
+}
+
 func TestUpdateAgent(t *testing.T) {
 	r := NewEngineMetricsRegistry()
 

@@ -111,6 +111,16 @@ func (c *EngineClient) StreamLogs(ctx context.Context, container string, follow 
 	return &grpcLogStreamReader{stream: stream}, nil
 }
 
+// DashboardData retrieves the full cluster snapshot for the dashboard.
+func (c *EngineClient) DashboardData(ctx context.Context) (*banyanpb.GetDashboardDataResponse, error) {
+	return c.client.GetDashboardData(ctx, &banyanpb.GetDashboardDataRequest{})
+}
+
+// GRPCClient returns the underlying gRPC client for direct use by the dashboard.
+func (c *EngineClient) GRPCClient() banyanpb.EngineServiceClient {
+	return c.client
+}
+
 // Health checks if the engine is healthy.
 func (c *EngineClient) Health(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)

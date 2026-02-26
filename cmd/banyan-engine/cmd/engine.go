@@ -127,6 +127,48 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	existingCfg, _ := types.LoadConfig(configPath)
 
+	// --- Check for existing config ---
+	if existingCfg.Engine.WGPrivateKeyFile != "" && existingCfg.Engine.WGPublicKey != "" && existingCfg.Engine.StoreBackend != "" {
+		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
+		if existingCfg.Engine.ManagedEtcd {
+			fmt.Printf("         Store: managed etcd\n")
+		} else {
+			fmt.Printf("         Store: %s at %s\n", existingCfg.Engine.StoreBackend, existingCfg.Engine.StoreAddress)
+		}
+
+		var overwrite bool
+		overwriteForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewConfirm().
+					Title("Overwrite existing configuration?").
+					Value(&overwrite),
+			),
+		)
+		if err := overwriteForm.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("confirm prompt: %w", err)
+		}
+		if !overwrite {
+			fmt.Println("Aborted.")
+			return nil
+		}
+
+		// Clear config sections so all prompts run fresh
+		existingCfg.Engine.WGPrivateKeyFile = ""
+		existingCfg.Engine.WGPublicKey = ""
+		existingCfg.Engine.StoreBackend = ""
+		existingCfg.Engine.StoreAddress = ""
+		existingCfg.Engine.ManagedEtcd = false
+		existingCfg.Engine.EtcdUsername = ""
+		existingCfg.Engine.EtcdPassword = ""
+		existingCfg.Engine.EtcdCertFile = ""
+		existingCfg.Engine.EtcdKeyFile = ""
+		existingCfg.Engine.EtcdCAFile = ""
+	}
+
 	// --- Create whitelisted keys directory ---
 	whitelistedKeysDir := existingCfg.Engine.WhitelistedKeysDir
 	if whitelistedKeysDir == "" {

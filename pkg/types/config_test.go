@@ -1,32 +1,54 @@
 package types
 
 import (
+	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 )
 
-func TestHashPassword(t *testing.T) {
+func TestTunnelIPFromPublicKey(t *testing.T) {
+	t.Run("returns IPv4 in 10.200.x.y range", func(t *testing.T) {
+		ip := TunnelIPFromPublicKey("dGVzdC1rZXktMQ==")
+		ip4 := ip.To4()
+		if ip4 == nil {
+			t.Fatal("expected IPv4 address")
+		}
+		if ip4[0] != 10 || ip4[1] != 200 {
+			t.Errorf("expected 10.200.x.y, got %s", ip)
+		}
+	})
+
 	t.Run("deterministic output", func(t *testing.T) {
-		hash1 := HashPassword("my-secret")
-		hash2 := HashPassword("my-secret")
-		if hash1 != hash2 {
-			t.Errorf("expected identical hashes, got %s and %s", hash1, hash2)
+		ip1 := TunnelIPFromPublicKey("dGVzdC1rZXktMQ==")
+		ip2 := TunnelIPFromPublicKey("dGVzdC1rZXktMQ==")
+		if !ip1.Equal(ip2) {
+			t.Errorf("expected identical IPs, got %s and %s", ip1, ip2)
 		}
 	})
 
-	t.Run("different inputs produce different hashes", func(t *testing.T) {
-		hash1 := HashPassword("password-a")
-		hash2 := HashPassword("password-b")
-		if hash1 == hash2 {
-			t.Errorf("expected different hashes for different inputs")
+	t.Run("different keys produce different IPs", func(t *testing.T) {
+		ip1 := TunnelIPFromPublicKey("a2V5LWFscGhh")
+		ip2 := TunnelIPFromPublicKey("a2V5LWJldGE=")
+		if ip1.Equal(ip2) {
+			t.Errorf("expected different IPs for different keys, both got %s", ip1)
 		}
 	})
 
-	t.Run("returns 64-char hex string", func(t *testing.T) {
-		hash := HashPassword("test")
-		if len(hash) != 64 {
-			t.Errorf("expected 64-char hex string, got %d chars: %s", len(hash), hash)
+	t.Run("avoids engine IP 10.200.0.1", func(t *testing.T) {
+		engineIP := net.ParseIP(ControlTunnelEngineIP).To4()
+		// Test with many keys to increase collision chance
+		for i := range 1000 {
+			key := fmt.Sprintf("test-key-%d", i)
+			ip := TunnelIPFromPublicKey(key).To4()
+			if ip.Equal(engineIP) {
+				t.Errorf("key %q produced engine IP %s", key, ip)
+			}
+			// Also check network address 10.200.0.0
+			if ip[0] == 10 && ip[1] == 200 && ip[2] == 0 && ip[3] == 0 {
+				t.Errorf("key %q produced network address %s", key, ip)
+			}
 		}
 	})
 }
@@ -38,16 +60,15 @@ func TestLoadSaveConfig(t *testing.T) {
 
 		cfg := BanyanConfig{
 			Engine: EngineConfig{
-				PasswordHash: HashPassword("my-cluster-secret"),
+				GRPCPort: "50051",
 			},
 			Agent: AgentConfig{
 				EngineHost: "192.168.1.10",
 				EnginePort: "2379",
-				AuthToken:  "agent-token-abc",
 				NodeName:   "worker-1",
 			},
 			CLI: CLIConfig{
-				AuthToken: "cli-token-xyz",
+				WGPublicKey: "cli-pubkey",
 			},
 		}
 
@@ -68,8 +89,8 @@ func TestLoadSaveConfig(t *testing.T) {
 			t.Fatalf("LoadConfig failed: %v", err)
 		}
 
-		if loaded.Engine.PasswordHash != cfg.Engine.PasswordHash {
-			t.Errorf("expected password_hash=%s, got %s", cfg.Engine.PasswordHash, loaded.Engine.PasswordHash)
+		if loaded.Engine.GRPCPort != "50051" {
+			t.Errorf("expected grpc_port=50051, got %s", loaded.Engine.GRPCPort)
 		}
 		if loaded.Agent.EngineHost != "192.168.1.10" {
 			t.Errorf("expected engine_host=192.168.1.10, got %s", loaded.Agent.EngineHost)
@@ -77,14 +98,11 @@ func TestLoadSaveConfig(t *testing.T) {
 		if loaded.Agent.EnginePort != "2379" {
 			t.Errorf("expected engine_port=2379, got %s", loaded.Agent.EnginePort)
 		}
-		if loaded.Agent.AuthToken != "agent-token-abc" {
-			t.Errorf("expected agent auth_token=agent-token-abc, got %s", loaded.Agent.AuthToken)
-		}
 		if loaded.Agent.NodeName != "worker-1" {
 			t.Errorf("expected agent node_name=worker-1, got %s", loaded.Agent.NodeName)
 		}
-		if loaded.CLI.AuthToken != "cli-token-xyz" {
-			t.Errorf("expected cli auth_token=cli-token-xyz, got %s", loaded.CLI.AuthToken)
+		if loaded.CLI.WGPublicKey != "cli-pubkey" {
+			t.Errorf("expected cli wg_public_key=cli-pubkey, got %s", loaded.CLI.WGPublicKey)
 		}
 	})
 
@@ -93,14 +111,14 @@ func TestLoadSaveConfig(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected no error for missing file, got %v", err)
 		}
-		if cfg.Engine.PasswordHash != "" {
-			t.Errorf("expected empty password_hash, got %s", cfg.Engine.PasswordHash)
+		if cfg.Engine.GRPCPort != "" {
+			t.Errorf("expected empty grpc_port, got %s", cfg.Engine.GRPCPort)
 		}
-		if cfg.Agent.AuthToken != "" {
-			t.Errorf("expected empty agent auth_token, got %s", cfg.Agent.AuthToken)
+		if cfg.Agent.WGPublicKey != "" {
+			t.Errorf("expected empty agent wg_public_key, got %s", cfg.Agent.WGPublicKey)
 		}
-		if cfg.CLI.AuthToken != "" {
-			t.Errorf("expected empty cli auth_token, got %s", cfg.CLI.AuthToken)
+		if cfg.CLI.WGPublicKey != "" {
+			t.Errorf("expected empty cli wg_public_key, got %s", cfg.CLI.WGPublicKey)
 		}
 	})
 
@@ -110,9 +128,9 @@ func TestLoadSaveConfig(t *testing.T) {
 
 		cfg := BanyanConfig{
 			CLI: CLIConfig{
-				EngineHost: "10.0.0.1",
-				EnginePort: "8443",
-				AuthToken:  "cli-token-123",
+				EngineHost:  "10.0.0.1",
+				EnginePort:  "8443",
+				WGPublicKey: "cli-key-123",
 			},
 			Engine: EngineConfig{
 				APIPort: "8443",
@@ -134,8 +152,8 @@ func TestLoadSaveConfig(t *testing.T) {
 		if loaded.CLI.EnginePort != "8443" {
 			t.Errorf("expected cli.engine_port=8443, got %s", loaded.CLI.EnginePort)
 		}
-		if loaded.CLI.AuthToken != "cli-token-123" {
-			t.Errorf("expected cli.auth_token=cli-token-123, got %s", loaded.CLI.AuthToken)
+		if loaded.CLI.WGPublicKey != "cli-key-123" {
+			t.Errorf("expected cli.wg_public_key=cli-key-123, got %s", loaded.CLI.WGPublicKey)
 		}
 		if loaded.Engine.APIPort != "8443" {
 			t.Errorf("expected engine.api_port=8443, got %s", loaded.Engine.APIPort)
@@ -374,7 +392,7 @@ func TestLoadConfig_InvalidYAML(t *testing.T) {
 func TestLoadConfig_UnreadableFile(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "unreadable.yaml")
-	os.WriteFile(cfgPath, []byte("engine:\n  password_hash: secret\n"), 0o644)
+	os.WriteFile(cfgPath, []byte("engine:\n  grpc_port: \"50051\"\n"), 0o644)
 
 	// Make file unreadable (skip if root)
 	if os.Geteuid() == 0 {
@@ -393,7 +411,7 @@ func TestSaveConfig_CreatesDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "subdir", "nested", "banyan.yaml")
 
-	cfg := BanyanConfig{Engine: EngineConfig{PasswordHash: "testhash"}}
+	cfg := BanyanConfig{Engine: EngineConfig{GRPCPort: "50051"}}
 	if err := SaveConfig(cfgPath, &cfg); err != nil {
 		t.Fatalf("SaveConfig should create nested dirs: %v", err)
 	}
@@ -402,8 +420,8 @@ func TestSaveConfig_CreatesDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	if loaded.Engine.PasswordHash != "testhash" {
-		t.Errorf("expected password_hash 'testhash', got %q", loaded.Engine.PasswordHash)
+	if loaded.Engine.GRPCPort != "50051" {
+		t.Errorf("expected grpc_port '50051', got %q", loaded.Engine.GRPCPort)
 	}
 }
 
@@ -444,7 +462,7 @@ func TestSaveConfig_WriteError(t *testing.T) {
 	t.Cleanup(func() { os.Chmod(readOnlyDir, 0o755) })
 
 	cfgPath := filepath.Join(readOnlyDir, "banyan.yaml")
-	cfg := BanyanConfig{Engine: EngineConfig{PasswordHash: "testhash"}}
+	cfg := BanyanConfig{Engine: EngineConfig{GRPCPort: "50051"}}
 	err := SaveConfig(cfgPath, &cfg)
 	if err == nil {
 		t.Fatal("expected error writing to read-only directory")
@@ -462,105 +480,9 @@ func TestSaveConfig_MkdirAllError(t *testing.T) {
 	os.WriteFile(blockingFile, []byte("x"), 0o644)
 
 	cfgPath := filepath.Join(blockingFile, "subdir", "banyan.yaml")
-	cfg := BanyanConfig{Engine: EngineConfig{PasswordHash: "testhash"}}
+	cfg := BanyanConfig{Engine: EngineConfig{GRPCPort: "50051"}}
 	err := SaveConfig(cfgPath, &cfg)
 	if err == nil {
 		t.Fatal("expected error when MkdirAll fails")
 	}
-}
-
-func TestGetAgentAuthToken(t *testing.T) {
-	t.Run("returns token from config", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{Agent: AgentConfig{AuthToken: "agent-secret-token"}}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		got := GetAgentAuthToken(cfgPath)
-		if got != "agent-secret-token" {
-			t.Errorf("expected 'agent-secret-token', got %q", got)
-		}
-	})
-
-	t.Run("missing config returns empty", func(t *testing.T) {
-		got := GetAgentAuthToken("/tmp/nonexistent-banyan-test-config.yaml")
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-
-	t.Run("invalid YAML returns empty", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "bad.yaml")
-		os.WriteFile(cfgPath, []byte("agent: [unterminated"), 0o644)
-
-		got := GetAgentAuthToken(cfgPath)
-		if got != "" {
-			t.Errorf("expected empty string for invalid config, got %q", got)
-		}
-	})
-
-	t.Run("empty agent config returns empty", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		got := GetAgentAuthToken(cfgPath)
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-}
-
-func TestGetCLIAuthToken(t *testing.T) {
-	t.Run("returns token from config", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{CLI: CLIConfig{AuthToken: "cli-secret-token"}}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		got := GetCLIAuthToken(cfgPath)
-		if got != "cli-secret-token" {
-			t.Errorf("expected 'cli-secret-token', got %q", got)
-		}
-	})
-
-	t.Run("missing config returns empty", func(t *testing.T) {
-		got := GetCLIAuthToken("/tmp/nonexistent-banyan-test-config.yaml")
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
-
-	t.Run("invalid YAML returns empty", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "bad.yaml")
-		os.WriteFile(cfgPath, []byte("cli: [unterminated"), 0o644)
-
-		got := GetCLIAuthToken(cfgPath)
-		if got != "" {
-			t.Errorf("expected empty string for invalid config, got %q", got)
-		}
-	})
-
-	t.Run("empty cli config returns empty", func(t *testing.T) {
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := BanyanConfig{}
-		if err := SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-
-		got := GetCLIAuthToken(cfgPath)
-		if got != "" {
-			t.Errorf("expected empty string, got %q", got)
-		}
-	})
 }

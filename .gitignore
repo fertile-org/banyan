@@ -30,6 +30,11 @@ run_*_integration
 /banyan-agent
 /banyan-cli
 
+# CLI binaries built in cmd subdirectories
+cmd/banyan-engine/banyan-engine
+cmd/banyan-agent/banyan-agent
+cmd/banyan-cli/banyan-cli
+
 # IDE files
 .vscode/
 .idea/

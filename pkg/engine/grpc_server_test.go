@@ -7,30 +7,16 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
-	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
-
-// testTokenValidator validates tokens against a set of known valid hashes.
-type testTokenValidator struct {
-	validTokens map[string]bool
-}
-
-func (v *testTokenValidator) ValidateToken(ctx context.Context, tokenHash string) error {
-	if !v.validTokens[tokenHash] {
-		return status.Error(codes.Unauthenticated, "invalid auth token")
-	}
-	return nil
-}
 
 // mockAgentService implements AgentServiceServer for testing the GetLogs proxy path.
 type mockAgentService struct {
@@ -117,7 +103,7 @@ func startMockAgentServer(t *testing.T, logData [][]byte) (string, func()) {
 
 const bufSize = 1024 * 1024
 
-func setupTestServer(t *testing.T, _ string) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
+func setupTestServer(t *testing.T) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
 	t.Helper()
 
 	store := storage.NewMemoryStore()
@@ -157,7 +143,7 @@ func setupTestServer(t *testing.T, _ string) (banyanpb.EngineServiceClient, *eng
 }
 
 func TestRegister(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -207,7 +193,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestHeartbeat(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -241,7 +227,7 @@ func TestHeartbeat(t *testing.T) {
 }
 
 func TestPollTasks(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -310,7 +296,7 @@ func TestPollTasks(t *testing.T) {
 }
 
 func TestReportTaskResult(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -362,7 +348,7 @@ func TestReportTaskResult(t *testing.T) {
 }
 
 func TestReportContainerHealth(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -400,7 +386,7 @@ func TestReportContainerHealth(t *testing.T) {
 }
 
 func TestDeploy(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -499,7 +485,7 @@ func TestGetSessionToken(t *testing.T) {
 }
 
 func TestHeartbeat_NewNode(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -523,7 +509,7 @@ func TestHeartbeat_NewNode(t *testing.T) {
 }
 
 func TestReportContainerHealth_MissingAgent(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	_, err := client.ReportContainerHealth(context.Background(), &banyanpb.ReportContainerHealthRequest{})
@@ -536,7 +522,7 @@ func TestReportContainerHealth_MissingAgent(t *testing.T) {
 }
 
 func TestReportContainerHealth_NonMatchingTask(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -564,7 +550,7 @@ func TestReportContainerHealth_NonMatchingTask(t *testing.T) {
 }
 
 func TestReportTaskResult_NotFound(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	_, err := client.ReportTaskResult(context.Background(), &banyanpb.ReportTaskResultRequest{
@@ -581,7 +567,7 @@ func TestReportTaskResult_NotFound(t *testing.T) {
 }
 
 func TestDown(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -638,7 +624,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("with service filter", func(t *testing.T) {
-		client2, srv2, cleanup2 := setupTestServer(t, "test-password")
+		client2, srv2, cleanup2 := setupTestServer(t)
 		defer cleanup2()
 
 		deployment2 := &types.DeploymentRecord{
@@ -678,7 +664,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("invalid service name", func(t *testing.T) {
-		client3, srv3, cleanup3 := setupTestServer(t, "test-password")
+		client3, srv3, cleanup3 := setupTestServer(t)
 		defer cleanup3()
 
 		srv3.store.Save(ctx, types.KeyDeployments+"deploy-inv", &types.DeploymentRecord{
@@ -697,7 +683,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("no completed tasks returns zero", func(t *testing.T) {
-		client4, srv4, cleanup4 := setupTestServer(t, "test-password")
+		client4, srv4, cleanup4 := setupTestServer(t)
 		defer cleanup4()
 
 		srv4.store.Save(ctx, types.KeyDeployments+"deploy-norun", &types.DeploymentRecord{
@@ -716,7 +702,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("clears stale deployment error", func(t *testing.T) {
-		client5, srv5, cleanup5 := setupTestServer(t, "test-password")
+		client5, srv5, cleanup5 := setupTestServer(t)
 		defer cleanup5()
 
 		// Deployment failed during deploy (1 task failed) but has completed tasks
@@ -754,7 +740,7 @@ func TestDown(t *testing.T) {
 }
 
 func TestGetStatus(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -805,7 +791,7 @@ func TestGetStatus(t *testing.T) {
 }
 
 func TestGetInfo(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -822,7 +808,7 @@ func TestGetInfo(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1014,7 +1000,7 @@ func TestFindContainerAgent(t *testing.T) {
 }
 
 func TestGetLogs(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1070,375 +1056,6 @@ func TestGetLogs(t *testing.T) {
 			t.Errorf("expected Unavailable, got %v", status.Code(recvErr))
 		}
 	})
-}
-
-func TestTokenAuth(t *testing.T) {
-	const testToken = "valid-test-token"
-	tokenHash := banyanrpc.HashPassword(testToken)
-	validator := &testTokenValidator{validTokens: map[string]bool{tokenHash: true}}
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
-	)
-	engineSrv := &engineGRPCServer{
-		store:       storage.NewMemoryStore(),
-		registryURL: "localhost:5000",
-	}
-	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
-	go srv.Serve(lis)
-	defer srv.Stop()
-
-	t.Run("valid token succeeds", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-				return lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: testToken}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
-		if err != nil {
-			t.Fatalf("expected success with valid token, got: %v", err)
-		}
-	})
-
-	t.Run("wrong token rejected", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-				return lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: "wrong-token"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
-		if err == nil {
-			t.Fatal("expected error with wrong token")
-		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-		}
-	})
-
-	t.Run("missing token rejected", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-				return lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
-		if err == nil {
-			t.Fatal("expected error with no token")
-		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-		}
-	})
-}
-
-func TestExchangeToken(t *testing.T) {
-	store := storage.NewMemoryStore()
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
-
-	engineSrv := &engineGRPCServer{
-		store:        store,
-		registryURL:  "localhost:5000",
-		passwordHash: string(passwordHash),
-	}
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), engineSrv)),
-	)
-	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
-	go srv.Serve(lis)
-	defer srv.Stop()
-
-	dialer := func(ctx context.Context, s string) (net.Conn, error) {
-		return lis.DialContext(ctx)
-	}
-
-	t.Run("valid password returns token", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-1", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("ExchangeToken failed: %v", err)
-		}
-		if resp.Token == "" {
-			t.Error("expected non-empty token")
-		}
-
-		// Verify the returned token works for other RPCs
-		tokenConn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp.Token}),
-		)
-		defer tokenConn.Close()
-
-		tokenClient := banyanpb.NewEngineServiceClient(tokenConn)
-		_, err = tokenClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-1"})
-		if err != nil {
-			t.Fatalf("Heartbeat with exchanged token failed: %v", err)
-		}
-	})
-
-	t.Run("wrong password rejected", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "wrong-password"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-2", Role: "agent",
-		})
-		if err == nil {
-			t.Fatal("expected error with wrong password")
-		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-		}
-	})
-
-	t.Run("re-issue replaces old token", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-
-		resp1, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-reissue", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("first ExchangeToken failed: %v", err)
-		}
-
-		resp2, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-reissue", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("second ExchangeToken failed: %v", err)
-		}
-
-		if resp1.Token == resp2.Token {
-			t.Error("re-issued token should be different from original")
-		}
-
-		// Old token should no longer work
-		oldConn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp1.Token}),
-		)
-		defer oldConn.Close()
-
-		oldClient := banyanpb.NewEngineServiceClient(oldConn)
-		_, err = oldClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-reissue"})
-		if err == nil {
-			t.Fatal("expected error with old token after re-issue")
-		}
-
-		// New token should work
-		newConn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp2.Token}),
-		)
-		defer newConn.Close()
-
-		newClient := banyanpb.NewEngineServiceClient(newConn)
-		_, err = newClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-reissue"})
-		if err != nil {
-			t.Fatalf("Heartbeat with new token failed: %v", err)
-		}
-	})
-}
-
-func TestExchangeToken_CLITokenHasExpiry(t *testing.T) {
-	store := storage.NewMemoryStore()
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
-
-	engineSrv := &engineGRPCServer{
-		store:        store,
-		registryURL:  "localhost:5000",
-		passwordHash: string(passwordHash),
-	}
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), engineSrv)),
-	)
-	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
-	go srv.Serve(lis)
-	defer srv.Stop()
-
-	dialer := func(ctx context.Context, s string) (net.Conn, error) {
-		return lis.DialContext(ctx)
-	}
-
-	conn, _ := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(dialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
-	)
-	defer conn.Close()
-
-	client := banyanpb.NewEngineServiceClient(conn)
-
-	t.Run("CLI token has expiry set", func(t *testing.T) {
-		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "cli-laptop", Role: "cli",
-		})
-		if err != nil {
-			t.Fatalf("ExchangeToken failed: %v", err)
-		}
-
-		// Verify the stored record has an ExpiresAt set
-		tokenHash := banyanrpc.HashPassword(resp.Token)
-		var record types.TokenRecord
-		if err := store.Get(context.Background(), types.KeyTokens+tokenHash, &record); err != nil {
-			t.Fatalf("failed to get token record: %v", err)
-		}
-		if record.Name != "cli-laptop" {
-			t.Errorf("expected name 'cli-laptop', got %q", record.Name)
-		}
-		if record.Role != "cli" {
-			t.Errorf("expected role 'cli', got %q", record.Role)
-		}
-		if record.ExpiresAt.IsZero() {
-			t.Error("expected non-zero ExpiresAt for CLI token")
-		}
-		// Expiry should be ~30 days from now (allow 1 minute tolerance)
-		expectedExpiry := time.Now().Add(types.DefaultCLITokenTTL)
-		if record.ExpiresAt.Before(expectedExpiry.Add(-time.Minute)) || record.ExpiresAt.After(expectedExpiry.Add(time.Minute)) {
-			t.Errorf("ExpiresAt %v not within 1 minute of expected %v", record.ExpiresAt, expectedExpiry)
-		}
-	})
-
-	t.Run("agent token has no expiry", func(t *testing.T) {
-		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "worker-1", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("ExchangeToken failed: %v", err)
-		}
-
-		tokenHash := banyanrpc.HashPassword(resp.Token)
-		var record types.TokenRecord
-		if err := store.Get(context.Background(), types.KeyTokens+tokenHash, &record); err != nil {
-			t.Fatalf("failed to get token record: %v", err)
-		}
-		if record.Name != "worker-1" {
-			t.Errorf("expected name 'worker-1', got %q", record.Name)
-		}
-		if record.Role != "agent" {
-			t.Errorf("expected role 'agent', got %q", record.Role)
-		}
-		if !record.ExpiresAt.IsZero() {
-			t.Errorf("expected zero ExpiresAt for agent token, got %v", record.ExpiresAt)
-		}
-	})
-}
-
-func TestValidateToken_Expired(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	// Store a token that expired 1 hour ago
-	expiredRecord := &types.TokenRecord{
-		Name:      "cli-expired",
-		Role:      "cli",
-		ExpiresAt: time.Now().Add(-time.Hour),
-	}
-	store.Save(ctx, types.KeyTokens+"expired-hash", expiredRecord)
-
-	err := srv.ValidateToken(ctx, "expired-hash")
-	if err == nil {
-		t.Fatal("expected error for expired token")
-	}
-	if status.Code(err) != codes.Unauthenticated {
-		t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-	}
-	if status.Convert(err).Message() != "token expired, run 'auth' to re-authenticate" {
-		t.Errorf("unexpected error message: %q", status.Convert(err).Message())
-	}
-}
-
-func TestValidateToken_Valid(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	// Store a valid non-expired CLI token
-	validRecord := &types.TokenRecord{
-		Name:      "cli-valid",
-		Role:      "cli",
-		ExpiresAt: time.Now().Add(time.Hour),
-	}
-	store.Save(ctx, types.KeyTokens+"valid-hash", validRecord)
-
-	if err := srv.ValidateToken(ctx, "valid-hash"); err != nil {
-		t.Fatalf("expected no error for valid token, got: %v", err)
-	}
-}
-
-func TestValidateToken_AgentNeverExpires(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	// Store an agent token (no expiry)
-	agentRecord := &types.TokenRecord{
-		Name: "worker-1",
-		Role: "agent",
-	}
-	store.Save(ctx, types.KeyTokens+"agent-hash", agentRecord)
-
-	if err := srv.ValidateToken(ctx, "agent-hash"); err != nil {
-		t.Fatalf("expected no error for agent token, got: %v", err)
-	}
-}
-
-func TestValidateToken_NotFound(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	err := srv.ValidateToken(ctx, "nonexistent-hash")
-	if err == nil {
-		t.Fatal("expected error for nonexistent token")
-	}
-	if status.Code(err) != codes.Unauthenticated {
-		t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-	}
 }
 
 func TestGetLogs_SuccessProxy(t *testing.T) {
@@ -1672,7 +1289,7 @@ func TestFindContainerAgent_NoNodes(t *testing.T) {
 }
 
 func TestGetStatus_EmptyStore(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	resp, err := client.GetStatus(context.Background(), &banyanpb.GetStatusRequest{})
@@ -1688,7 +1305,7 @@ func TestGetStatus_EmptyStore(t *testing.T) {
 }
 
 func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1791,7 +1408,7 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 }
 
 func TestReportTaskResult_NilResult(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1830,7 +1447,7 @@ func TestReportTaskResult_NilResult(t *testing.T) {
 }
 
 func TestHeartbeat_EmptySessionToken(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1858,7 +1475,7 @@ func TestHeartbeat_EmptySessionToken(t *testing.T) {
 }
 
 func TestDeploy_WithBuildAndDeploy(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1908,7 +1525,7 @@ func TestDeploy_WithBuildAndDeploy(t *testing.T) {
 }
 
 func TestDown_ServiceFilterNoMatchingTasks(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -2046,6 +1663,179 @@ func TestRegister_SaveError(t *testing.T) {
 	if status.Code(err) != codes.Internal {
 		t.Errorf("expected Internal, got %v", status.Code(err))
 	}
+}
+
+func TestRegister_VPCConfig(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns allocated subnet when allocator is set", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		allocator, err := overlay.NewSubnetAllocator("10.0.0.0/16")
+		if err != nil {
+			t.Fatalf("failed to create allocator: %v", err)
+		}
+		peerTracker := overlay.NewPeerTracker()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+			allocator:   allocator,
+			peerTracker: peerTracker,
+			vpcCIDR:     "10.0.0.0/16",
+		}
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+			ApiAddress:   "worker-1:9090",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if resp.AllocatedSubnet == "" {
+			t.Error("expected non-empty allocated_subnet")
+		}
+		if resp.VpcCidr != "10.0.0.0/16" {
+			t.Errorf("expected vpc_cidr '10.0.0.0/16', got %q", resp.VpcCidr)
+		}
+	})
+
+	t.Run("idempotent allocation for same agent", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		allocator, _ := overlay.NewSubnetAllocator("10.0.0.0/16")
+		peerTracker := overlay.NewPeerTracker()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+			allocator:   allocator,
+			peerTracker: peerTracker,
+			vpcCIDR:     "10.0.0.0/16",
+		}
+
+		resp1, _ := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+			ApiAddress:   "worker-1:9090",
+		})
+		resp2, _ := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+			ApiAddress:   "worker-1:9090",
+		})
+
+		if resp1.AllocatedSubnet != resp2.AllocatedSubnet {
+			t.Errorf("expected same subnet for same agent, got %q and %q", resp1.AllocatedSubnet, resp2.AllocatedSubnet)
+		}
+	})
+
+	t.Run("no VPC config when allocator is nil", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+		}
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-3",
+			SessionToken: "token-3",
+			ApiAddress:   "worker-3:9090",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if resp.AllocatedSubnet != "" {
+			t.Errorf("expected empty allocated_subnet, got %q", resp.AllocatedSubnet)
+		}
+		if resp.VpcCidr != "" {
+			t.Errorf("expected empty vpc_cidr, got %q", resp.VpcCidr)
+		}
+	})
+}
+
+func TestHeartbeat_VPCPeers(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("returns VPC peers from peer tracker", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		allocator, _ := overlay.NewSubnetAllocator("10.0.0.0/16")
+		peerTracker := overlay.NewPeerTracker()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+			allocator:   allocator,
+			peerTracker: peerTracker,
+			vpcCIDR:     "10.0.0.0/16",
+		}
+
+		// Register two agents to populate allocator and peer tracker
+		srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName: "worker-1", SessionToken: "token-1", ApiAddress: "w1:9090",
+		})
+		srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName: "worker-2", SessionToken: "token-2", ApiAddress: "w2:9090",
+		})
+
+		// Manually update peer tracker with known IPs since test gRPC
+		// context doesn't have real peer addresses
+		subnet1, _ := allocator.Allocate("worker-1")
+		subnet2, _ := allocator.Allocate("worker-2")
+		peerTracker.Update("worker-1", overlay.Peer{
+			Subnet: *subnet1,
+			HostIP: net.ParseIP("192.168.1.10"),
+			VTEPIP: overlay.VTEPIP(*subnet1),
+			MAC:    overlay.DeterministicMAC(*subnet1),
+		})
+		peerTracker.Update("worker-2", overlay.Peer{
+			Subnet: *subnet2,
+			HostIP: net.ParseIP("192.168.1.20"),
+			VTEPIP: overlay.VTEPIP(*subnet2),
+			MAC:    overlay.DeterministicMAC(*subnet2),
+		})
+
+		// Heartbeat from worker-1 should see worker-2 as a peer
+		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+		resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		if len(resp.VpcPeers) != 1 {
+			t.Fatalf("expected 1 VPC peer, got %d", len(resp.VpcPeers))
+		}
+		if resp.VpcPeers[0].HostIp != "192.168.1.20" {
+			t.Errorf("expected peer host IP '192.168.1.20', got %q", resp.VpcPeers[0].HostIp)
+		}
+	})
+
+	t.Run("no peers when tracker is nil", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{
+			store:       store,
+			registryURL: "localhost:5000",
+		}
+
+		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+		resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-1",
+			SessionToken: "token-1",
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		if len(resp.VpcPeers) != 0 {
+			t.Errorf("expected 0 VPC peers when tracker is nil, got %d", len(resp.VpcPeers))
+		}
+	})
+}
+
+func TestExtractPeerIP(t *testing.T) {
+	t.Run("returns nil for context without peer", func(t *testing.T) {
+		ip := extractPeerIP(context.Background())
+		if ip != nil {
+			t.Errorf("expected nil IP for context without peer, got %v", ip)
+		}
+	})
 }
 
 func TestHeartbeat_SaveError(t *testing.T) {
@@ -3289,7 +3079,7 @@ func TestTeardownNonRunningDeployments(t *testing.T) {
 func TestDeployServices(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("creates recreate deployment for target services", func(t *testing.T) {
+	t.Run("creates blue-green deployment for target services", func(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
@@ -3329,11 +3119,11 @@ func TestDeployServices(t *testing.T) {
 			t.Errorf("expected pending, got %s", resp.Status)
 		}
 
-		// Verify new deployment has recreate strategy
+		// Verify new deployment has blue-green strategy (not recreate)
 		var newDeploy types.DeploymentRecord
 		store.Get(ctx, types.KeyDeployments+resp.DeploymentId, &newDeploy)
-		if newDeploy.UpdateStrategy != types.UpdateStrategyRecreate {
-			t.Errorf("expected recreate strategy, got %s", newDeploy.UpdateStrategy)
+		if newDeploy.UpdateStrategy != types.UpdateStrategyBlueGreen {
+			t.Errorf("expected blue-green strategy, got %s", newDeploy.UpdateStrategy)
 		}
 		if newDeploy.ReplacesID != "old-deploy" {
 			t.Errorf("expected replaces_id 'old-deploy', got %s", newDeploy.ReplacesID)
@@ -3347,10 +3137,10 @@ func TestDeployServices(t *testing.T) {
 			t.Error("expected 'web' service in new deployment")
 		}
 
-		// Stop task should exist for web in old deployment
+		// No stop task should exist upfront — blue-green tears down old after new is running
 		var webStop types.TaskRecord
-		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &webStop); err != nil {
-			t.Fatalf("expected web stop task: %v", err)
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &webStop); err == nil {
+			t.Error("expected no upfront stop task for blue-green strategy")
 		}
 	})
 
@@ -3408,4 +3198,221 @@ func TestDeployServices(t *testing.T) {
 			t.Fatal("expected error for unsatisfied dependency")
 		}
 	})
+}
+
+func TestReportContainerHealth_StoresIP(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Create a completed task
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-ip1", &types.TaskRecord{
+		ID: "task-ip1", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0",
+	})
+
+	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+		AgentName: "worker-1",
+		Containers: []*banyanpb.ContainerStatus{
+			{ContainerName: "app-web-0", Status: "running", Ip: "10.0.1.5"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReportContainerHealth failed: %v", err)
+	}
+
+	var updated types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-ip1", &updated); err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.ContainerIP != "10.0.1.5" {
+		t.Errorf("expected container IP '10.0.1.5', got %q", updated.ContainerIP)
+	}
+	if updated.ContainerStatus != "running" {
+		t.Errorf("expected container status 'running', got %q", updated.ContainerStatus)
+	}
+}
+
+func TestCollectServiceBackends(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+	ctx := context.Background()
+
+	// Register agents and a running deployment
+	store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"worker-2", &types.NodeRecord{Name: "worker-2", Status: "ready"})
+	store.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
+		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
+	})
+	// Old stopped deployment — backends should be excluded
+	store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+		ID: "deploy-old", Name: "app", Status: types.StatusStopped,
+	})
+
+	// Task with IP, ports, running, completed — should be included
+	store.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
+		ID: "task-1", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "web",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+	})
+
+	// Task without IP — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
+		ID: "task-2", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "api",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-api-0", ContainerStatus: "running",
+		Ports: []string{"9090:90"},
+	})
+
+	// Task with IP but no ports — should be INCLUDED (DNS needs portless containers)
+	store.Save(ctx, types.KeyTasks+"worker-2/task-3", &types.TaskRecord{
+		ID: "task-3", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "db",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-worker-0", ContainerStatus: "running",
+		ContainerIP: "10.0.2.5",
+	})
+
+	// Task with IP and ports but not running — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
+		ID: "task-4", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "db",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-db-0", ContainerStatus: "exited",
+		ContainerIP: "10.0.2.6", Ports: []string{"5432:5432"},
+	})
+
+	// Stop task — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-1/task-5", &types.TaskRecord{
+		ID: "task-5", DeploymentID: "deploy-1", AgentID: "worker-1",
+		Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		ContainerName: "app-old-0",
+	})
+
+	// Full match on worker-2
+	store.Save(ctx, types.KeyTasks+"worker-2/task-6", &types.TaskRecord{
+		ID: "task-6", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "web",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-1", ContainerStatus: "running",
+		ContainerIP: "10.0.2.7", Ports: []string{"8080:80"},
+	})
+
+	// Task from old stopped deployment — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-1/task-7", &types.TaskRecord{
+		ID: "task-7", DeploymentID: "deploy-old", AgentID: "worker-1", ServiceName: "web",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-old-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.99", Ports: []string{"8080:80"},
+	})
+
+	backends := srv.collectServiceBackends(ctx)
+
+	// 3 backends: app-web-0 (with ports), app-worker-0 (no ports but has IP), app-web-1 (with ports)
+	if len(backends) != 3 {
+		t.Fatalf("expected 3 backends, got %d", len(backends))
+	}
+
+	// Verify the included backends
+	byName := make(map[string]*banyanpb.ServiceBackend)
+	for _, b := range backends {
+		byName[b.ContainerName] = b
+		if b.ContainerIp == "" {
+			t.Errorf("backend %s has empty IP", b.ContainerName)
+		}
+	}
+	if _, ok := byName["app-web-0"]; !ok {
+		t.Error("expected app-web-0 in backends")
+	}
+	if _, ok := byName["app-web-1"]; !ok {
+		t.Error("expected app-web-1 in backends")
+	}
+	if _, ok := byName["app-worker-0"]; !ok {
+		t.Error("expected app-worker-0 in backends (portless container with IP)")
+	}
+
+	// Verify ServiceName is populated
+	if byName["app-web-0"].ServiceName != "web" {
+		t.Errorf("expected ServiceName 'web' for app-web-0, got %q", byName["app-web-0"].ServiceName)
+	}
+	if byName["app-worker-0"].ServiceName != "db" {
+		t.Errorf("expected ServiceName 'db' for app-worker-0, got %q", byName["app-worker-0"].ServiceName)
+	}
+}
+
+func TestHeartbeat_ReturnsServiceBackends(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	peerTracker := overlay.NewPeerTracker()
+
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		peerTracker: peerTracker,
+	}
+
+	ctx := context.Background()
+
+	// Register agent, deployment, and add a running container with IP
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
+		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
+	})
+	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb1", &types.TaskRecord{
+		ID: "task-hb1", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "web",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+	})
+
+	resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{AgentName: "worker-1", SessionToken: "t1"})
+	if err != nil {
+		t.Fatalf("Heartbeat failed: %v", err)
+	}
+
+	if len(resp.ServiceBackends) != 1 {
+		t.Fatalf("expected 1 service backend, got %d", len(resp.ServiceBackends))
+	}
+	b := resp.ServiceBackends[0]
+	if b.ContainerName != "app-web-0" {
+		t.Errorf("expected container name app-web-0, got %s", b.ContainerName)
+	}
+	if b.ContainerIp != "10.0.1.5" {
+		t.Errorf("expected container IP 10.0.1.5, got %s", b.ContainerIp)
+	}
+	if b.AgentName != "worker-1" {
+		t.Errorf("expected agent name worker-1, got %s", b.AgentName)
+	}
+	if b.ServiceName != "web" {
+		t.Errorf("expected service name web, got %s", b.ServiceName)
+	}
+}
+
+func TestHeartbeat_NoBackendsWithoutPeerTracker(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		// peerTracker is nil — no VPC
+	}
+
+	ctx := context.Background()
+
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb2", &types.TaskRecord{
+		ID: "task-hb2", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+	})
+
+	resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{AgentName: "worker-1", SessionToken: "t1"})
+	if err != nil {
+		t.Fatalf("Heartbeat failed: %v", err)
+	}
+
+	// Without peer tracker, no backends should be returned
+	if len(resp.ServiceBackends) != 0 {
+		t.Errorf("expected 0 service backends without VPC, got %d", len(resp.ServiceBackends))
+	}
 }

@@ -17,11 +17,11 @@ type EngineClient struct {
 	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient dials the engine gRPC server with token credentials.
-func NewEngineClient(engineAddr, token string) (*EngineClient, error) {
+// NewEngineClient dials the engine gRPC server with public key credentials.
+func NewEngineClient(engineAddr, publicKey string) (*EngineClient, error) {
 	conn, err := grpc.NewClient(engineAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: token}),
+		grpc.WithPerRPCCredentials(&banyanrpc.PublicKeyCredentials{PublicKey: publicKey}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
@@ -33,58 +33,77 @@ func NewEngineClient(engineAddr, token string) (*EngineClient, error) {
 	}, nil
 }
 
-// NewEngineClientWithPassword dials the engine gRPC server with password credentials.
-// Used during init to call ExchangeToken.
-func NewEngineClientWithPassword(engineAddr, password string) (*EngineClient, error) {
-	conn, err := grpc.NewClient(engineAddr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: password}),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
-	}
-
-	return &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
-	}, nil
+// VPCConfig holds VPC networking configuration returned by the engine during registration.
+type VPCConfig struct {
+	VPCCIDR         string
+	AllocatedSubnet string // /24 subnet allocated for this agent
+	OverlayType     string // "wireguard" or "vxlan"
 }
 
-// ExchangeToken calls the ExchangeToken RPC to get an auth token.
-func (c *EngineClient) ExchangeToken(ctx context.Context, name, role string) (string, error) {
-	resp, err := c.client.ExchangeToken(ctx, &banyanpb.ExchangeTokenRequest{
-		Name: name,
-		Role: role,
-	})
-	if err != nil {
-		return "", fmt.Errorf("token exchange failed: %w", err)
-	}
-	return resp.Token, nil
+// VPCPeer represents a remote agent in the overlay network.
+type VPCPeer struct {
+	Subnet    string
+	HostIP    string
+	VTEPMAC   string // VXLAN
+	PublicKey string // WireGuard
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string) (string, error) {
+func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey string) (string, *VPCConfig, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:    name,
 		ApiAddress:   apiAddr,
 		SessionToken: sessionToken,
 		Tags:         tags,
+		WgPublicKey:  wgPublicKey,
 	})
 	if err != nil {
-		return "", fmt.Errorf("register failed: %w", err)
+		return "", nil, fmt.Errorf("register failed: %w", err)
 	}
-	return resp.RegistryUrl, nil
+
+	var vpcConfig *VPCConfig
+	if resp.AllocatedSubnet != "" && resp.VpcCidr != "" {
+		vpcConfig = &VPCConfig{
+			VPCCIDR:         resp.VpcCidr,
+			AllocatedSubnet: resp.AllocatedSubnet,
+			OverlayType:     resp.OverlayType,
+		}
+	}
+
+	return resp.RegistryUrl, vpcConfig, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) error {
-	_, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) ([]VPCPeer, []ServiceBackend, error) {
+	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    name,
 		SessionToken: sessionToken,
 		Tags:         tags,
 	})
 	if err != nil {
-		return fmt.Errorf("heartbeat failed: %w", err)
+		return nil, nil, fmt.Errorf("heartbeat failed: %w", err)
 	}
-	return nil
+
+	var peers []VPCPeer
+	for _, p := range resp.VpcPeers {
+		peers = append(peers, VPCPeer{
+			Subnet:    p.Subnet,
+			HostIP:    p.HostIp,
+			VTEPMAC:   p.VtepMac,
+			PublicKey: p.PublicKey,
+		})
+	}
+
+	var backends []ServiceBackend
+	for _, b := range resp.ServiceBackends {
+		backends = append(backends, ServiceBackend{
+			ContainerName: b.ContainerName,
+			ContainerIP:   b.ContainerIp,
+			Ports:         b.Ports,
+			AgentName:     b.AgentName,
+			ServiceName:   b.ServiceName,
+		})
+	}
+
+	return peers, backends, nil
 }
 
 func (c *EngineClient) PollTasks(ctx context.Context, name string) ([]*banyanpb.TaskRecord, error) {

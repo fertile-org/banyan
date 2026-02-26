@@ -160,14 +160,14 @@ func TestRunAgentStatus_NotRunning_WithToken(t *testing.T) {
 
 	agentPidFile = filepath.Join(t.TempDir(), "nonexistent.pid")
 
-	// Create config with an auth token
+	// Create config with a public key
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 	cfg := types.BanyanConfig{
 		Agent: types.AgentConfig{
-			EngineHost: "127.0.0.1",
-			EnginePort: "59999", // unreachable port
-			AuthToken:  "test-token-abc",
+			EngineHost:  "127.0.0.1",
+			EnginePort:  "59999", // unreachable port
+			WGPublicKey: "dGVzdC1wdWJsaWMta2V5", // dummy key for test auth
 		},
 	}
 	if err := types.SaveConfig(cfgPath, &cfg); err != nil {

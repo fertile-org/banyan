@@ -2,7 +2,6 @@ package types
 
 import (
 	"testing"
-	"time"
 )
 
 func TestKeyConstants(t *testing.T) {
@@ -18,12 +17,6 @@ func TestKeyConstants(t *testing.T) {
 		}
 		if KeyRegistry != "config/registry" {
 			t.Errorf("expected config/registry, got %s", KeyRegistry)
-		}
-		if KeyTokens != "tokens/" {
-			t.Errorf("expected tokens/, got %s", KeyTokens)
-		}
-		if KeyTokenIndex != "token-index/" {
-			t.Errorf("expected token-index/, got %s", KeyTokenIndex)
 		}
 	})
 
@@ -57,44 +50,6 @@ func TestKeyConstants(t *testing.T) {
 		}
 		if TaskTypeStopAndRemove != "stop_and_remove" {
 			t.Errorf("expected stop_and_remove, got %s", TaskTypeStopAndRemove)
-		}
-	})
-}
-
-func TestDefaultCLITokenTTL(t *testing.T) {
-	expected := 30 * 24 * time.Hour
-	if DefaultCLITokenTTL != expected {
-		t.Errorf("expected %v, got %v", expected, DefaultCLITokenTTL)
-	}
-}
-
-func TestTokenRecord_IsExpired(t *testing.T) {
-	t.Run("zero time is not expired", func(t *testing.T) {
-		record := TokenRecord{Name: "test", Role: "cli"}
-		if record.IsExpired() {
-			t.Error("zero ExpiresAt should not be expired")
-		}
-	})
-
-	t.Run("future time is not expired", func(t *testing.T) {
-		record := TokenRecord{
-			Name:      "test",
-			Role:      "cli",
-			ExpiresAt: time.Now().Add(time.Hour),
-		}
-		if record.IsExpired() {
-			t.Error("future ExpiresAt should not be expired")
-		}
-	})
-
-	t.Run("past time is expired", func(t *testing.T) {
-		record := TokenRecord{
-			Name:      "test",
-			Role:      "cli",
-			ExpiresAt: time.Now().Add(-time.Hour),
-		}
-		if !record.IsExpired() {
-			t.Error("past ExpiresAt should be expired")
 		}
 	})
 }

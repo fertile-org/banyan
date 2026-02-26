@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -15,11 +16,11 @@ import (
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
-	"golang.org/x/crypto/bcrypt"
 
 	"github.com/fertile-org/banyan/pkg/engine"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // Engine configuration flags.
@@ -30,7 +31,6 @@ var (
 	engineGRPCPort     string
 	engineStoreBackend string
 	engineStoreAddress string
-	engineInitPassword string
 )
 
 // configPath is the default path to the Banyan config file.
@@ -85,9 +85,6 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&engineDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
-	// Init flags
-	initCmd.Flags().StringVar(&engineInitPassword, "password", "", "Cluster password (non-interactive mode)")
-
 	// Store backend flags (for external etcd override)
 	startCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
 	startCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
@@ -130,44 +127,33 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	existingCfg, _ := types.LoadConfig(configPath)
 
-	// --- Cluster password ---
-	fmt.Println()
-	switch {
-	case existingCfg.Engine.PasswordHash != "":
-		fmt.Printf("  %s Cluster password already configured\n", styleOK.Render("[OK]"))
-	case engineInitPassword != "":
-		// Password provided via --password flag (e.g., for automation or E2E).
-		hash, hashErr := bcrypt.GenerateFromPassword([]byte(engineInitPassword), bcrypt.DefaultCost)
-		if hashErr != nil {
-			return fmt.Errorf("failed to hash password: %w", hashErr)
+	// --- Create whitelisted keys directory ---
+	whitelistedKeysDir := existingCfg.Engine.WhitelistedKeysDir
+	if whitelistedKeysDir == "" {
+		whitelistedKeysDir = types.DefaultWhitelistedKeysDir
+	}
+	if err := os.MkdirAll(whitelistedKeysDir, 0o755); err != nil {
+		fmt.Printf("  %s Failed to create whitelisted keys directory: %v\n", styleWarn.Render("[WARN]"), err)
+	} else {
+		fmt.Printf("  %s Whitelisted keys directory: %s\n", styleOK.Render("[OK]"), whitelistedKeysDir)
+	}
+
+	// --- WireGuard keypair generation ---
+	fmt.Println(styleInfo.Render("\nGenerating WireGuard keypair..."))
+	if existingCfg.Engine.WGPrivateKey != "" && existingCfg.Engine.WGPublicKey != "" {
+		fmt.Printf("  %s WireGuard keypair already configured\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), existingCfg.Engine.WGPublicKey)
+	} else {
+		privKey, pubKey, genErr := overlay.GenerateKeyPair()
+		if genErr != nil {
+			return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
 		}
-		existingCfg.Engine.PasswordHash = string(hash)
-		fmt.Printf("  %s Cluster password configured\n", styleOK.Render("[OK]"))
-	default:
-		var password string
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Cluster password").
-					Description("Protects engine-agent communication (leave empty to skip)").
-					EchoMode(huh.EchoModePassword).
-					Value(&password),
-			),
-		)
-		if err := form.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println("\nInitialization cancelled.")
-				return nil
-			}
-			return fmt.Errorf("password input: %w", err)
-		}
-		if password != "" {
-			hash, hashErr := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-			if hashErr != nil {
-				return fmt.Errorf("failed to hash password: %w", hashErr)
-			}
-			existingCfg.Engine.PasswordHash = string(hash)
-		}
+		existingCfg.Engine.WGPrivateKey = privKey
+		existingCfg.Engine.WGPublicKey = pubKey
+		fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
+		fmt.Println()
+		fmt.Println(styleInfo.Render("Share this public key with agents and CLI clients during their init."))
 	}
 
 	// --- Etcd setup ---
@@ -392,19 +378,63 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Connecting to %s at %s...\n", storeBackend, storeAddress)
 
+	// Load whitelisted agent public keys
+	whitelistedKeysDir := cfg.Engine.WhitelistedKeysDir
+	if whitelistedKeysDir == "" {
+		whitelistedKeysDir = types.DefaultWhitelistedKeysDir
+	}
+	whitelistedKeys, wkErr := types.LoadWhitelistedKeys(whitelistedKeysDir)
+	if wkErr != nil {
+		fmt.Printf("Warning: Failed to load whitelisted keys: %v\n", wkErr)
+	}
+	if len(whitelistedKeys) > 0 {
+		fmt.Printf("Loaded %d whitelisted agent key(s) from %s\n", len(whitelistedKeys), whitelistedKeysDir)
+	}
+
+	// Set up WireGuard control tunnel (required when keys are configured)
+	if cfg.Engine.WGPrivateKey != "" {
+		fmt.Println("Setting up WireGuard control tunnel...")
+		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, cfg.Engine.WGPrivateKey, engineIP, types.ControlTunnelPort); tunnelErr != nil {
+			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
+		}
+		defer overlay.CleanupControlTunnelExec(types.ControlIfaceEngine) //nolint:errcheck // best-effort cleanup on exit
+		fmt.Printf("Control tunnel ready on %s (port %d)\n", types.ControlTunnelEngineIP, types.ControlTunnelPort)
+
+		// Add whitelisted keys as control tunnel peers
+		for pubKey, name := range whitelistedKeys {
+			tunnelIP := types.TunnelIPFromPublicKey(pubKey)
+			if peerErr := overlay.AddControlPeerExec(types.ControlIfaceEngine, pubKey, "", tunnelIP); peerErr != nil {
+				fmt.Printf("Warning: Failed to add control peer %s: %v\n", name, peerErr)
+			} else {
+				fmt.Printf("  Control peer: %s → %s\n", name, tunnelIP)
+			}
+		}
+	}
+
+	// Determine overlay type
+	overlayType := cfg.Engine.OverlayType
+	if overlayType == "" {
+		overlayType = "vxlan" // default for backwards compat; wireguard when whitelisted keys exist
+		if len(whitelistedKeys) > 0 {
+			overlayType = "wireguard"
+		}
+	}
+
 	eng, err := engine.New(&engine.Options{
-		StoreBackend: storeBackend,
-		StoreAddress: storeAddress,
-		VPCCIDR:      engineVPCCIDR,
-		RegistryPort: engineRegistryPort,
-		GRPCPort:     engineGRPCPort,
-		PasswordHash: cfg.Engine.PasswordHash,
-		DataDir:      engineDataDir,
-		EtcdUsername: cfg.Engine.EtcdUsername,
-		EtcdPassword: cfg.Engine.EtcdPassword,
-		EtcdCertFile: cfg.Engine.EtcdCertFile,
-		EtcdKeyFile:  cfg.Engine.EtcdKeyFile,
-		EtcdCAFile:   cfg.Engine.EtcdCAFile,
+		StoreBackend:    storeBackend,
+		StoreAddress:    storeAddress,
+		VPCCIDR:         engineVPCCIDR,
+		RegistryPort:    engineRegistryPort,
+		GRPCPort:        engineGRPCPort,
+		DataDir:         engineDataDir,
+		EtcdUsername:    cfg.Engine.EtcdUsername,
+		EtcdPassword:    cfg.Engine.EtcdPassword,
+		EtcdCertFile:    cfg.Engine.EtcdCertFile,
+		EtcdKeyFile:     cfg.Engine.EtcdKeyFile,
+		EtcdCAFile:      cfg.Engine.EtcdCAFile,
+		WhitelistedKeys: whitelistedKeys,
+		OverlayType:     overlayType,
 	})
 	if err != nil {
 		return err
@@ -444,8 +474,13 @@ func resolveDefaultStoreAddress(backend, address string) string {
 	}
 }
 
-// managedEtcdClientURL is the default client URL for managed etcd.
+// managedEtcdClientURL is the default client URL for managed etcd (used for health checks and local access).
 const managedEtcdClientURL = "http://127.0.0.1:2379"
+
+// managedEtcdListenURL is the listen address for managed etcd.
+// Listens on localhost only — agents no longer need direct etcd access
+// (overlay networking is managed by the engine via gRPC).
+const managedEtcdListenURL = "http://127.0.0.1:2379"
 
 // startManagedEtcd starts an etcd process using the system-installed etcd binary.
 // It waits for etcd to become healthy before returning.
@@ -456,7 +491,7 @@ func startManagedEtcd(dataDir string) (*exec.Cmd, error) {
 
 	etcdCmd := exec.Command("etcd",
 		"--data-dir", dataDir,
-		"--listen-client-urls", managedEtcdClientURL,
+		"--listen-client-urls", managedEtcdListenURL,
 		"--advertise-client-urls", managedEtcdClientURL,
 		"--listen-peer-urls", "http://127.0.0.1:2380",
 	)

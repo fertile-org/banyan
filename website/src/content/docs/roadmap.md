@@ -36,18 +36,18 @@ See what's running, check container health, stream logs, and stop deployments �
 
 ---
 
-## Milestone 3 — Basic Security
+## Milestone 3 — Security
 
 Status: **Done**
 
-Secure gRPC communication between CLI, Engine, and Agents with password-based token exchange.
+Secure all inter-component communication with WireGuard-based authentication and encryption.
 
-- All inter-component communication uses gRPC with token authentication
-- Password used once at init, exchanged for a long-lived auth token
-- Token stored as SHA-256 hash in etcd — compromise doesn't leak usable tokens
-- CLI tokens expire after 30 days; agent tokens don't expire
-- Config file at `/etc/banyan/banyan.yaml` with sections: `security`, `engine`, `agent`, `cli`
-- `init` and `auth` commands for engine, agent, and CLI
+- All inter-component communication uses gRPC with public key authentication
+- Each component generates an X25519 keypair during `init`
+- Agent/CLI → Engine: public key in gRPC metadata, validated against whitelist
+- Engine → Agent: session token authentication for log streaming
+- Config file at `/etc/banyan/banyan.yaml` with sections: `engine`, `agent`, `cli`
+- `init` commands for engine, agent, and CLI prompt for credentials and connection info
 - Three separate binaries: `banyan-engine`, `banyan-agent`, `banyan-cli`
 
 See [Authentication](/guides/authentication/) for details.
@@ -65,6 +65,22 @@ Optional tags on agents and deployments for environment isolation (e.g. staging 
 - Tag matching rules: both untagged = match, one side tagged = no match, intersection = match
 - Same app name with different tags can coexist as independent deployments
 - Engine scheduling filters agents by tag match before assigning tasks
+
+---
+
+## Milestone 3.6 — Networking
+
+Status: **Done**
+
+Built-in overlay networking and cross-host load balancing without external dependencies.
+
+- WireGuard overlay (default) with VXLAN fallback, both managed by Engine via abstract `OverlayDriver` interface
+- Built-in VXLAN overlay managed by Engine with deterministic VTEP MACs
+- Per-agent /24 subnet allocation from VPC CIDR via `SubnetAllocator`
+- Peer discovery via heartbeat RPC (15s convergence)
+- iptables DNAT proxy on each agent for port forwarding to container backends
+- Cross-host load balancing: every agent aware of all service backends cluster-wide, probability-based DNAT rules distribute traffic across all replicas regardless of which agent they run on
+- Service DNS: agent-local DNS server on bridge gateway IP resolves `<service>.internal` to container IPs, with `--dns-search internal` enabling short names (e.g., `ping db` from any container)
 
 ---
 
@@ -154,11 +170,12 @@ The terminal monitoring dashboard (`banyan-cli monitor`) is delivered in Milesto
 
 ## Milestone 10 — Advanced Security
 
-Stronger authentication for production environments.
+Stronger authentication model for production environments.
 
-- Private key authentication for agent-to-engine connections
-- Private key authentication for CLI-to-engine and CLI-to-agent
-- Key generation and distribution tooling
+- ~~Private key authentication for agent-to-engine connections~~ → **Done**: X25519 public key whitelist authentication
+- ~~Private key authentication for CLI-to-engine and CLI-to-agent~~ → **Done**: CLI uses same public key auth
+- ~~Key generation and distribution tooling~~ → **Done**: `init` commands generate keypairs, admin copies public keys to engine
+- ~~Encrypted control plane~~ → **Done**: WireGuard control tunnel (`wg-control`) encrypts all gRPC traffic between engine, agents, and CLI (port 51821/UDP)
 - Certificate rotation support
 
 ---
@@ -177,12 +194,14 @@ Automatically redistribute services across nodes based on actual resource usage 
 
 ---
 
-## Milestone 12 — Advanced Metrics and Dashboard Enhancements
+## Milestone 12 — Advanced Networking
 
-Deeper observability and richer operational tooling.
+Service discovery, traffic policies, and encrypted communication across the cluster.
 
-- Custom application metrics (user-defined)
-- Alerting rules and notifications
-- Historical trends and capacity planning views
-- Multi-cluster dashboard support
-- Metric export to external systems (Prometheus, Grafana)
+- **Health-check-based routing**: Only route to healthy containers — filter backends by `container_status` before including in HeartbeatResponse
+- **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
+- **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
+- ~~**WireGuard overlay driver**: Alternative to VXLAN via the existing `OverlayDriver` interface~~ → **Done**: WireGuard is the default overlay, VXLAN kept as fallback
+- **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
+- **mTLS between services**: Encrypted service-to-service communication — WireGuard approach (transparent at network layer) or sidecar proxy pattern
+- **Multi-tenant network isolation**: Separate VPC CIDRs per deployment or tag group with different VNIs

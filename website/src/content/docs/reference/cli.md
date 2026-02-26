@@ -30,21 +30,13 @@ sudo banyan-engine init
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--password` | | Cluster password (skips interactive prompt) |
 
-The wizard asks:
+The wizard generates a WireGuard keypair for authentication and asks:
 
-1. **Cluster password** — used to authenticate agents and CLI clients. The password is hashed with bcrypt and stored in `/etc/banyan/banyan.yaml` — the plain-text password is never saved.
-2. **Etcd setup** — choose **Managed** (Banyan runs etcd for you) or **External** (connect to your own cluster).
-3. For **External etcd**: endpoints (e.g., `http://10.0.0.1:2379`) and connection security (None, Username & Password, TLS, or mTLS).
+1. **Etcd setup** — choose **Managed** (Banyan runs etcd for you) or **External** (connect to your own cluster).
+2. For **External etcd**: endpoints (e.g. `http://10.0.0.1:2379`) and connection security (None, Username & Password, TLS, or mTLS).
 
-If a password hash is already configured, the wizard skips that step.
-
-Pass `--password` for non-interactive setup (useful for automation):
-
-```bash
-sudo banyan-engine init --password "my-cluster-secret"
-```
+The engine's public key is displayed during init. Share this key with agents and CLI clients that want to use the encrypted WireGuard control tunnel. See [Authentication](/guides/authentication/) for details.
 
 ### start
 
@@ -92,23 +84,9 @@ banyan-engine status
 
 Run on each worker node.
 
-### auth
-
-Re-authenticate with the engine. Reads the existing config and prompts only for the cluster password to get a new token — no need to re-enter connection details.
-
-```bash
-sudo banyan-agent auth
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--password` | | Cluster password (skips interactive prompt) |
-
-Use when a token has been revoked or the engine was re-initialized. Requires an existing config from a previous `init`.
-
 ### init
 
-Set up the worker node: creates data directories, verifies containerd and nerdctl are installed, and walks you through an interactive setup wizard.
+Prepare the worker node: creates data directories, verifies containerd and nerdctl are installed, generates a WireGuard keypair, and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-agent init
@@ -117,23 +95,23 @@ sudo banyan-agent init
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--password` | | Cluster password (skips interactive prompt) |
 
-The wizard asks:
+The wizard generates a WireGuard keypair and asks:
 
 1. **Engine host** — hostname or IP of the Banyan engine (e.g., `192.168.1.10`).
 2. **Engine gRPC port** — default `50051`.
 3. **Node name** — unique name for this worker (default: hostname).
-4. **Cluster password** — must match the engine password.
+4. **Engine WireGuard public key** — displayed during `banyan-engine init` (optional, enables encrypted tunnel).
+5. **Tags** — comma-separated tags for environment isolation (optional).
 
-The wizard connects to the running engine and exchanges the password for an auth token. Only the token and node name are stored — the password is never saved. The engine must be running during `init`.
+After init, the agent's public key is displayed. Copy it to the engine's whitelisted keys directory. See [Authentication](/guides/authentication/) for details.
 
-If an auth token is already configured, the wizard skips that step.
+If a keypair and engine host are already configured, the wizard skips and shows the current setting.
 
-Pass `--password` with a pre-written config file for non-interactive setup:
+Pre-write a config file to skip the interactive wizard (useful for automation):
 
 ```bash
-# Write connection details first
+# Write config with engine connection details
 cat > /etc/banyan/banyan.yaml <<EOF
 agent:
     engine_host: 192.168.1.10
@@ -142,8 +120,8 @@ agent:
         - staging
 EOF
 
-# Exchange the password for a token
-sudo banyan-agent init --password "my-cluster-secret"
+# Init generates a keypair and skips prompts since config exists
+sudo banyan-agent init
 ```
 
 ### start
@@ -191,56 +169,24 @@ banyan-agent status
 
 Run on any machine to manage deployments. Run `banyan-cli init` once to configure the engine connection, then use `up`, `status`, `down`, and `logs` freely.
 
-### auth
-
-Re-authenticate with the engine. Reads the existing config and prompts only for the cluster password to get a new token.
-
-```bash
-sudo banyan-cli auth
-```
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--password` | | Cluster password (skips interactive prompt) |
-
-Use when a token has been revoked or the engine was re-initialized. Requires an existing config from a previous `init`.
-
 ### init
 
-Configure the CLI with an interactive setup wizard.
+Configure the CLI with an interactive setup wizard. Generates a WireGuard keypair for authentication.
 
 ```bash
 sudo banyan-cli init
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--password` | | Cluster password (skips interactive prompt) |
-
-The wizard asks:
+The wizard generates a WireGuard keypair and asks:
 
 1. **Engine host** — hostname or IP of the Banyan engine.
 2. **Engine gRPC port** — default `50051`.
 3. **CLI name** — unique name for this CLI client (default: `cli-<hostname>`).
-4. **Cluster password** — must match the engine password.
+4. **Engine WireGuard public key** — displayed during `banyan-engine init` (optional, enables encrypted tunnel).
 
-The wizard connects to the running engine and exchanges the password for an auth token. Only the token is stored in `/etc/banyan/banyan.yaml` — the password is never saved.
+After init, the CLI's public key is displayed. Copy it to the engine's whitelisted keys directory. See [Authentication](/guides/authentication/) for details.
 
-Run this once per machine. If an auth token already exists in the config, you'll be asked whether to overwrite it.
-
-Pass `--password` with a pre-written config file for non-interactive setup:
-
-```bash
-# Write connection details first
-cat > /etc/banyan/banyan.yaml <<EOF
-cli:
-    engine_host: 192.168.1.10
-    engine_port: "50051"
-EOF
-
-# Exchange the password for a token
-sudo banyan-cli init --password "my-cluster-secret"
-```
+Run this once on any machine where you want to use `banyan-cli` commands. If a keypair and engine host already exist in the config, you'll be asked whether to overwrite.
 
 ### up
 
@@ -254,7 +200,7 @@ Sends the deployment to the Engine, then waits for agents to run all containers.
 
 **Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: new containers start alongside old ones, and old containers are torn down only after the new deployment is healthy. If the new deployment fails, old containers keep running. See [Redeployment](/guides/redeployment/) for details.
 
-**Per-service deployment.** Pass service names as arguments to redeploy only specific services. The full manifest is still validated, but only the listed services are redeployed. Per-service deploys use a recreate strategy (stop old, then start new) to avoid port conflicts. Other services are untouched.
+**Per-service deployment.** Pass service names as arguments to redeploy only those services. Per-service deploys use the same blue-green strategy as full deploys — new containers start alongside old ones and old containers are torn down only after the new deployment is healthy. Zero downtime. Services not listed are untouched.
 
 `depends_on` is validated: if a service being deployed depends on another service, that dependency must already be running or be included in the same deploy command.
 

@@ -20,7 +20,6 @@ NERDCTL_VERSION="2.0.3"
 CNI_VERSION="1.6.1"
 ETCD_VERSION="3.5.17"
 BUILDKIT_VERSION="0.19.0"
-
 # --- Output helpers ---
 
 GREEN='\033[0;32m'
@@ -277,6 +276,37 @@ install_cni() {
     info "CNI plugins installed."
 }
 
+install_wireguard() {
+    if command -v wg &>/dev/null; then
+        info "wireguard-tools already installed, skipping."
+    else
+        info "Installing wireguard-tools..."
+
+        case "$OS" in
+            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
+                $PKG_UPDATE
+                $PKG_INSTALL wireguard-tools
+                ;;
+            *)
+                $PKG_INSTALL wireguard-tools
+                ;;
+        esac
+
+        info "wireguard-tools installed."
+    fi
+
+    # Verify WireGuard kernel module is available (built-in since Linux 5.6)
+    if ip link add wg-test type wireguard 2>/dev/null; then
+        ip link delete wg-test 2>/dev/null
+        info "WireGuard kernel support: OK"
+    else
+        warn "WireGuard kernel module not available."
+        warn "  - Overlay networking will fall back to VXLAN."
+        warn "  - Control plane tunnel (encrypted gRPC) will be unavailable."
+        warn "To enable WireGuard: modprobe wireguard (requires Linux 5.6+ or wireguard-dkms)"
+    fi
+}
+
 # --- Verify ---
 
 verify() {
@@ -305,6 +335,12 @@ verify() {
         else
             error "  etcd: NOT FOUND"
             ok=false
+        fi
+
+        if command -v wg &>/dev/null; then
+            info "  wireguard-tools: OK (for control tunnel)"
+        else
+            warn "  wireguard-tools: NOT FOUND (control tunnel will be unavailable, gRPC falls back to unencrypted)"
         fi
     fi
 
@@ -336,6 +372,13 @@ verify() {
             error "  buildkit: NOT FOUND"
             ok=false
         fi
+
+        if command -v wg &>/dev/null; then
+            info "  wireguard-tools: OK"
+        else
+            warn "  wireguard-tools: NOT FOUND (overlay falls back to VXLAN, control tunnel unavailable)"
+        fi
+
     fi
 
     if ! $ok; then
@@ -350,15 +393,20 @@ verify() {
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
         echo "  Start the Engine:"
-        echo "    sudo banyan-engine init"
+        echo "    sudo banyan-engine init    # generates keypair, configures etcd"
         echo "    sudo banyan-engine start"
+        echo ""
+        echo "  Note: Engine init displays a public key — share it with agents/CLI"
+        echo "  to enable encrypted control tunnels (port 51821/UDP)."
         echo ""
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         echo "  Start an Agent:"
-        echo "    sudo banyan-agent init"
-        echo "    sudo banyan-agent start --node-name <node-name>"
+        echo "    sudo banyan-agent init     # generates keypair, asks for engine public key"
+        echo "    # Copy agent's public key to engine:"
+        echo "    #   echo '<key>' > /etc/banyan/whitelisted-keys/<name>.pub"
+        echo "    sudo banyan-agent start"
         echo ""
     fi
 }
@@ -416,12 +464,14 @@ main() {
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
         install_etcd
+        install_wireguard  # WireGuard is used for the control tunnel (encrypted gRPC)
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         install_containerd
         install_nerdctl
         install_cni
+        install_wireguard  # WireGuard is used for both overlay networking and control tunnel
         install_buildkit
     fi
 

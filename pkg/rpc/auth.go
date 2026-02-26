@@ -2,12 +2,9 @@ package rpc
 
 import (
 	"context"
-	"crypto/sha256"
 	"crypto/subtle"
-	"fmt"
 	"strings"
 
-	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
@@ -16,50 +13,11 @@ import (
 )
 
 const (
-	// MetadataKeyPassword is the gRPC metadata key for password auth (ExchangeToken only).
-	MetadataKeyPassword = "x-banyan-password" //nolint:gosec // not a credential, just a metadata key name
-	// MetadataKeyAuthToken is the gRPC metadata key for token auth (all other RPCs).
-	MetadataKeyAuthToken = "x-banyan-auth-token" //nolint:gosec // not a credential, just a metadata key name
 	// MetadataKeySessionToken is the gRPC metadata key for engine→agent session auth.
 	MetadataKeySessionToken = "x-banyan-session-token" //nolint:gosec // not a credential, just a metadata key name
+	// MetadataKeyPublicKey is the gRPC metadata key for public key auth.
+	MetadataKeyPublicKey = "x-banyan-public-key" //nolint:gosec // not a credential, just a metadata key name
 )
-
-// PasswordCredentials implements credentials.PerRPCCredentials for ExchangeToken calls.
-// It attaches the cluster password to every RPC.
-type PasswordCredentials struct {
-	Password string
-}
-
-func (c *PasswordCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	return map[string]string{
-		MetadataKeyPassword: c.Password,
-	}, nil
-}
-
-func (c *PasswordCredentials) RequireTransportSecurity() bool {
-	return false
-}
-
-// Verify interface compliance.
-var _ credentials.PerRPCCredentials = (*PasswordCredentials)(nil)
-
-// TokenCredentials implements credentials.PerRPCCredentials for token-based auth.
-// It attaches the auth token to every RPC.
-type TokenCredentials struct {
-	Token string
-}
-
-func (c *TokenCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
-	return map[string]string{
-		MetadataKeyAuthToken: c.Token,
-	}, nil
-}
-
-func (c *TokenCredentials) RequireTransportSecurity() bool {
-	return false
-}
-
-var _ credentials.PerRPCCredentials = (*TokenCredentials)(nil)
 
 // SessionTokenCredentials implements credentials.PerRPCCredentials for engine→agent calls.
 // It attaches the session token to every RPC.
@@ -79,79 +37,80 @@ func (c *SessionTokenCredentials) RequireTransportSecurity() bool {
 
 var _ credentials.PerRPCCredentials = (*SessionTokenCredentials)(nil)
 
-// HashPassword returns the SHA-256 hex digest of the given password.
-func HashPassword(password string) string {
-	h := sha256.Sum256([]byte(password))
-	return fmt.Sprintf("%x", h)
+// PublicKeyCredentials implements credentials.PerRPCCredentials for public key auth.
+// It attaches the agent's public key to every RPC.
+type PublicKeyCredentials struct {
+	PublicKey string
 }
 
-// TokenValidator validates auth tokens against the store.
-type TokenValidator interface {
-	ValidateToken(ctx context.Context, tokenHash string) error
+func (c *PublicKeyCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{
+		MetadataKeyPublicKey: c.PublicKey,
+	}, nil
 }
 
-// NewAuthInterceptor returns a unary server interceptor with dual-mode auth:
-//   - ExchangeToken RPC: validates password via bcrypt against passwordHash
-//   - All other RPCs: validates token via TokenValidator
-func NewAuthInterceptor(passwordHash string, validator TokenValidator) grpc.UnaryServerInterceptor {
+func (c *PublicKeyCredentials) RequireTransportSecurity() bool {
+	return false
+}
+
+var _ credentials.PerRPCCredentials = (*PublicKeyCredentials)(nil)
+
+// PublicKeyValidator validates public keys against a whitelist.
+type PublicKeyValidator struct {
+	AllowedKeys map[string]string // publicKey → agent name
+}
+
+// Validate checks if a public key is in the whitelist.
+func (v *PublicKeyValidator) Validate(publicKey string) error {
+	if _, ok := v.AllowedKeys[publicKey]; !ok {
+		return status.Error(codes.Unauthenticated, "public key not whitelisted")
+	}
+	return nil
+}
+
+// NewPublicKeyAuthInterceptor returns a unary server interceptor that validates
+// public keys from gRPC metadata against the whitelist.
+// Health RPCs are exempt (used for connectivity checks).
+func NewPublicKeyAuthInterceptor(validator *PublicKeyValidator) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
-		if isExchangeTokenMethod(info.FullMethod) {
-			if err := validatePasswordBcrypt(ctx, passwordHash); err != nil {
-				return nil, err
-			}
+		if isHealthMethod(info.FullMethod) {
 			return handler(ctx, req)
 		}
-		if err := validateAuthToken(ctx, validator); err != nil {
+		if err := validatePublicKey(ctx, validator); err != nil {
 			return nil, err
 		}
 		return handler(ctx, req)
 	}
 }
 
-// NewAuthStreamInterceptor returns a stream server interceptor with dual-mode auth.
-// Stream RPCs always use token auth (ExchangeToken is unary-only).
-func NewAuthStreamInterceptor(validator TokenValidator) grpc.StreamServerInterceptor {
+// NewPublicKeyAuthStreamInterceptor returns a stream server interceptor that validates
+// public keys from gRPC metadata against the whitelist.
+func NewPublicKeyAuthStreamInterceptor(validator *PublicKeyValidator) grpc.StreamServerInterceptor {
 	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		if err := validateAuthToken(ss.Context(), validator); err != nil {
+		if err := validatePublicKey(ss.Context(), validator); err != nil {
 			return err
 		}
 		return handler(srv, ss)
 	}
 }
 
-func isExchangeTokenMethod(fullMethod string) bool {
-	return strings.HasSuffix(fullMethod, "/ExchangeToken")
+func isHealthMethod(fullMethod string) bool {
+	return strings.HasSuffix(fullMethod, "/Health")
 }
 
-func validatePasswordBcrypt(ctx context.Context, passwordHash string) error {
+func validatePublicKey(ctx context.Context, validator *PublicKeyValidator) error {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
 		return status.Error(codes.Unauthenticated, "missing metadata")
 	}
-	values := md.Get(MetadataKeyPassword)
+	values := md.Get(MetadataKeyPublicKey)
 	if len(values) == 0 {
-		return status.Error(codes.Unauthenticated, "missing password")
+		return status.Error(codes.Unauthenticated, "missing public key")
 	}
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(values[0])); err != nil {
-		return status.Error(codes.Unauthenticated, "invalid password")
-	}
-	return nil
+	return validator.Validate(values[0])
 }
 
-func validateAuthToken(ctx context.Context, validator TokenValidator) error {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return status.Error(codes.Unauthenticated, "missing metadata")
-	}
-	values := md.Get(MetadataKeyAuthToken)
-	if len(values) == 0 {
-		return status.Error(codes.Unauthenticated, "missing auth token")
-	}
-	tokenHash := HashPassword(values[0])
-	return validator.ValidateToken(ctx, tokenHash)
-}
-
-// --- Legacy interceptors kept for agent gRPC server (session token auth) ---
+// --- Session token auth interceptors (used by agent gRPC server) ---
 
 // SessionTokenAuthInterceptor returns a unary server interceptor that validates
 // the session token in gRPC metadata against the locally held token.

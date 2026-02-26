@@ -13,23 +13,24 @@ import (
 
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
-	"github.com/fertile-org/banyan/pkg/vpc"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // Options configures the Engine.
 type Options struct {
-	StoreBackend string // "etcd" only
-	StoreAddress string // resolved address for the store backend
-	VPCCIDR      string
-	RegistryPort string
-	GRPCPort     string
-	PasswordHash string // bcrypt hash of cluster password
-	DataDir      string
-	EtcdUsername string // etcd RBAC username
-	EtcdPassword string // etcd RBAC password
-	EtcdCertFile string // client certificate for mTLS
-	EtcdKeyFile  string // client key for mTLS
-	EtcdCAFile   string // CA certificate for server verification
+	StoreBackend    string            // "etcd" only
+	StoreAddress    string            // resolved address for the store backend
+	VPCCIDR         string
+	RegistryPort    string
+	GRPCPort        string
+	DataDir         string
+	EtcdUsername    string            // etcd RBAC username
+	EtcdPassword    string            // etcd RBAC password
+	EtcdCertFile    string            // client certificate for mTLS
+	EtcdKeyFile     string            // client key for mTLS
+	EtcdCAFile      string            // CA certificate for server verification
+	WhitelistedKeys map[string]string // publicKey → agentName
+	OverlayType     string            // "wireguard" (default) or "vxlan"
 }
 
 // Engine is the Banyan control plane.
@@ -66,21 +67,26 @@ func New(opts *Options) (*Engine, error) {
 // Run starts the engine: VPC init, registry, gRPC server, and orchestration loop.
 // It blocks until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) error {
-	if e.opts.PasswordHash != "" {
-		fmt.Println("Token-based authentication enabled")
+	if len(e.opts.WhitelistedKeys) > 0 {
+		fmt.Printf("Public key authentication enabled (%d whitelisted keys)\n", len(e.opts.WhitelistedKeys))
 	} else {
-		fmt.Println("WARNING: No authentication configured")
+		fmt.Println("WARNING: No authentication configured (no whitelisted keys)")
 	}
 
-	// Initialize VPC network (etcd only — Flannel requires etcd natively)
-	if e.opts.StoreBackend == "etcd" {
-		fmt.Printf("Initializing VPC network with CIDR %s...\n", e.opts.VPCCIDR)
-		if vpcErr := vpc.InitializeNetwork(ctx, []string{e.opts.StoreAddress}, e.opts.VPCCIDR); vpcErr != nil {
-			fmt.Printf("Warning: VPC initialization: %v\n", vpcErr)
+	// Initialize VPC overlay networking (subnet allocation + peer tracking)
+	var allocator *overlay.SubnetAllocator
+	var peerTracker *overlay.PeerTracker
+	if e.opts.VPCCIDR != "" {
+		if err := checkCIDRConflict(e.opts.VPCCIDR); err != nil {
+			return fmt.Errorf("VPC CIDR conflict: %w", err)
 		}
-		fmt.Println("VPC initialized")
-	} else {
-		fmt.Println("VPC networking skipped (requires etcd backend for Flannel)")
+		var allocErr error
+		allocator, allocErr = overlay.NewSubnetAllocator(e.opts.VPCCIDR)
+		if allocErr != nil {
+			return fmt.Errorf("failed to create subnet allocator: %w", allocErr)
+		}
+		peerTracker = overlay.NewPeerTracker()
+		fmt.Printf("VPC overlay networking enabled (CIDR: %s)\n", e.opts.VPCCIDR)
 	}
 
 	// Start embedded OCI registry
@@ -105,7 +111,16 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Start Engine gRPC server
 	fmt.Printf("Starting Engine gRPC server on port %s...\n", e.opts.GRPCPort)
-	grpcSrv, err := startEngineGRPC(ctx, e.store, e.opts.GRPCPort, e.opts.PasswordHash, e.registryURL)
+	grpcSrv, err := startEngineGRPC(ctx, &grpcServerOptions{
+		Store:           e.store,
+		Port:            e.opts.GRPCPort,
+		RegistryURL:     e.registryURL,
+		Allocator:       allocator,
+		PeerTracker:     peerTracker,
+		VPCCIDR:         e.opts.VPCCIDR,
+		WhitelistedKeys: e.opts.WhitelistedKeys,
+		OverlayType:     e.opts.OverlayType,
+	})
 	if err != nil {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
@@ -273,6 +288,12 @@ func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types
 			if task.DeploymentID != deployment.ID {
 				continue
 			}
+			// Only count create_and_start tasks — stop_and_remove tasks
+			// (from Down or teardown) have the same DeploymentID and would
+			// inflate totalTasks, preventing the deployment from reaching StatusRunning.
+			if task.Type != types.TaskTypeCreateAndStart {
+				continue
+			}
 
 			totalTasks++
 			switch task.Status {
@@ -340,6 +361,8 @@ func (e *Engine) areReplacedServicesStopped(ctx context.Context, deployment *typ
 
 // blueGreenTeardownOld tears down the old deployment referenced by ReplacesID
 // after the new deployment has reached StatusRunning.
+// For selective service deploys (e.g. "up api"), services not being replaced
+// are adopted into the new deployment so they keep running.
 func (e *Engine) blueGreenTeardownOld(ctx context.Context, deployment *types.DeploymentRecord) {
 	if deployment.ReplacesID == "" {
 		return
@@ -352,12 +375,65 @@ func (e *Engine) blueGreenTeardownOld(ctx context.Context, deployment *types.Dep
 		return
 	}
 
+	// For selective service deploys: adopt services not being replaced
+	// so they continue running under the new deployment.
+	e.adoptUnreplacedServices(ctx, deployment, &oldDeployment)
+
 	count, err := teardownDeployment(ctx, e.store, &oldDeployment, oldKey)
 	if err != nil {
 		fmt.Printf("[Engine] Blue-green: failed to teardown old deployment '%s': %v\n", oldDeployment.ID, err)
 		return
 	}
 	fmt.Printf("[Engine] Blue-green: tearing down old deployment '%s' (%d stop tasks created)\n", oldDeployment.ID, count)
+}
+
+// adoptUnreplacedServices moves tasks and service definitions for services
+// that exist in the old deployment but NOT in the new deployment.
+// This prevents selective service deploys (e.g. "up api") from stopping
+// unrelated services (e.g. "db").
+func (e *Engine) adoptUnreplacedServices(ctx context.Context, newDeploy, oldDeploy *types.DeploymentRecord) {
+	// Find services in old but not in new
+	var adoptNames []string
+	for svcName := range oldDeploy.Services {
+		if _, inNew := newDeploy.Services[svcName]; !inNew {
+			adoptNames = append(adoptNames, svcName)
+		}
+	}
+
+	if len(adoptNames) == 0 {
+		return // Full replacement, nothing to adopt
+	}
+
+	adoptSet := make(map[string]bool, len(adoptNames))
+	for _, name := range adoptNames {
+		adoptSet[name] = true
+	}
+
+	// Copy service definitions to new deployment
+	for _, svcName := range adoptNames {
+		newDeploy.Services[svcName] = oldDeploy.Services[svcName]
+	}
+
+	// Re-assign matching tasks from old deployment to new deployment
+	oldTasks := types.CollectDeploymentTasks(ctx, e.store, oldDeploy.ID)
+	for i := range oldTasks {
+		if !adoptSet[oldTasks[i].ServiceName] || oldTasks[i].Type != types.TaskTypeCreateAndStart {
+			continue
+		}
+		oldTasks[i].DeploymentID = newDeploy.ID
+		taskKey := types.KeyTasks + oldTasks[i].AgentID + "/" + oldTasks[i].ID
+		if err := e.store.Save(ctx, taskKey, &oldTasks[i]); err != nil {
+			fmt.Printf("[Engine] Blue-green: failed to adopt task %s: %v\n", oldTasks[i].ID, err)
+		}
+	}
+
+	// Save updated new deployment with adopted services
+	newDeployKey := types.KeyDeployments + newDeploy.ID
+	if err := e.store.Save(ctx, newDeployKey, newDeploy); err != nil {
+		fmt.Printf("[Engine] Blue-green: failed to save adopted services: %v\n", err)
+	}
+
+	fmt.Printf("[Engine] Blue-green: adopted %d service(s) from old deployment: %v\n", len(adoptNames), adoptNames)
 }
 
 // checkStoppingDeployment checks if all stop_and_remove tasks have completed.
@@ -479,4 +555,72 @@ func findNonLoopbackIPv4(addrs []net.Addr) (string, error) {
 		return ip.String(), nil
 	}
 	return "", fmt.Errorf("no non-loopback IPv4 address found")
+}
+
+// ifaceAddr pairs an interface name with its IP address.
+type ifaceAddr struct {
+	Name string
+	Addr *net.IPNet
+}
+
+// listInterfaceAddrs returns all interface addresses with their names.
+func listInterfaceAddrs() ([]ifaceAddr, error) {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil, err
+	}
+	var result []ifaceAddr
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			if ipNet, ok := addr.(*net.IPNet); ok {
+				result = append(result, ifaceAddr{Name: iface.Name, Addr: ipNet})
+			}
+		}
+	}
+	return result, nil
+}
+
+// listInterfaceAddrsFunc is a variable for testing.
+var listInterfaceAddrsFunc = listInterfaceAddrs
+
+// banyanInterfaces are interface names managed by Banyan that should be
+// excluded from CIDR conflict checks.
+var banyanInterfaces = map[string]bool{
+	"banyan0":    true, // VPC bridge
+	"banyan.1":   true, // VXLAN data plane
+	"banyan-wg":  true, // WireGuard data plane
+	"wg-ctl-eng": true, // WireGuard control tunnel (engine)
+	"wg-ctl-agt": true, // WireGuard control tunnel (agent)
+	"wg-ctl-cli": true, // WireGuard control tunnel (CLI)
+}
+
+// checkCIDRConflict verifies the VPC CIDR doesn't overlap with any host network interfaces.
+// Banyan-managed interfaces (bridges, tunnels) are excluded from the check.
+func checkCIDRConflict(vpcCIDR string) error {
+	_, vpcNet, err := net.ParseCIDR(vpcCIDR)
+	if err != nil {
+		return fmt.Errorf("invalid VPC CIDR: %w", err)
+	}
+
+	addrs, err := listInterfaceAddrsFunc()
+	if err != nil {
+		return fmt.Errorf("failed to get network interfaces: %w", err)
+	}
+
+	for _, entry := range addrs {
+		if banyanInterfaces[entry.Name] {
+			continue
+		}
+		if entry.Addr.IP.To4() == nil {
+			continue
+		}
+		if vpcNet.Contains(entry.Addr.IP) || entry.Addr.Contains(vpcNet.IP) {
+			return fmt.Errorf("VPC CIDR %s overlaps with host interface %s (%s)", vpcCIDR, entry.Name, entry.Addr.String())
+		}
+	}
+	return nil
 }

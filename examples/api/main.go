@@ -18,7 +18,6 @@ func main() {
 
 	http.HandleFunc("/", handleIndex)
 	http.HandleFunc("/health", handleHealth)
-	http.HandleFunc("/db-check", handleDBCheck)
 
 	log.Printf("API server listening on :%s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
@@ -37,37 +36,50 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	fmt.Fprintln(w, "ok")
-}
+	resp := map[string]any{
+		"status":    "ok",
+		"timestamp": time.Now().UTC().Format(time.RFC3339),
+		"server_ip": getServerIP(),
+	}
 
-func handleDBCheck(w http.ResponseWriter, r *http.Request) {
 	dbHost := os.Getenv("DB_HOST")
-	if dbHost == "" {
-		dbHost = "localhost"
+	if dbHost != "" {
+		dbPort := os.Getenv("DB_PORT")
+		if dbPort == "" {
+			dbPort = "5432"
+		}
+		addr := net.JoinHostPort(dbHost, dbPort)
+		// Resolve DB host to IP for visibility
+		ips, _ := net.LookupHost(dbHost)
+		if len(ips) > 0 {
+			resp["db_ip"] = ips[0]
+		}
+		conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
+		if err != nil {
+			resp["db"] = "unreachable"
+			resp["db_addr"] = addr
+			resp["db_error"] = err.Error()
+		} else {
+			conn.Close()
+			resp["db"] = "reachable"
+			resp["db_addr"] = addr
+		}
 	}
-	dbPort := os.Getenv("DB_PORT")
-	if dbPort == "" {
-		dbPort = "5432"
-	}
-
-	addr := net.JoinHostPort(dbHost, dbPort)
-	conn, err := net.DialTimeout("tcp", addr, 2*time.Second)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusServiceUnavailable)
-		json.NewEncoder(w).Encode(map[string]string{
-			"db":    "unreachable",
-			"addr":  addr,
-			"error": err.Error(),
-		})
-		return
-	}
-	conn.Close()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
-		"db":   "reachable",
-		"addr": addr,
-	})
+	json.NewEncoder(w).Encode(resp)
+}
+
+func getServerIP() string {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return "unknown"
+	}
+	for _, addr := range addrs {
+		if ipnet, ok := addr.(*net.IPNet); ok && !ipnet.IP.IsLoopback() && ipnet.IP.To4() != nil {
+			return ipnet.IP.String()
+		}
+	}
+	hostname, _ := os.Hostname()
+	return fmt.Sprintf("hostname:%s", hostname)
 }

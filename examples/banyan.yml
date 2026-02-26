@@ -6,13 +6,6 @@
 name: my-app
 
 services:
-  web:
-    build: ./web
-    ports:
-      - "80:80"
-    depends_on:
-      - api
-
   api:
     build: ./api
     deploy:
@@ -20,7 +13,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=my-app-db-0
+      - DB_HOST=db
       - DB_PORT=5432
     depends_on:
       - db

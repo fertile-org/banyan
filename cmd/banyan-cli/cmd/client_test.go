@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,8 +101,9 @@ func setupCLITestConfig(t *testing.T, engineAddr string) {
 	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 	cfg := types.BanyanConfig{
 		CLI: types.CLIConfig{
-			EngineHost: "127.0.0.1",
-			EnginePort: "", // will be parsed from addr
+			EngineHost:  "127.0.0.1",
+			EnginePort:  "", // will be parsed from addr
+			WGPublicKey: "dGVzdC1wdWJsaWMta2V5", // dummy key for test auth
 		},
 	}
 	// Parse host:port from addr
@@ -310,9 +312,66 @@ func TestGrpcLogStreamReader_Read(t *testing.T) {
 // Verify the interface is satisfied (compile-time check).
 var _ banyanpb.EngineServiceClient = (banyanpb.EngineServiceClient)(nil)
 
+func TestNewAutoEngineClient(t *testing.T) {
+	t.Run("uses public key auth", func(t *testing.T) {
+		origConfig := configPath
+		t.Cleanup(func() { configPath = origConfig })
+
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := types.BanyanConfig{
+			CLI: types.CLIConfig{
+				EngineHost:  "127.0.0.1",
+				EnginePort:  "50051",
+				WGPublicKey: "test-pubkey-base64",
+			},
+		}
+		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+		configPath = cfgPath
+
+		client, err := NewAutoEngineClient("localhost:50051")
+		if err != nil {
+			t.Fatalf("NewAutoEngineClient failed: %v", err)
+		}
+		defer client.Close()
+
+		if client.conn == nil {
+			t.Error("expected non-nil conn")
+		}
+	})
+
+	t.Run("returns error when no auth configured", func(t *testing.T) {
+		origConfig := configPath
+		t.Cleanup(func() { configPath = origConfig })
+
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := types.BanyanConfig{
+			CLI: types.CLIConfig{
+				EngineHost: "127.0.0.1",
+				EnginePort: "50051",
+			},
+		}
+		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+		configPath = cfgPath
+
+		_, err := NewAutoEngineClient("localhost:50051")
+		if err == nil {
+			t.Fatal("expected error when no auth configured")
+		}
+		if !strings.Contains(err.Error(), "no authentication configured") {
+			t.Errorf("expected 'no authentication configured' error, got: %v", err)
+		}
+	})
+}
+
 func TestNewEngineClient(t *testing.T) {
 	// NewEngineClient creates a lazy gRPC connection (no actual network needed)
-	client, err := NewEngineClient("localhost:50051", "test-password")
+	client, err := NewEngineClient("localhost:50051", "test-pubkey-base64")
 	if err != nil {
 		t.Fatalf("NewEngineClient failed: %v", err)
 	}

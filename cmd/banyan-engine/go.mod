@@ -8,8 +8,8 @@ require (
 	github.com/fertile-org/banyan/pkg/engine v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
+	github.com/fertile-org/banyan/pkg/vpc/overlay v0.0.0
 	github.com/spf13/cobra v1.10.1
-	golang.org/x/crypto v0.48.0
 )
 
 require (
@@ -28,7 +28,6 @@ require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0 // indirect
-	github.com/fertile-org/banyan/pkg/vpc v0.0.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-containerregistry v0.20.7 // indirect
@@ -49,6 +48,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.21 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
@@ -66,4 +66,5 @@ replace (
 	github.com/fertile-org/banyan/pkg/storage => ../../pkg/storage
 	github.com/fertile-org/banyan/pkg/types => ../../pkg/types
 	github.com/fertile-org/banyan/pkg/vpc => ../../pkg/vpc
+	github.com/fertile-org/banyan/pkg/vpc/overlay => ../../pkg/vpc/overlay
 )

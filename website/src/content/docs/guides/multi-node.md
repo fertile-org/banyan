@@ -25,14 +25,14 @@ graph TD
     end
 ```
 
-The Engine orchestrates. Workers run containers. All communication happens over gRPC with token-based authentication.
+The Engine orchestrates. Workers run containers. All communication happens over gRPC with public key authentication.
 
 ## Prerequisites
 
 Install the appropriate binaries on each server. See [Installation](/getting-started/installation/).
 
 - **Engine node**: `banyan-engine`, `banyan-cli`, etcd (managed automatically by default)
-- **Worker nodes**: `banyan-agent`, containerd, nerdctl
+- **Worker nodes**: `banyan-agent`, containerd, nerdctl, wireguard-tools
 - **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 
 ## 1. Start the Engine
@@ -44,18 +44,20 @@ sudo banyan-engine init
 sudo banyan-engine start
 ```
 
-The init wizard asks for:
-- **Cluster password** — used to authenticate agents and CLI clients. Stored as a bcrypt hash (never in plain text).
+During init, Banyan generates a WireGuard keypair for the engine and creates the whitelisted keys directory at `/etc/banyan/whitelisted-keys/`. The wizard also asks for:
 - **Etcd setup** — choose **Managed** (recommended) or **External** if you have your own etcd cluster.
 
-The Engine starts a gRPC server on port 50051 by default.
+The engine's public key is displayed during init. **Copy it** — agents and CLI clients need it to set up encrypted control tunnels.
 
-Configure the CLI to connect to the engine (run this on your deploy machine):
+The Engine starts a gRPC server on port 50051 by default. Verify from another machine:
 
 ```bash
 sudo banyan-cli init
-# Enter: engine host, gRPC port, and cluster password
-# The CLI exchanges the password for an auth token — the password is never saved
+# The wizard asks for: engine host and gRPC port
+# It generates a WireGuard keypair and displays the public key
+
+# Copy the CLI's public key to the engine
+echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
 ```
 
 Verify the connection:
@@ -90,9 +92,14 @@ The init wizard asks for:
 - **Engine host** — IP or hostname of the engine server (e.g., `192.168.1.10`).
 - **Engine gRPC port** — default `50051`.
 - **Node name** — unique name for this worker (default: hostname).
-- **Cluster password** — must match the engine password.
+- **Engine WireGuard public key** — the engine's public key from `banyan-engine init` (optional, enables encrypted control tunnel).
 
-The wizard connects to the engine and exchanges the password for an auth token. Only the token is stored locally.
+During init, Banyan generates a WireGuard keypair and displays the agent's public key. Copy this key to the engine:
+
+```bash
+# On the engine machine
+echo '<worker-1-public-key>' > /etc/banyan/whitelisted-keys/worker-1.pub
+```
 
 On Worker 2 (`192.168.1.12`):
 
@@ -146,7 +153,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=my-app-db-0
+      - DB_HOST=db
       - DB_PORT=5432
     depends_on:
       - db
@@ -194,9 +201,12 @@ sudo nerdctl ps
 You don't need to run `up` from the Engine node. Any machine with `banyan-cli` can deploy as long as it can reach the Engine's gRPC port:
 
 ```bash
-# Configure once (the engine must be running)
+# First configure the CLI (run once)
 sudo banyan-cli init
-# Enter the engine host, port, and password — receives an auth token
+# Enter the engine host and port — generates a keypair and displays the public key
+
+# Copy the CLI's public key to the engine
+echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
 
 # Deploy from anywhere
 banyan-cli up -f banyan.yaml
@@ -204,9 +214,10 @@ banyan-cli up -f banyan.yaml
 
 ## Adding more workers
 
-1. Install `banyan-agent`, containerd, and nerdctl on the new server.
-2. Run `sudo banyan-agent init` (enter engine host, port, node name, and password — the engine must be running).
-3. Run `sudo banyan-agent start`.
+1. Install `banyan-agent`, containerd, nerdctl, and wireguard-tools on the new server.
+2. Run `sudo banyan-agent init` (enter engine host, port, and node name).
+3. Copy the agent's public key to the engine: `echo '<pubkey>' > /etc/banyan/whitelisted-keys/<name>.pub`
+4. Run `sudo banyan-agent start`
 
 The new worker appears in `banyan-cli status` within seconds. Future deployments include it automatically.
 
@@ -219,5 +230,8 @@ That's the point — **scaling is adding a server, not editing a manifest.**
 | 50051 | TCP | Agents/CLI → Engine | gRPC (all control plane communication) |
 | 50052 | TCP | Engine → Agents | gRPC (log streaming) |
 | 5000 | TCP | Agents → Engine | OCI registry (image distribution) |
+| 51820 | UDP | Agent ↔ Agent | WireGuard overlay (encrypted container traffic) |
+| 51821 | UDP | Agents/CLI → Engine | WireGuard control tunnel (encrypted control plane) |
+| 4789 | UDP | Agent ↔ Agent | VXLAN overlay (fallback if WireGuard unavailable) |
 
-Workers don't need to communicate with each other directly.
+Workers communicate with each other over the overlay network (WireGuard or VXLAN) for cross-host container traffic. When the control tunnel is active, gRPC traffic (ports 50051/50052) flows inside the WireGuard tunnel and does not need to be exposed directly.

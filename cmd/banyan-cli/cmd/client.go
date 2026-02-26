@@ -12,6 +12,7 @@ import (
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // EngineClient is a gRPC client for the Engine API.
@@ -20,11 +21,11 @@ type EngineClient struct {
 	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient creates a new engine gRPC client with token-based auth.
-func NewEngineClient(engineAddr, token string) (*EngineClient, error) {
+// NewEngineClient creates a new engine gRPC client with public key auth.
+func NewEngineClient(engineAddr, publicKey string) (*EngineClient, error) {
 	conn, err := grpc.NewClient(engineAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: token}),
+		grpc.WithPerRPCCredentials(&banyanrpc.PublicKeyCredentials{PublicKey: publicKey}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
@@ -34,6 +35,33 @@ func NewEngineClient(engineAddr, token string) (*EngineClient, error) {
 		conn:   conn,
 		client: banyanpb.NewEngineServiceClient(conn),
 	}, nil
+}
+
+// NewAutoEngineClient creates a gRPC client using the best available auth method.
+// If a WireGuard control tunnel is active and engine WG public key is configured,
+// connects through the tunnel. Otherwise uses direct connection.
+func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
+	cfg, _ := types.LoadConfig(configPath)
+
+	if cfg.CLI.WGPublicKey == "" {
+		return nil, fmt.Errorf("no authentication configured. Run 'banyan-cli init'")
+	}
+
+	// If engine WG public key is configured, require the control tunnel to be active
+	if cfg.CLI.EngineWGPublicKey != "" {
+		if !overlay.ControlTunnelExists(types.ControlIfaceCLI) {
+			return nil, fmt.Errorf("WireGuard control tunnel (wg-control) is not active. Run 'sudo banyan-cli init' to set it up")
+		}
+		port := "50051"
+		if cfg.CLI.EnginePort != "" {
+			port = cfg.CLI.EnginePort
+		}
+		tunnelAddr := types.ControlTunnelEngineIP + ":" + port
+		return NewEngineClient(tunnelAddr, cfg.CLI.WGPublicKey)
+	}
+
+	// No engine WG public key — direct connection with public key metadata auth
+	return NewEngineClient(engineAddr, cfg.CLI.WGPublicKey)
 }
 
 // Close closes the gRPC connection.

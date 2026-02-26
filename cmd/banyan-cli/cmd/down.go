@@ -81,8 +81,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
-	token := types.GetCLIAuthToken(configPath)
-	client, err := NewEngineClient(engineAddr, token)
+	client, err := NewAutoEngineClient(engineAddr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to engine: %w", err)
 	}

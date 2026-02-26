@@ -81,10 +81,30 @@ sudo bin/banyan-cli setup cni
 ```
 
 This installs:
-- **Standard CNI plugins** (v1.8.0): bridge, host-local, portmap, vlan, etc.
-- **Flannel CNI plugin** (v1.7.1): VXLAN overlay networking
+- **Standard CNI plugins** (v1.8.0): bridge, host-local, portmap, loopback, etc.
 
 Installation directory: `/opt/cni/bin/`
+
+**Note**: Flannel is no longer required. Banyan uses a built-in overlay managed by the engine. WireGuard is the default overlay driver (encrypted L3 tunneling). VXLAN is kept as a fallback for environments without WireGuard kernel support. Both implement the `OverlayDriver` interface in `pkg/vpc/overlay/`.
+
+### WireGuard Control Tunnel
+
+In addition to the data plane overlay, Banyan uses a separate WireGuard tunnel (`wg-control`) to encrypt all control plane gRPC traffic between engine, agents, and CLI. This is distinct from the data plane overlay (`banyan-wg`).
+
+```
+Control plane (wg-control, port 51821/UDP):
+  Engine (10.200.0.1) ←→ Agent (10.200.X.Y)    # encrypted gRPC
+  Engine (10.200.0.1) ←→ CLI   (10.200.X.Y)    # encrypted gRPC
+
+Data plane (banyan-wg, port 51820/UDP):
+  Agent ←→ Agent                                 # encrypted container traffic
+```
+
+- Engine generates a keypair during `init` and displays its public key
+- Agents/CLI provide the engine's public key during their `init` to enable the tunnel
+- Tunnel IPs are deterministic (derived from the public key hash)
+- If WireGuard is unavailable, gRPC falls back to direct TCP with public key metadata auth
+- Implementation: `pkg/vpc/overlay/control_tunnel.go`
 
 ### Manual Installation
 
@@ -95,23 +115,18 @@ If you prefer manual installation:
 sudo mkdir -p /opt/cni/bin
 curl -L https://github.com/containernetworking/plugins/releases/download/v1.8.0/cni-plugins-linux-amd64-v1.8.0.tgz | \
   sudo tar -C /opt/cni/bin -xz
-
-# Install Flannel CNI plugin
-sudo curl -L https://github.com/flannel-io/cni-plugin/releases/download/v1.7.1-flannel1/flannel-amd64 \
-  -o /opt/cni/bin/flannel
-sudo chmod +x /opt/cni/bin/flannel
 ```
 
 ### Verify Installation
 
 ```bash
 ls -lh /opt/cni/bin/
-# Should show: flannel, bridge, host-local, portmap, and others
+# Should show: bridge, host-local, portmap, loopback, and others
 ```
 
 ## Integration Testing (Docker-in-Docker)
 
-Integration tests run inside a Docker container that provides an isolated environment with containerd, nerdctl, etcd, and Flannel. This Docker-in-Docker (DinD) approach allows testing network functionality without affecting the host system.
+Integration tests run inside a Docker container that provides an isolated environment with containerd, nerdctl, and etcd. This Docker-in-Docker (DinD) approach allows testing network functionality without affecting the host system.
 
 ### Prerequisites
 
@@ -146,7 +161,7 @@ docker run --rm --privileged -v /lib/modules:/lib/modules:ro banyan-integration-
 | `dns` | DNS server functionality | None |
 | `debug` | Debug and diagnostic tools | None |
 | `security` | iptables and security rules | iptables |
-| `cni` | CNI plugin with containerd | containerd, etcd, Flannel |
+| `cni` | CNI plugin with containerd | containerd, etcd |
 | `multihost` | Multi-host networking simulation | containerd, etcd |
 
 ### Debugging Integration Tests
@@ -161,13 +176,13 @@ docker run --rm -it --privileged -v /lib/modules:/lib/modules:ro banyan-integrat
 
 ### Test Container Architecture
 
-The integration test container uses a "kind-like" approach:
+The integration test container uses an isolated approach:
 
 1. **Base Image**: `golang:1.24-alpine` with necessary tools
 2. **Container Runtime**: containerd with nerdctl CLI
-3. **Networking**: Flannel VXLAN overlay network
+3. **Networking**: Built-in overlay managed by Engine (WireGuard default, VXLAN fallback)
 4. **Coordination**: etcd for distributed state
-5. **CNI Plugins**: Standard CNI plugins + Flannel CNI
+5. **CNI Plugins**: Standard CNI plugins (bridge, host-local, portmap, loopback)
 
 ### Important Notes
 
@@ -177,7 +192,7 @@ The integration test container uses a "kind-like" approach:
   - Running nested containers (containerd inside Docker)
 
 - **Kernel modules** (`/lib/modules:/lib/modules:ro`) are mounted for:
-  - VXLAN module support
+  - WireGuard and VXLAN module support
   - Bridge networking
   - Network filtering
 

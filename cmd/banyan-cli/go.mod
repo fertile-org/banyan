@@ -5,9 +5,9 @@ go 1.24.3
 require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
-	github.com/fertile-org/banyan/pkg/agent v0.0.0
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
+	github.com/fertile-org/banyan/pkg/vpc/overlay v0.0.0
 	github.com/spf13/cobra v1.10.1
 	google.golang.org/grpc v1.72.1
 	gopkg.in/yaml.v3 v3.0.1
@@ -52,7 +52,10 @@ require (
 
 replace (
 	github.com/fertile-org/banyan/pkg/agent => ../../pkg/agent
+	github.com/fertile-org/banyan/pkg/proxy => ../../pkg/proxy
 	github.com/fertile-org/banyan/pkg/rpc => ../../pkg/rpc
 	github.com/fertile-org/banyan/pkg/storage => ../../pkg/storage
 	github.com/fertile-org/banyan/pkg/types => ../../pkg/types
+	github.com/fertile-org/banyan/pkg/vpc => ../../pkg/vpc
+	github.com/fertile-org/banyan/pkg/vpc/overlay => ../../pkg/vpc/overlay
 )

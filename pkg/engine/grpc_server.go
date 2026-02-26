@@ -2,8 +2,6 @@ package engine
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"net"
@@ -12,40 +10,69 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // engineGRPCServer implements the EngineService gRPC server.
 type engineGRPCServer struct {
 	banyanpb.UnimplementedEngineServiceServer
-	store        storage.StateStore
-	sessions     sync.Map // map[agentName]sessionToken
-	registryURL  string
-	passwordHash string
+	store           storage.StateStore
+	sessions        sync.Map // map[agentName]sessionToken
+	registryURL     string
+	whitelistedKeys map[string]string        // publicKey → agentName
+	overlayType     string                   // "wireguard" or "vxlan"
+	allocator       *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
+	peerTracker     *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
+	vpcCIDR         string                   // VPC network CIDR (e.g., "10.0.0.0/16")
+}
+
+// grpcServerOptions configures the engine gRPC server.
+type grpcServerOptions struct {
+	Store           storage.StateStore
+	Port            string
+	RegistryURL     string
+	Allocator       *overlay.SubnetAllocator
+	PeerTracker     *overlay.PeerTracker
+	VPCCIDR         string
+	WhitelistedKeys map[string]string // publicKey → agentName
+	OverlayType     string            // "wireguard" or "vxlan"
 }
 
 // startEngineGRPC starts the gRPC server for agent communication.
-func startEngineGRPC(ctx context.Context, store storage.StateStore, port, passwordHash, registryURL string) (*engineGRPCServer, error) {
-	lis, err := net.Listen("tcp", ":"+port)
+func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCServer, error) {
+	lis, err := net.Listen("tcp", ":"+opts.Port)
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen on gRPC port %s: %w", port, err)
+		return nil, fmt.Errorf("failed to listen on gRPC port %s: %w", opts.Port, err)
 	}
 
 	engineSrv := &engineGRPCServer{
-		store:        store,
-		registryURL:  registryURL,
-		passwordHash: passwordHash,
+		store:           opts.Store,
+		registryURL:     opts.RegistryURL,
+		whitelistedKeys: opts.WhitelistedKeys,
+		overlayType:     opts.OverlayType,
+		allocator:       opts.Allocator,
+		peerTracker:     opts.PeerTracker,
+		vpcCIDR:         opts.VPCCIDR,
 	}
 
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(passwordHash, engineSrv)),
-		grpc.StreamInterceptor(banyanrpc.NewAuthStreamInterceptor(engineSrv)),
-	)
+	var srv *grpc.Server
+	if len(opts.WhitelistedKeys) > 0 {
+		validator := &banyanrpc.PublicKeyValidator{AllowedKeys: opts.WhitelistedKeys}
+		srv = grpc.NewServer(
+			grpc.UnaryInterceptor(banyanrpc.NewPublicKeyAuthInterceptor(validator)),
+			grpc.StreamInterceptor(banyanrpc.NewPublicKeyAuthStreamInterceptor(validator)),
+		)
+	} else {
+		// No auth — warn at startup but allow (development/testing)
+		srv = grpc.NewServer()
+	}
 
 	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
 
@@ -97,9 +124,37 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 
 	fmt.Printf("[Engine] Agent registered: %s (api: %s)\n", req.AgentName, req.ApiAddress)
 
-	return &banyanpb.RegisterResponse{
+	resp := &banyanpb.RegisterResponse{
 		RegistryUrl: s.registryURL,
-	}, nil
+		OverlayType: s.overlayType,
+	}
+
+	// Allocate VPC subnet for this agent
+	if s.allocator != nil && s.vpcCIDR != "" {
+		subnet, allocErr := s.allocator.Allocate(req.AgentName)
+		if allocErr != nil {
+			return nil, status.Errorf(codes.Internal, "failed to allocate subnet: %v", allocErr)
+		}
+		resp.VpcCidr = s.vpcCIDR
+		resp.AllocatedSubnet = subnet.String()
+
+		// Record peer info using the agent's reachable IP from gRPC connection
+		if s.peerTracker != nil {
+			hostIP := extractPeerIP(ctx)
+			if hostIP != nil {
+				peer := overlay.Peer{
+					Subnet:    *subnet,
+					HostIP:    hostIP,
+					VTEPIP:    overlay.VTEPIP(*subnet),
+					MAC:       overlay.DeterministicMAC(*subnet),
+					PublicKey: req.WgPublicKey,
+				}
+				s.peerTracker.Update(req.AgentName, peer)
+			}
+		}
+	}
+
+	return resp, nil
 }
 
 func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error) {
@@ -128,7 +183,54 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 		return nil, status.Errorf(codes.Internal, "failed to update heartbeat: %v", err)
 	}
 
-	return &banyanpb.HeartbeatResponse{}, nil
+	resp := &banyanpb.HeartbeatResponse{}
+
+	// Return service backends for cross-host load balancing (VPC-gated)
+	if s.peerTracker != nil {
+		resp.ServiceBackends = s.collectServiceBackends(ctx)
+	}
+
+	// Return VPC peer list if overlay networking is enabled
+	if s.peerTracker != nil {
+		// Update peer's host IP from gRPC connection (in case it changed)
+		hostIP := extractPeerIP(ctx)
+		if hostIP != nil {
+			if s.allocator != nil {
+				subnet, allocErr := s.allocator.Allocate(req.AgentName)
+				if allocErr == nil {
+					// Preserve existing public key from peer tracker
+					existingPeers := s.peerTracker.GetPeersExcluding("")
+					var existingPubKey string
+					for _, ep := range existingPeers {
+						if ep.Subnet.String() == subnet.String() {
+							existingPubKey = ep.PublicKey
+							break
+						}
+					}
+					p := overlay.Peer{
+						Subnet:    *subnet,
+						HostIP:    hostIP,
+						VTEPIP:    overlay.VTEPIP(*subnet),
+						MAC:       overlay.DeterministicMAC(*subnet),
+						PublicKey: existingPubKey,
+					}
+					s.peerTracker.Update(req.AgentName, p)
+				}
+			}
+		}
+
+		peers := s.peerTracker.GetPeersExcluding(req.AgentName)
+		for _, p := range peers {
+			resp.VpcPeers = append(resp.VpcPeers, &banyanpb.VPCPeer{
+				Subnet:    p.Subnet.String(),
+				HostIp:    p.HostIP.String(),
+				VtepMac:   p.MAC.String(),
+				PublicKey: p.PublicKey,
+			})
+		}
+	}
+
+	return resp, nil
 }
 
 func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTasksRequest) (*banyanpb.PollTasksResponse, error) {
@@ -205,10 +307,14 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
 
-	// Build a map of container statuses for quick lookup
+	// Build maps of container statuses and IPs for quick lookup
 	statusMap := make(map[string]string, len(req.Containers))
+	ipMap := make(map[string]string, len(req.Containers))
 	for _, c := range req.Containers {
 		statusMap[c.ContainerName] = c.Status
+		if c.Ip != "" {
+			ipMap[c.ContainerName] = c.Ip
+		}
 	}
 
 	// Update matching tasks in store
@@ -229,6 +335,9 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		if containerStatus, ok := statusMap[task.ContainerName]; ok {
 			task.ContainerStatus = containerStatus
 			task.ContainerCheckedAt = time.Now()
+			if ip, hasIP := ipMap[task.ContainerName]; hasIP {
+				task.ContainerIP = ip
+			}
 			if err := s.store.Save(ctx, key, &task); err != nil {
 				log.Printf("WARNING: failed to save container health for %s: %v", task.ContainerName, err)
 			}
@@ -519,62 +628,6 @@ func (s *engineGRPCServer) Health(ctx context.Context, req *banyanpb.HealthReque
 	return &banyanpb.HealthResponse{Status: "ok"}, nil
 }
 
-// ExchangeToken validates the password and returns a random auth token.
-func (s *engineGRPCServer) ExchangeToken(ctx context.Context, req *banyanpb.ExchangeTokenRequest) (*banyanpb.ExchangeTokenResponse, error) {
-	if req.Name == "" {
-		return nil, status.Error(codes.InvalidArgument, "name is required")
-	}
-	if req.Role == "" {
-		return nil, status.Error(codes.InvalidArgument, "role is required")
-	}
-
-	// Delete existing token for this name (re-issue)
-	var existingHash string
-	indexKey := types.KeyTokenIndex + req.Name
-	if err := s.store.Get(ctx, indexKey, &existingHash); err == nil {
-		_ = s.store.Delete(ctx, types.KeyTokens+existingHash)
-		_ = s.store.Delete(ctx, indexKey)
-	}
-
-	// Generate random token (32 bytes → 64-char hex)
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to generate token: %v", err)
-	}
-	token := hex.EncodeToString(tokenBytes)
-	tokenHash := banyanrpc.HashPassword(token)
-
-	// Build token record with TTL for CLI tokens
-	record := types.TokenRecord{Name: req.Name, Role: req.Role}
-	if req.Role == "cli" {
-		record.ExpiresAt = time.Now().Add(types.DefaultCLITokenTTL)
-	}
-
-	// Store dual index: hash→record and name→hash
-	if err := s.store.Save(ctx, types.KeyTokens+tokenHash, &record); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to store token: %v", err)
-	}
-	if err := s.store.Save(ctx, indexKey, tokenHash); err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to store token index: %v", err)
-	}
-
-	fmt.Printf("[Engine] Token issued for %s (role: %s)\n", req.Name, req.Role)
-
-	return &banyanpb.ExchangeTokenResponse{Token: token}, nil
-}
-
-// ValidateToken implements rpc.TokenValidator by looking up the token hash in the store.
-func (s *engineGRPCServer) ValidateToken(ctx context.Context, tokenHash string) error {
-	var record types.TokenRecord
-	if err := s.store.Get(ctx, types.KeyTokens+tokenHash, &record); err != nil {
-		return status.Error(codes.Unauthenticated, "invalid auth token")
-	}
-	if record.IsExpired() {
-		return status.Error(codes.Unauthenticated, "token expired, run 'auth' to re-authenticate")
-	}
-	return nil
-}
-
 // teardownDeployment creates stop_and_remove tasks for running containers and sets
 // the deployment to StatusStopping. If there are no running containers (e.g. deployment
 // is still pending), it marks the deployment StatusStopped directly.
@@ -671,7 +724,9 @@ func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string, 
 
 // --- Per-service deploy ---
 
-// deployServices handles per-service redeployment using the recreate strategy.
+// deployServices handles per-service redeployment using the blue-green strategy.
+// With the TCP proxy on each agent, containers no longer bind host ports directly,
+// so old and new containers can run simultaneously without port conflicts.
 func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, allServices map[string]types.ServiceRecord, serviceNames []string, tags []string) (*banyanpb.DeployRPCResponse, error) {
 	// Validate service names exist
 	for _, name := range serviceNames {
@@ -697,16 +752,15 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 	// Clean up non-running deployments (pending/deploying/failed)
 	s.teardownNonRunningDeployments(ctx, appName, tags)
 
-	// Create stop tasks for target services in the running deployment
-	s.teardownDeploymentServices(ctx, runningDeploy.ID, serviceNames)
-
 	// Filter services to only the target ones
 	filteredServices := make(map[string]types.ServiceRecord, len(serviceNames))
 	for _, name := range serviceNames {
 		filteredServices[name] = allServices[name]
 	}
 
-	// Create new deployment with recreate strategy
+	// Create new deployment with blue-green strategy.
+	// Old containers stay running until the new deployment reaches StatusRunning,
+	// then the engine's blueGreenTeardownOld() tears them down.
 	deploymentID := fmt.Sprintf("%s-%d", appName, time.Now().Unix())
 	record := &types.DeploymentRecord{
 		ID:             deploymentID,
@@ -716,7 +770,7 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 		Tags:           tags,
 		CreatedAt:      time.Now(),
 		UpdatedAt:      time.Now(),
-		UpdateStrategy: types.UpdateStrategyRecreate,
+		UpdateStrategy: types.UpdateStrategyBlueGreen,
 		ReplacesID:     runningDeploy.ID,
 	}
 
@@ -939,4 +993,79 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 		Version:  m.Version,
 		Services: services,
 	}
+}
+
+// collectServiceBackends gathers all running container backends across all agents.
+// Used for cross-host load balancing via heartbeat responses.
+func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyanpb.ServiceBackend {
+	// Build set of running deployment IDs — only include backends from active deployments
+	runningDeployments := map[string]bool{}
+	deployKeys, err := s.store.List(ctx, types.KeyDeployments)
+	if err != nil {
+		return nil
+	}
+	for _, key := range deployKeys {
+		var d types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &d); err != nil {
+			continue
+		}
+		if d.Status == types.StatusRunning {
+			runningDeployments[d.ID] = true
+		}
+	}
+
+	nodeKeys, err := s.store.List(ctx, types.KeyNodes)
+	if err != nil {
+		return nil
+	}
+
+	var backends []*banyanpb.ServiceBackend
+	for _, nodeKey := range nodeKeys {
+		var node types.NodeRecord
+		if err := s.store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+
+		taskKeys, err := s.store.List(ctx, types.KeyTasks+node.Name+"/")
+		if err != nil {
+			continue
+		}
+
+		for _, taskKey := range taskKeys {
+			var task types.TaskRecord
+			if err := s.store.Get(ctx, taskKey, &task); err != nil {
+				continue
+			}
+			// Only include running containers from active deployments
+			if task.Type != types.TaskTypeCreateAndStart ||
+				task.Status != types.StatusCompleted ||
+				task.ContainerStatus != types.StatusRunning ||
+				task.ContainerIP == "" ||
+				!runningDeployments[task.DeploymentID] {
+				continue
+			}
+			backends = append(backends, &banyanpb.ServiceBackend{
+				ContainerName: task.ContainerName,
+				ContainerIp:   task.ContainerIP,
+				Ports:         task.Ports,
+				AgentName:     task.AgentID,
+				ServiceName:   task.ServiceName,
+			})
+		}
+	}
+
+	return backends
+}
+
+// extractPeerIP extracts the remote IP address from the gRPC connection context.
+func extractPeerIP(ctx context.Context) net.IP {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return nil
+	}
+	addr, ok := p.Addr.(*net.TCPAddr)
+	if !ok {
+		return nil
+	}
+	return addr.IP
 }

@@ -10,10 +10,13 @@ RUN apt-get update && apt-get install -y \
     containerd \
     iptables \
     iproute2 \
+    ethtool \
+    tcpdump \
     curl \
     netcat-openbsd \
     procps \
     ca-certificates \
+    wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Create CNI directories
@@ -27,7 +30,8 @@ RUN curl -L https://github.com/containernetworking/plugins/releases/download/v1.
 RUN curl -L https://github.com/containerd/nerdctl/releases/download/v2.0.3/nerdctl-2.0.3-linux-amd64.tar.gz \
     | tar -xz -C /usr/local/bin nerdctl
 
-# Copy pre-built binaries
+# Copy pre-built binaries (cache-bust file forces rebuild when binaries change)
+COPY bin/.cache-bust /tmp/.cache-bust
 COPY bin/banyan-engine /usr/local/bin/banyan-engine
 COPY bin/banyan-agent /usr/local/bin/banyan-agent
 COPY bin/banyan-cli /usr/local/bin/banyan-cli

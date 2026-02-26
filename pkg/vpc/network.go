@@ -2,30 +2,54 @@ package vpc
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
-	"os/exec"
+	"io"
+	"net/http"
 	"strings"
 )
 
-// InitializeNetwork configures the Flannel network in etcd
-// This writes the network configuration that Flannel daemons will read
+// etcdV3PutRequest is the request body for the etcd v3 HTTP gateway PUT.
+type etcdV3PutRequest struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// InitializeNetwork configures the Flannel network in etcd.
+// Uses the etcd v3 HTTP gateway API because Flannel v0.22.x reads from the v3 store.
 func InitializeNetwork(ctx context.Context, etcdEndpoints []string, vpcCIDR string) error {
-	// Create Flannel network config JSON
 	config := fmt.Sprintf(`{"Network": "%s", "SubnetLen": 24, "Backend": {"Type": "vxlan"}}`, vpcCIDR)
-	
-	// Use etcdctl command to write config (same as working test)
-	// This ensures compatibility with Flannel's expectations
-	args := []string{
-		"--endpoints=" + strings.Join(etcdEndpoints, ","),
-		"put", "/coreos.com/network/config", config,
+
+	endpoint := etcdEndpoints[0]
+	apiURL := strings.TrimRight(endpoint, "/") + "/v3/kv/put"
+
+	putReq := etcdV3PutRequest{
+		Key:   base64.StdEncoding.EncodeToString([]byte("/coreos.com/network/config")),
+		Value: base64.StdEncoding.EncodeToString([]byte(config)),
 	}
-	
-	cmd := exec.CommandContext(ctx, "etcdctl", args...)
-	output, err := cmd.CombinedOutput()
+	body, err := json.Marshal(putReq)
 	if err != nil {
-		return fmt.Errorf("failed to write Flannel config to etcd: %w\nOutput: %s", err, output)
+		return fmt.Errorf("failed to marshal etcd put request: %w", err)
 	}
-	
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, strings.NewReader(string(body)))
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to write Flannel config to etcd: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("etcd returned status %d: %s", resp.StatusCode, respBody)
+	}
+
 	return nil
 }
 

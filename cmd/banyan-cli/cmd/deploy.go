@@ -158,8 +158,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
 	}
 
-	token := types.GetCLIAuthToken(configPath)
-	client, err := NewEngineClient(engineAddr, token)
+	client, err := NewAutoEngineClient(engineAddr)
 	if err != nil {
 		return fmt.Errorf("failed to connect to engine: %w", err)
 	}
@@ -211,6 +210,9 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 	defer ticker.Stop()
 
 	lastStatus := ""
+	pendingStart := time.Now()
+	pendingWarned := false
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -241,6 +243,18 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 					fmt.Printf("  Status: FAILED (%s)\n", d.Error)
 					fmt.Println("\n========================================")
 					return fmt.Errorf("deployment failed: %s", d.Error)
+				}
+			}
+
+			// Warn if deployment is stuck in pending (no agents picking it up)
+			if d.Status == types.StatusPending && !pendingWarned && time.Since(pendingStart) > 10*time.Second {
+				pendingWarned = true
+				fmt.Println("  WARNING: Deployment is still pending — no tasks have been scheduled.")
+				fmt.Println("  Possible causes:")
+				fmt.Println("    - No agents are connected with matching tags")
+				fmt.Println("    - A previous deployment is still being torn down")
+				if len(deployTags) > 0 {
+					fmt.Printf("  Deployment tags: %v\n", deployTags)
 				}
 			}
 		}

@@ -6,17 +6,12 @@ import (
 	"time"
 )
 
-// DefaultCLITokenTTL is how long CLI tokens remain valid before requiring re-authentication.
-const DefaultCLITokenTTL = 30 * 24 * time.Hour // 30 days
-
 // Etcd key prefixes (relative to store prefix "/banyan/").
 const (
 	KeyDeployments = "deployments/"
 	KeyNodes       = "nodes/"
 	KeyTasks       = "tasks/"
 	KeyRegistry    = "config/registry"
-	KeyTokens      = "tokens/"
-	KeyTokenIndex  = "token-index/"
 )
 
 // Deployment statuses.
@@ -46,21 +41,6 @@ const (
 	// Causes downtime but requires no extra resources.
 	UpdateStrategyRecreate = "recreate"
 )
-
-// TokenRecord is stored at /tokens/{sha256-hash} in etcd.
-type TokenRecord struct {
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
-	Name      string    `json:"name"`
-	Role      string    `json:"role"`
-}
-
-// IsExpired returns true if the token has a non-zero expiry time that is in the past.
-func (t *TokenRecord) IsExpired() bool {
-	if t.ExpiresAt.IsZero() {
-		return false
-	}
-	return time.Now().After(t.ExpiresAt)
-}
 
 // DeploymentRecord is stored at /deployments/<id> in etcd.
 type DeploymentRecord struct {
@@ -94,6 +74,7 @@ type TaskRecord struct {
 	Result             *TaskResultRecord `json:"result,omitempty"`
 	DeploymentID       string            `json:"deployment_id"`
 	ContainerName      string            `json:"container_name"`
+	ContainerIP        string            `json:"container_ip,omitempty"`
 	Error              string            `json:"error,omitempty"`
 	ID                 string            `json:"id"`
 	ContainerStatus    string            `json:"container_status,omitempty"`

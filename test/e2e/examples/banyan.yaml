@@ -1,38 +1,49 @@
 # Banyan E2E Test Application
-# A simple multi-service application for testing
+# Realistic multi-service app: API server with replicas + database
+# API connects to Redis via DNS name "db.internal" (resolved by agent-local DNS server)
 
 name: e2e-test-app
 
 services:
-  # Simple web server
-  web:
-    image: nginx:alpine
+  # Node.js API server — connects to Redis via DNS, returns PONG on /db
+  api:
+    image: node:22-alpine
     deploy:
       replicas: 2
     ports:
-      - "80:80"
-
-  # API service
-  api:
-    image: alpine:latest
-    deploy:
-      replicas: 2
-    command:
-      - sh
-      - -c
-      - "echo 'API running' && sleep infinity"
+      - "3000:3000"
     environment:
-      - APP_ENV=test
-      - LOG_LEVEL=debug
+      - REDIS_HOST=db.internal
+    command:
+      - node
+      - -e
+      - |
+        const http = require('http');
+        const net = require('net');
+        function redisPing(host, cb) {
+          const sock = net.createConnection(6379, host);
+          sock.setTimeout(3000);
+          sock.on('connect', () => sock.write('PING\r\n'));
+          sock.on('data', d => { sock.destroy(); cb(null, d.toString().trim()); });
+          sock.on('error', e => { sock.destroy(); cb(e); });
+          sock.on('timeout', () => { sock.destroy(); cb(new Error('timeout')); });
+        }
+        http.createServer((req, res) => {
+          if (req.url === '/db') {
+            redisPing(process.env.REDIS_HOST || 'db', (err, reply) => {
+              if (err) { res.writeHead(502); res.end('Redis error: ' + err.message); }
+              else { res.writeHead(200); res.end('Redis says: ' + reply); }
+            });
+          } else {
+            res.writeHead(200, {'Content-Type': 'text/plain'});
+            res.end('OK');
+          }
+        }).listen(3000, () => console.log('API server running on port 3000'));
     depends_on:
-      - web
+      - db
 
-  # Background worker
-  worker:
-    image: alpine:latest
-    command:
-      - sh
-      - -c
-      - "echo 'Worker running' && sleep infinity"
-    environment:
-      - WORKER_ID=1
+  # Redis database (single instance, no exposed ports)
+  # Must bind to 0.0.0.0 — Redis 7 defaults to 127.0.0.1 only
+  db:
+    image: redis:7-alpine
+    command: ["redis-server", "--bind", "0.0.0.0", "--protected-mode", "no"]

@@ -22,6 +22,25 @@
   <a href="./DEVELOPMENT.md">Development</a>
 </p>
 
+<table align="center">
+  <tr>
+    <td align="center" valign="top">
+      <sub><strong>SECURED BY</strong></sub><br><br>
+      <img src="website/public/wireguard.webp" alt="WireGuard" height="60">
+    </td>
+    <td align="center" valign="top">
+      <sub><strong>BUILT WITH</strong></sub><br><br>
+      <img src="website/public/containerd-logo.png" alt="containerd" height="25">
+      &nbsp;&nbsp;
+      <img src="website/public/nerdctl-logo.webp" alt="nerdctl" height="25">
+      <br><br>
+      <img src="website/public/etcd-logo.png" alt="etcd" height="25">
+      &nbsp;&nbsp;
+      <img src="website/public/go_logo.png" alt="Go" height="25">
+    </td>
+  </tr>
+</table>
+
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
 ## From one server to many
@@ -115,15 +134,17 @@ One-time setup (run once per machine):
 
 ```bash
 # Control plane
-sudo banyan-engine init        # Set a cluster password
+sudo banyan-engine init        # Generate keypair, configure etcd
 sudo banyan-engine start       # Starts the engine, etcd, and image registry
 
 # Each worker
-sudo banyan-agent init         # Connect to the engine
+sudo banyan-agent init         # Generate keypair, set engine address
+# Copy agent's public key to engine: echo '<key>' > /etc/banyan/whitelisted-keys/worker-1.pub
 sudo banyan-agent start        # Register and start accepting containers
 
 # Your machine
-sudo banyan-cli init           # Authenticate with the engine
+sudo banyan-cli init           # Generate keypair, set engine address
+# Copy CLI's public key to engine: echo '<key>' > /etc/banyan/whitelisted-keys/cli.pub
 ```
 
 Then deploy — every time, one command:
@@ -177,7 +198,7 @@ graph TD
     Engine -.-|/metrics| Prom
 ```
 
-The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is authenticated over gRPC.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All gRPC communication is authenticated via public key whitelist and optionally encrypted through a WireGuard control tunnel (port 51821/UDP).
 
 ## Documentation
 

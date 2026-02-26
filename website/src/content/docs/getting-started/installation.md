@@ -33,8 +33,8 @@ The script installs:
 
 | Role | What gets installed |
 |------|-------------------|
-| Engine | `banyan-engine`, `banyan-cli`, etcd |
-| Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl, CNI plugins, BuildKit |
+| Engine | `banyan-engine`, `banyan-cli`, etcd, wireguard-tools |
+| Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl, CNI plugins, wireguard-tools, BuildKit |
 
 Supported distros: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux. Architectures: x86_64, ARM64.
 
@@ -77,8 +77,8 @@ scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 
 When building from source, you still need runtime dependencies on each node:
 
-- **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below).
-- **Worker nodes**: containerd, nerdctl, BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
+- **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below), wireguard-tools (for control tunnel).
+- **Worker nodes**: containerd, nerdctl, CNI plugins, wireguard-tools (for overlay and control tunnel), BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
 
 ### Etcd (state store)
 
@@ -111,13 +111,15 @@ You must install, run, and manage external etcd yourself. See the [etcd document
 
 ## Setup order
 
-The engine must be running before you initialize agents or the CLI. During init, each component connects to the engine to exchange the cluster password for an auth token (see [Authentication](/guides/authentication/) for details).
+Each component generates a WireGuard keypair during `init`. Agent and CLI public keys must be copied to the engine's whitelisted keys directory before they can connect (see [Authentication](/guides/authentication/) for details).
 
 The order is always:
 
-1. **Engine**: `banyan-engine init` → `banyan-engine start`
-2. **Agents**: `banyan-agent init` → `banyan-agent start` (on each worker)
-3. **CLI**: `banyan-cli init` (on any machine where you want to deploy from)
+1. **Engine**: `banyan-engine init` → note the engine's public key → `banyan-engine start`
+2. **Agents**: `banyan-agent init` (provide engine's public key for encrypted tunnel) → copy agent's public key to engine → `banyan-agent start` (on each worker)
+3. **CLI**: `banyan-cli init` (provide engine's public key for encrypted tunnel) → copy CLI's public key to engine (on any machine where you want to deploy from)
+
+The engine's public key is optional during agent/CLI init. If provided, all gRPC traffic is encrypted via a WireGuard control tunnel (port 51821/UDP). Without it, gRPC runs over plain TCP with public key metadata authentication.
 
 ## Verify
 

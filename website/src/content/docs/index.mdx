@@ -18,6 +18,26 @@ hero:
 
 import { Card, CardGrid, Aside } from "@astrojs/starlight/components";
 
+<div class="not-content" style="display: flex; align-items: stretch; justify-content: center; gap: 1.5rem; margin: 1rem auto 2.75rem; flex-wrap: wrap;">
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.25rem 2rem; background: linear-gradient(160deg, #f5f0e8, #e8ddd0); border: 1px solid #d4c9bb; border-radius: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);">
+    <span style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; color: #7a6e60;">Secured by</span>
+    <img src="/wireguard.webp" alt="WireGuard" style="height: 75px; margin: auto 0;" />
+  </div>
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.25rem 2rem; background: linear-gradient(160deg, #f5f0e8, #e8ddd0); border: 1px solid #d4c9bb; border-radius: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);">
+    <span style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; color: #7a6e60;">Built with</span>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; margin: auto 0;">
+      <div style="display: flex; align-items: center; gap: 1.5rem;">
+        <img src="/containerd-logo.png" alt="containerd" style="height: 32px;" />
+        <img src="/nerdctl-logo.webp" alt="nerdctl" style="height: 32px;" />
+      </div>
+      <div style="display: flex; align-items: center; gap: 1.5rem;">
+        <img src="/etcd-logo.png" alt="etcd" style="height: 32px;" />
+        <img src="/go_logo.png" alt="Go" style="height: 32px;" />
+      </div>
+    </div>
+  </div>
+</div>
+
 <Aside type="caution" title="Under experiment">
   Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 </Aside>
@@ -82,19 +102,19 @@ Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and
   <Card title="The YAML you already know" icon="document">
     `services`, `build`, `image`, `ports`, `environment`, `depends_on` — same fields, same structure. If you've written a docker-compose.yml, you can write a banyan.yaml.
   </Card>
-  <Card title="Three binaries, nothing else" icon="setting">
+  <Card title="Three binaries, nothing else" icon="seti:go">
     `banyan-engine`, `banyan-agent`, `banyan-cli`. No package managers, no plugins, no Helm charts, no YAML templating. Download, run, deploy.
   </Card>
-  <Card title="Built-in image registry" icon="star">
+  <Card title="Built-in image registry" icon="seti:docker">
     Use `build:` in your manifest and Banyan builds, stores, and distributes images across your cluster. No Docker Hub account needed. No private registry to configure.
   </Card>
-  <Card title="Containers talk across servers" icon="rocket">
+  <Card title="Containers talk across servers" icon="seti:license">
     Services on different machines communicate as if they were on the same network. Banyan sets up the overlay network and DNS automatically.
   </Card>
-  <Card title="Monitor from your terminal" icon="shield">
+  <Card title="Monitor from your terminal" icon="seti:cake_php">
     `banyan-cli status` shows every container, which server it's on, and whether it's healthy. `banyan-cli logs` streams from any container, any node. A live terminal dashboard (`banyan-cli monitor`) is [coming soon](/roadmap/).
   </Card>
-  <Card title="Open source, self-hosted" icon="approve-check">
+  <Card title="Open source, self-hosted" icon="openCollective">
     Apache 2.0. Inspect the code, modify it, run it on your own servers. No vendor lock-in, no usage-based pricing.
   </Card>
 </CardGrid>

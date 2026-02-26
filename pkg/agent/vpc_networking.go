@@ -6,6 +6,10 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
@@ -20,6 +24,13 @@ var (
 	dnsServerFactory     = func(m *dns.Manager, c dns.ServerConfig) *dns.Server {
 		return dns.NewServer(m, c)
 	}
+	reclaimDNSPort = defaultReclaimDNSPort
+)
+
+// Paths used by findUDPListenerPID — variables for testability.
+var (
+	procNetUDP = "/proc/net/udp"
+	procDir    = "/proc"
 )
 
 const (
@@ -141,6 +152,88 @@ func detectHostIP() (net.IP, error) {
 	return nil, fmt.Errorf("no non-loopback IPv4 address found")
 }
 
+// defaultReclaimDNSPort finds and kills the process holding a UDP port on a specific IP.
+// This handles the case where a previous agent was killed without cleanup (e.g., terminal crash).
+func defaultReclaimDNSPort(ip string, port int) error {
+	pid, err := findUDPListenerPID(ip, port)
+	if err != nil {
+		return err
+	}
+	if pid <= 1 {
+		return fmt.Errorf("refusing to kill PID %d", pid)
+	}
+
+	fmt.Printf("  Killing stale process (PID %d) holding %s:%d...\n", pid, ip, port)
+	if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
+		return fmt.Errorf("kill PID %d: %w", pid, killErr)
+	}
+	time.Sleep(200 * time.Millisecond)
+	return nil
+}
+
+// findUDPListenerPID finds the PID of the process bound to a specific IP:port on UDP.
+// Parses /proc/net/udp for the socket inode, then walks /proc/[pid]/fd/ to find the owner.
+func findUDPListenerPID(ip string, port int) (int, error) {
+	parsedIP := net.ParseIP(ip).To4()
+	if parsedIP == nil {
+		return 0, fmt.Errorf("invalid IPv4: %s", ip)
+	}
+
+	// /proc/net/udp stores IPs as 32-bit little-endian hex
+	hexAddr := fmt.Sprintf("%02X%02X%02X%02X:%04X",
+		parsedIP[3], parsedIP[2], parsedIP[1], parsedIP[0], port)
+
+	data, err := os.ReadFile(procNetUDP)
+	if err != nil {
+		return 0, fmt.Errorf("read %s: %w", procNetUDP, err)
+	}
+
+	var inode string
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 10 && fields[1] == hexAddr {
+			inode = fields[9]
+			break
+		}
+	}
+	if inode == "" || inode == "0" {
+		return 0, fmt.Errorf("no UDP socket found for %s:%d", ip, port)
+	}
+
+	// Walk /proc/[pid]/fd/ to find which PID owns the socket inode
+	target := "socket:[" + inode + "]"
+	entries, readErr := os.ReadDir(procDir)
+	if readErr != nil {
+		return 0, fmt.Errorf("read %s: %w", procDir, readErr)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, parseErr := strconv.Atoi(entry.Name())
+		if parseErr != nil {
+			continue
+		}
+		fdPath := filepath.Join(procDir, entry.Name(), "fd")
+		fds, fdErr := os.ReadDir(fdPath)
+		if fdErr != nil {
+			continue // permission denied for other users' processes
+		}
+		for _, fd := range fds {
+			link, linkErr := os.Readlink(filepath.Join(fdPath, fd.Name()))
+			if linkErr != nil {
+				continue
+			}
+			if link == target {
+				return pid, nil
+			}
+		}
+	}
+
+	return 0, fmt.Errorf("no process found for socket inode %s", inode)
+}
+
 // initializeDNS creates a DNS manager and server, binding to the bridge gateway IP.
 // Called once during Agent.Run() after VPC networking is initialized.
 func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error {
@@ -151,22 +244,40 @@ func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error
 
 	// Gateway IP is the first usable IP in the subnet (VTEP IP)
 	gatewayIP := overlay.VTEPIP(*ipnet)
+	bindAddr := gatewayIP.String() + ":53"
 
 	manager := dnsManagerFactory()
 	server := dnsServerFactory(manager, dns.ServerConfig{
-		BindAddr:     gatewayIP.String() + ":53",
+		BindAddr:     bindAddr,
 		InternalZone: "internal",
 		UpstreamDNS:  "8.8.8.8:53",
 	})
 
 	if startErr := server.Start(); startErr != nil {
-		return fmt.Errorf("DNS server failed to start: %w", startErr)
+		// If a stale agent process is holding the port, reclaim and retry
+		if strings.Contains(startErr.Error(), "address already in use") {
+			fmt.Printf("  DNS port %s in use by stale process, reclaiming...\n", bindAddr)
+			if reclaimErr := reclaimDNSPort(gatewayIP.String(), 53); reclaimErr != nil {
+				fmt.Printf("  WARNING: Could not reclaim port: %v\n", reclaimErr)
+			}
+			// Create fresh server and retry
+			server = dnsServerFactory(manager, dns.ServerConfig{
+				BindAddr:     bindAddr,
+				InternalZone: "internal",
+				UpstreamDNS:  "8.8.8.8:53",
+			})
+			if retryErr := server.Start(); retryErr != nil {
+				return fmt.Errorf("DNS server failed to start after reclaim: %w", retryErr)
+			}
+		} else {
+			return fmt.Errorf("DNS server failed to start: %w", startErr)
+		}
 	}
 
 	a.dnsManager = manager
 	a.dnsServer = server
 	a.gatewayIP = gatewayIP.String()
-	fmt.Printf("  DNS server started (bind: %s:53)\n", a.gatewayIP)
+	fmt.Printf("  DNS server started (bind: %s)\n", bindAddr)
 
 	return nil
 }

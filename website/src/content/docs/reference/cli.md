@@ -11,7 +11,7 @@ Banyan uses three binaries. Install only what each machine needs.
 |--------|------|------------|
 | `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes |
-| `banyan-cli` | Client (up, status, logs, down) | Any machine |
+| `banyan-cli` | Client (up, status, logs, dashboard, down) | Any machine |
 
 ---
 
@@ -333,4 +333,58 @@ banyan-cli logs my-app-web-0 -f
 
 # Show last 100 lines and follow
 banyan-cli logs my-app-web-0 -f --tail 100
+```
+
+### dashboard
+
+Open a live terminal dashboard showing real-time cluster status.
+
+```bash
+banyan-cli dashboard
+```
+
+The dashboard auto-refreshes and provides five views you can switch between with number keys:
+
+| View | Key | Shows |
+|------|-----|-------|
+| Overview | `1` | Engine health, cluster summary, agents, deployments, and recent events — all on one screen |
+| Agents | `2` | All connected agents with CPU, memory, disk usage, and container count |
+| Deploys | `3` | All deployments grouped by name, with health status and version history |
+| Containers | `4` | Flat list of all containers across the cluster |
+| Engine | `5` | Detailed engine metrics — CPU, memory, disk with progress bars |
+
+Navigate lists with arrow keys or `j`/`k`, press `Enter` to drill into agent or deployment details, and `Esc` to go back. Press `p` to open the command palette for quick view switching, or `?` for keyboard shortcuts.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--refresh` | `5s` | Auto-refresh interval |
+
+```
+╭─ Engine ────────────────────╮╭─ Cluster ───────────────────╮
+│ ● Running  2d 5h            ││ Agents        2/2 ●●        │
+│ CPU  ██░░░░░░░░░░░░░░  12%  ││ Deployments   3 running     │
+│ Mem  ████░░░░░░░░░░░░  28%  ││ Containers    8/8 healthy   │
+│ Disk ██████░░░░░░░░░░  42%  │╰─────────────────────────────╯
+╰─────────────────────────────╯
+╭─ Agents (2) ────────────────────────────────────────────────╮
+│  Name        Status    CPU          Mem          Containers  │
+│  worker-1    ● ready   ████░░  22%  ██░░░░  15%  5          │
+│  worker-2    ● ready   ███░░░  18%  ██░░░░  12%  3          │
+╰─────────────────────────────────────────────────────────────╯
+╭─ Deployments (3 active) ────────────────────────────────────╮
+│  Name        Status      Healthy  Services  Age             │
+│  my-app      ● running   5/5      3         2d 5h           │
+│  staging     ● running   2/2      2         1d 3h           │
+│  jobs        ● running   1/1      1         4h 20m          │
+╰─────────────────────────────────────────────────────────────╯
+```
+
+Examples:
+
+```bash
+# Open the dashboard with default 5s refresh
+banyan-cli dashboard
+
+# Use a slower refresh interval
+banyan-cli dashboard --refresh 30s
 ```

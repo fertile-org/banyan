@@ -128,13 +128,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cli config input: %w", err)
 	}
 
+	// Write private key to file
+	keyPath, writeErr := types.WritePrivateKeyFile(types.DefaultKeysDir, "cli", privKey)
+	if writeErr != nil {
+		return fmt.Errorf("failed to write private key: %w", writeErr)
+	}
+	fmt.Printf("  %s Private key: %s\n", styleOK.Render("[OK]"), keyPath)
+
 	// Load existing config to preserve other sections (agent, engine)
 	cfg, _ := types.LoadConfig(configPath)
 	cfg.CLI = types.CLIConfig{
 		EngineHost:        engineHost,
 		EnginePort:        enginePort,
 		Name:              cliName,
-		WGPrivateKey:      privKey,
+		WGPrivateKeyFile:  keyPath,
 		WGPublicKey:       pubKey,
 		EngineWGPublicKey: engineWGPubKey,
 	}

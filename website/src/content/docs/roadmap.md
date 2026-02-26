@@ -101,6 +101,18 @@ See [Redeployment](/guides/redeployment/) for details.
 
 ---
 
+## Milestone 4.5 — Rootless Mode
+
+Run Banyan without root. Today every component needs `sudo` — the engine to manage etcd and WireGuard, the agent to run containerd and configure networking, even the CLI to write config during `init`. This milestone removes that requirement so Banyan works on shared servers, locked-down environments, and developer machines without elevated privileges.
+
+- **Rootless containerd support**: Agent detects rootless containerd and adapts nerdctl commands accordingly (user socket, unprivileged namespace)
+- **User-space networking**: Replace kernel WireGuard with wireguard-go and iptables DNAT with a Go TCP proxy — no kernel modules, no sysctl writes, no `/proc` access
+- **User-scoped config and data**: Config in `~/.config/banyan/` and data in `~/.local/share/banyan/` instead of `/etc/banyan/` and `/var/lib/banyan/` — no root needed for `init`
+- **Unprivileged ports only**: All default ports already above 1024 (gRPC 50051, registry 5000); services needing 80/443 can use port mapping from a higher port
+- **Graceful fallback**: When running as root, Banyan uses the faster kernel-mode networking (WireGuard, iptables). Without root, it transparently falls back to user-space equivalents. Same manifest, same commands — just without `sudo`
+
+---
+
 ## Milestone 5 — Metrics Collection
 
 Collect and expose resource metrics from every node and container in Prometheus-compatible format.

@@ -469,6 +469,128 @@ func TestSaveConfig_WriteError(t *testing.T) {
 	}
 }
 
+func TestWritePrivateKeyFile(t *testing.T) {
+	t.Run("writes key file with correct permissions", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		keysDir := filepath.Join(tmpDir, "keys")
+
+		path, err := WritePrivateKeyFile(keysDir, "engine", "test-private-key-content")
+		if err != nil {
+			t.Fatalf("WritePrivateKeyFile failed: %v", err)
+		}
+
+		expectedPath := filepath.Join(keysDir, "engine.key")
+		if path != expectedPath {
+			t.Errorf("expected path %s, got %s", expectedPath, path)
+		}
+
+		// Check file permissions
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat failed: %v", err)
+		}
+		if perm := info.Mode().Perm(); perm != 0600 {
+			t.Errorf("expected 0600 permissions, got %04o", perm)
+		}
+
+		// Check directory permissions
+		dirInfo, err := os.Stat(keysDir)
+		if err != nil {
+			t.Fatalf("stat dir failed: %v", err)
+		}
+		if perm := dirInfo.Mode().Perm(); perm != 0700 {
+			t.Errorf("expected 0700 directory permissions, got %04o", perm)
+		}
+
+		// Check content
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("ReadFile failed: %v", err)
+		}
+		if string(data) != "test-private-key-content" {
+			t.Errorf("expected 'test-private-key-content', got %q", string(data))
+		}
+	})
+
+	t.Run("creates nested directory", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		keysDir := filepath.Join(tmpDir, "deep", "nested", "keys")
+
+		path, err := WritePrivateKeyFile(keysDir, "agent", "key-data")
+		if err != nil {
+			t.Fatalf("WritePrivateKeyFile failed: %v", err)
+		}
+
+		if _, statErr := os.Stat(path); statErr != nil {
+			t.Errorf("key file should exist at %s: %v", path, statErr)
+		}
+	})
+}
+
+func TestReadPrivateKeyFile(t *testing.T) {
+	t.Run("reads and trims key", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		keyPath := filepath.Join(tmpDir, "test.key")
+		os.WriteFile(keyPath, []byte("  my-secret-key  \n"), 0o600)
+
+		key, err := ReadPrivateKeyFile(keyPath)
+		if err != nil {
+			t.Fatalf("ReadPrivateKeyFile failed: %v", err)
+		}
+		if key != "my-secret-key" {
+			t.Errorf("expected 'my-secret-key', got %q", key)
+		}
+	})
+
+	t.Run("returns error for missing file", func(t *testing.T) {
+		_, err := ReadPrivateKeyFile("/tmp/nonexistent-key-file-test.key")
+		if err == nil {
+			t.Fatal("expected error for missing file")
+		}
+	})
+
+	t.Run("returns error for empty file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		keyPath := filepath.Join(tmpDir, "empty.key")
+		os.WriteFile(keyPath, []byte(""), 0o600)
+
+		_, err := ReadPrivateKeyFile(keyPath)
+		if err == nil {
+			t.Fatal("expected error for empty key file")
+		}
+	})
+
+	t.Run("returns error for whitespace-only file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		keyPath := filepath.Join(tmpDir, "spaces.key")
+		os.WriteFile(keyPath, []byte("   \n  \n"), 0o600)
+
+		_, err := ReadPrivateKeyFile(keyPath)
+		if err == nil {
+			t.Fatal("expected error for whitespace-only key file")
+		}
+	})
+}
+
+func TestWriteReadPrivateKeyFile_RoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	keysDir := filepath.Join(tmpDir, "keys")
+
+	originalKey := "dGVzdC1wcml2YXRlLWtleQ==" // base64 encoded
+	path, err := WritePrivateKeyFile(keysDir, "roundtrip", originalKey)
+	if err != nil {
+		t.Fatalf("WritePrivateKeyFile failed: %v", err)
+	}
+
+	readKey, err := ReadPrivateKeyFile(path)
+	if err != nil {
+		t.Fatalf("ReadPrivateKeyFile failed: %v", err)
+	}
+	if readKey != originalKey {
+		t.Errorf("round-trip failed: wrote %q, read %q", originalKey, readKey)
+	}
+}
+
 func TestSaveConfig_MkdirAllError(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("cannot test mkdir error as root")

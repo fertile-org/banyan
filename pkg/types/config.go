@@ -29,6 +29,9 @@ const DefaultConfigPath = "/etc/banyan/banyan.yaml"
 // DefaultWhitelistedKeysDir is the default directory for whitelisted agent public keys.
 const DefaultWhitelistedKeysDir = "/etc/banyan/whitelisted-keys"
 
+// DefaultKeysDir is the default directory for private key files.
+const DefaultKeysDir = "/etc/banyan/keys"
+
 // BanyanConfig is the top-level configuration structure.
 type BanyanConfig struct {
 	Agent  AgentConfig  `yaml:"agent,omitempty"`
@@ -49,7 +52,7 @@ type EngineConfig struct {
 	EtcdCAFile         string `yaml:"etcd_ca_file,omitempty"`
 	WhitelistedKeysDir string `yaml:"whitelisted_keys_dir,omitempty"`
 	OverlayType        string `yaml:"overlay_type,omitempty"` // "wireguard" (default) or "vxlan"
-	WGPrivateKey       string `yaml:"wg_private_key,omitempty"`
+	WGPrivateKeyFile   string `yaml:"wg_private_key_file,omitempty"`
 	WGPublicKey        string `yaml:"wg_public_key,omitempty"`
 	ManagedEtcd        bool   `yaml:"managed_etcd,omitempty"`
 }
@@ -67,7 +70,7 @@ type AgentConfig struct {
 	EngineHost        string   `yaml:"engine_host,omitempty"`
 	EnginePort        string   `yaml:"engine_port,omitempty"`
 	NodeName          string   `yaml:"node_name,omitempty"`
-	WGPrivateKey      string   `yaml:"wg_private_key,omitempty"`
+	WGPrivateKeyFile  string   `yaml:"wg_private_key_file,omitempty"`
 	WGPublicKey       string   `yaml:"wg_public_key,omitempty"`
 	EngineWGPublicKey string   `yaml:"engine_wg_public_key,omitempty"`
 	Tags              []string `yaml:"tags,omitempty"`
@@ -78,7 +81,7 @@ type CLIConfig struct {
 	EngineHost        string `yaml:"engine_host,omitempty"`
 	EnginePort        string `yaml:"engine_port,omitempty"`
 	Name              string `yaml:"name,omitempty"`
-	WGPrivateKey      string `yaml:"wg_private_key,omitempty"`
+	WGPrivateKeyFile  string `yaml:"wg_private_key_file,omitempty"`
 	WGPublicKey       string `yaml:"wg_public_key,omitempty"`
 	EngineWGPublicKey string `yaml:"engine_wg_public_key,omitempty"`
 }
@@ -175,6 +178,32 @@ func TunnelIPFromPublicKey(pubKeyB64 string) net.IP {
 		o4 += 2
 	}
 	return net.IPv4(10, 200, o3, o4)
+}
+
+// WritePrivateKeyFile writes a private key to a file in the given directory
+// with 0600 permissions. Returns the full path to the key file.
+func WritePrivateKeyFile(dir, name, key string) (string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", fmt.Errorf("failed to create keys directory: %w", err)
+	}
+	path := filepath.Join(dir, name+".key")
+	if err := os.WriteFile(path, []byte(key), 0o600); err != nil {
+		return "", fmt.Errorf("failed to write private key file: %w", err)
+	}
+	return path, nil
+}
+
+// ReadPrivateKeyFile reads a private key from a file and returns the trimmed content.
+func ReadPrivateKeyFile(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("failed to read private key file: %w", err)
+	}
+	key := strings.TrimSpace(string(data))
+	if key == "" {
+		return "", fmt.Errorf("private key file is empty: %s", path)
+	}
+	return key, nil
 }
 
 // LoadWhitelistedKeys reads all *.pub files from a directory and returns

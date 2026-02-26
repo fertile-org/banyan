@@ -149,7 +149,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	// --- WireGuard keypair generation ---
 	existingCfg, _ := types.LoadConfig(configPath)
 	fmt.Println(styleInfo.Render("\nGenerating WireGuard keypair..."))
-	if existingCfg.Agent.WGPrivateKey != "" && existingCfg.Agent.WGPublicKey != "" {
+	if existingCfg.Agent.WGPrivateKeyFile != "" && existingCfg.Agent.WGPublicKey != "" {
 		fmt.Printf("  %s WireGuard keypair already configured\n", styleOK.Render("[OK]"))
 		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), existingCfg.Agent.WGPublicKey)
 	} else {
@@ -157,9 +157,14 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		if genErr != nil {
 			return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
 		}
-		existingCfg.Agent.WGPrivateKey = privKey
+		keyPath, writeErr := types.WritePrivateKeyFile(types.DefaultKeysDir, "agent", privKey)
+		if writeErr != nil {
+			return fmt.Errorf("failed to write private key: %w", writeErr)
+		}
+		existingCfg.Agent.WGPrivateKeyFile = keyPath
 		existingCfg.Agent.WGPublicKey = pubKey
 		fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Private key: %s\n", styleOK.Render("[OK]"), keyPath)
 		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
 	}
 
@@ -320,11 +325,19 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 
 	// Set up WireGuard control tunnel (required when engine public key is configured)
 	controlTunnelActive := false
-	if cfg.Agent.EngineWGPublicKey != "" && cfg.Agent.WGPrivateKey != "" {
+	var agentWGPrivateKey string
+	if cfg.Agent.WGPrivateKeyFile != "" {
+		var readErr error
+		agentWGPrivateKey, readErr = types.ReadPrivateKeyFile(cfg.Agent.WGPrivateKeyFile)
+		if readErr != nil {
+			return fmt.Errorf("failed to load WireGuard private key: %w", readErr)
+		}
+	}
+	if cfg.Agent.EngineWGPublicKey != "" && agentWGPrivateKey != "" {
 		myTunnelIP := types.TunnelIPFromPublicKey(cfg.Agent.WGPublicKey)
 		fmt.Printf("Setting up WireGuard control tunnel (%s)...\n", myTunnelIP)
 		engineEndpointWG := cfg.Agent.EngineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
-		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceAgent, cfg.Agent.WGPrivateKey, myTunnelIP, 0); tunnelErr != nil {
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceAgent, agentWGPrivateKey, myTunnelIP, 0); tunnelErr != nil {
 			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
 		}
 		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
@@ -353,7 +366,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		NodeName:       nodeName,
 		EngineEndpoint: agentEngineEndpoint,
 		PublicKey:      publicKey,
-		WGPrivateKey:   cfg.Agent.WGPrivateKey,
+		WGPrivateKey:   agentWGPrivateKey,
 		WGPublicKey:    cfg.Agent.WGPublicKey,
 		APIPort:        agentAPIPort,
 		APIAddress:     apiAddress,

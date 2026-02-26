@@ -140,7 +140,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	// --- WireGuard keypair generation ---
 	fmt.Println(styleInfo.Render("\nGenerating WireGuard keypair..."))
-	if existingCfg.Engine.WGPrivateKey != "" && existingCfg.Engine.WGPublicKey != "" {
+	if existingCfg.Engine.WGPrivateKeyFile != "" && existingCfg.Engine.WGPublicKey != "" {
 		fmt.Printf("  %s WireGuard keypair already configured\n", styleOK.Render("[OK]"))
 		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), existingCfg.Engine.WGPublicKey)
 	} else {
@@ -148,9 +148,14 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		if genErr != nil {
 			return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
 		}
-		existingCfg.Engine.WGPrivateKey = privKey
+		keyPath, writeErr := types.WritePrivateKeyFile(types.DefaultKeysDir, "engine", privKey)
+		if writeErr != nil {
+			return fmt.Errorf("failed to write private key: %w", writeErr)
+		}
+		existingCfg.Engine.WGPrivateKeyFile = keyPath
 		existingCfg.Engine.WGPublicKey = pubKey
 		fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Private key: %s\n", styleOK.Render("[OK]"), keyPath)
 		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
 		fmt.Println()
 		fmt.Println(styleInfo.Render("Share this public key with agents and CLI clients during their init."))
@@ -392,10 +397,14 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set up WireGuard control tunnel (required when keys are configured)
-	if cfg.Engine.WGPrivateKey != "" {
+	if cfg.Engine.WGPrivateKeyFile != "" {
+		wgPrivateKey, readErr := types.ReadPrivateKeyFile(cfg.Engine.WGPrivateKeyFile)
+		if readErr != nil {
+			return fmt.Errorf("failed to load WireGuard private key: %w", readErr)
+		}
 		fmt.Println("Setting up WireGuard control tunnel...")
 		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
-		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, cfg.Engine.WGPrivateKey, engineIP, types.ControlTunnelPort); tunnelErr != nil {
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, wgPrivateKey, engineIP, types.ControlTunnelPort); tunnelErr != nil {
 			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
 		}
 		defer overlay.CleanupControlTunnelExec(types.ControlIfaceEngine) //nolint:errcheck // best-effort cleanup on exit

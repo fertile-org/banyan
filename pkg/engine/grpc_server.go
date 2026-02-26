@@ -165,6 +165,30 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 		}
 	}
 
+	// Return active containers so agent can restore proxy rules after restart
+	taskPrefix := types.KeyTasks + req.AgentName + "/"
+	taskKeys, _ := s.store.List(ctx, taskPrefix)
+	for _, key := range taskKeys {
+		var task types.TaskRecord
+		if err := s.store.Get(ctx, key, &task); err != nil {
+			continue
+		}
+		if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted {
+			continue
+		}
+		if task.ContainerStatus != types.StatusRunning {
+			continue
+		}
+		resp.ActiveContainers = append(resp.ActiveContainers, &banyanpb.ActiveContainer{
+			ContainerName: task.ContainerName,
+			ContainerIp:   task.ContainerIP,
+			Ports:         task.Ports,
+			ServiceName:   task.ServiceName,
+			DeploymentId:  task.DeploymentID,
+			TaskId:        task.ID,
+		})
+	}
+
 	return resp, nil
 }
 

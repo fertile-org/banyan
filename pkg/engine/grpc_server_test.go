@@ -3905,3 +3905,112 @@ func TestReconcileDeploymentStatus(t *testing.T) {
 		}
 	})
 }
+
+func TestRegister_ReturnsActiveContainers(t *testing.T) {
+	ctx := context.Background()
+	memStore := storage.NewMemoryStore()
+	events := NewEventBuffer(10)
+	srv := &engineGRPCServer{
+		store:       memStore,
+		registryURL: "localhost:5000",
+		events:      events,
+	}
+
+	t.Run("returns running containers for agent", func(t *testing.T) {
+		// Seed tasks for worker-1
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
+			ID:              "task-1",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			ContainerName:   "myapp-web-1",
+			ContainerIP:     "10.0.1.2",
+			Ports:           []string{"8080:80"},
+			ServiceName:     "web",
+			DeploymentID:    "deploy-1",
+			AgentID:         "worker-1",
+		})
+
+		// Completed but container stopped — should NOT be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
+			ID:              "task-2",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusStopped,
+			ContainerName:   "myapp-db-1",
+			AgentID:         "worker-1",
+		})
+
+		// Pending task — should NOT be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-1/task-3", &types.TaskRecord{
+			ID:      "task-3",
+			Type:    types.TaskTypeCreateAndStart,
+			Status:  types.StatusPending,
+			AgentID: "worker-1",
+		})
+
+		// Different agent — should NOT be returned
+		memStore.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
+			ID:              "task-4",
+			Type:            types.TaskTypeCreateAndStart,
+			Status:          types.StatusCompleted,
+			ContainerStatus: types.StatusRunning,
+			ContainerName:   "other-web-1",
+			AgentID:         "worker-2",
+		})
+
+		resp, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-1",
+			ApiAddress:   "worker-1:9090",
+			SessionToken: "token-abc",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+
+		if len(resp.ActiveContainers) != 1 {
+			t.Fatalf("expected 1 active container, got %d", len(resp.ActiveContainers))
+		}
+
+		ac := resp.ActiveContainers[0]
+		if ac.ContainerName != "myapp-web-1" {
+			t.Errorf("container name = %q, want myapp-web-1", ac.ContainerName)
+		}
+		if ac.ContainerIp != "10.0.1.2" {
+			t.Errorf("container IP = %q, want 10.0.1.2", ac.ContainerIp)
+		}
+		if len(ac.Ports) != 1 || ac.Ports[0] != "8080:80" {
+			t.Errorf("ports = %v, want [8080:80]", ac.Ports)
+		}
+		if ac.ServiceName != "web" {
+			t.Errorf("service name = %q, want web", ac.ServiceName)
+		}
+		if ac.DeploymentId != "deploy-1" {
+			t.Errorf("deployment ID = %q, want deploy-1", ac.DeploymentId)
+		}
+		if ac.TaskId != "task-1" {
+			t.Errorf("task ID = %q, want task-1", ac.TaskId)
+		}
+	})
+
+	t.Run("returns empty when no running containers", func(t *testing.T) {
+		freshStore := storage.NewMemoryStore()
+		freshSrv := &engineGRPCServer{
+			store:       freshStore,
+			registryURL: "localhost:5000",
+			events:      NewEventBuffer(10),
+		}
+
+		resp, err := freshSrv.Register(ctx, &banyanpb.RegisterRequest{
+			AgentName:    "worker-3",
+			ApiAddress:   "worker-3:9090",
+			SessionToken: "token-xyz",
+		})
+		if err != nil {
+			t.Fatalf("Register failed: %v", err)
+		}
+		if len(resp.ActiveContainers) != 0 {
+			t.Errorf("expected 0 active containers, got %d", len(resp.ActiveContainers))
+		}
+	})
+}

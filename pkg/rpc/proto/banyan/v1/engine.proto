@@ -50,6 +50,18 @@ message RegisterResponse {
   string vpc_cidr = 3;                  // VPC network CIDR (e.g., "10.0.0.0/16")
   string allocated_subnet = 4;          // /24 subnet for this agent (e.g., "10.0.45.0/24")
   string overlay_type = 5;             // "wireguard" or "vxlan"
+  repeated ActiveContainer active_containers = 6;  // containers this agent should already be running
+}
+
+// ActiveContainer describes a container that was previously running on the agent.
+// Returned during registration so the agent can restore proxy rules and tracking.
+message ActiveContainer {
+  string container_name = 1;
+  string container_ip = 2;
+  repeated string ports = 3;
+  string service_name = 4;
+  string deployment_id = 5;
+  string task_id = 6;
 }
 
 message HeartbeatRequest {

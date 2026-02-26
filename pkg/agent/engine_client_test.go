@@ -226,7 +226,7 @@ func TestEngineClient_Register(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t)
 	defer cleanup()
 
-	registryURL, vpcConfig, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
+	registryURL, vpcConfig, _, err := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestEngineClient_Register_WithVPCConfig(t *testing.T) {
 		client: banyanpb.NewEngineServiceClient(conn),
 	}
 
-	registryURL, vpcConfig, registerErr := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
+	registryURL, vpcConfig, _, registerErr := client.Register(context.Background(), "worker-1", "worker-1:50052", "token-abc", nil, "")
 	if registerErr != nil {
 		t.Fatalf("Register failed: %v", registerErr)
 	}
@@ -513,7 +513,7 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Register error", func(t *testing.T) {
-		_, _, err := client.Register(ctx, "worker-1", "addr", "token", nil, "")
+		_, _, _, err := client.Register(ctx, "worker-1", "addr", "token", nil, "")
 		if err == nil {
 			t.Error("expected error from Register on stopped server")
 		}

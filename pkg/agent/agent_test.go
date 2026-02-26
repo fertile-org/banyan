@@ -1499,3 +1499,114 @@ func TestGetContainerIP(t *testing.T) {
 		_ = err // Just verify no panic
 	})
 }
+
+func TestRestoreActiveContainers(t *testing.T) {
+	t.Run("restores proxy and tracker for running containers", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+
+		agent := &Agent{
+			proxy:      p,
+			containers: &containerTracker{},
+		}
+
+		origStatus := containerStatusFunc
+		origIP := containerIPGetter
+		t.Cleanup(func() {
+			containerStatusFunc = origStatus
+			containerIPGetter = origIP
+		})
+		containerStatusFunc = func(ctx context.Context, name string) string {
+			if name == "web-0" || name == "web-1" {
+				return "running"
+			}
+			return "not_found"
+		}
+		containerIPGetter = func(ctx context.Context, name string) (string, error) {
+			switch name {
+			case "web-0":
+				return "10.0.1.2", nil
+			case "web-1":
+				return "10.0.1.3", nil
+			default:
+				return "", fmt.Errorf("unknown container")
+			}
+		}
+
+		containers := []ActiveContainer{
+			{ContainerName: "web-0", Ports: []string{"8080:80"}, TaskID: "task-1", ServiceName: "web"},
+			{ContainerName: "web-1", Ports: []string{"8081:80"}, TaskID: "task-2", ServiceName: "web"},
+			{ContainerName: "dead-container", Ports: []string{"9090:90"}, TaskID: "task-3"},
+		}
+
+		agent.restoreActiveContainers(context.Background(), containers)
+
+		// Verify container tracker has only the running containers
+		tracked := agent.containers.List()
+		if len(tracked) != 2 {
+			t.Fatalf("expected 2 tracked containers, got %d", len(tracked))
+		}
+		if tracked[0].containerName != "web-0" {
+			t.Errorf("expected web-0, got %s", tracked[0].containerName)
+		}
+		if tracked[1].containerName != "web-1" {
+			t.Errorf("expected web-1, got %s", tracked[1].containerName)
+		}
+
+		// Verify proxy has backends for both ports
+		if p.ListenerCount() != 2 {
+			t.Errorf("expected 2 proxy listeners (ports 8080, 8081), got %d", p.ListenerCount())
+		}
+		if p.BackendCount(8080) != 1 {
+			t.Errorf("expected 1 backend on port 8080, got %d", p.BackendCount(8080))
+		}
+		if p.BackendCount(8081) != 1 {
+			t.Errorf("expected 1 backend on port 8081, got %d", p.BackendCount(8081))
+		}
+	})
+
+	t.Run("skips containers with no ports", func(t *testing.T) {
+		p := newTestProxy(t)
+		defer p.Close()
+
+		agent := &Agent{
+			proxy:      p,
+			containers: &containerTracker{},
+		}
+
+		origStatus := containerStatusFunc
+		origIP := containerIPGetter
+		t.Cleanup(func() {
+			containerStatusFunc = origStatus
+			containerIPGetter = origIP
+		})
+		containerStatusFunc = func(ctx context.Context, name string) string { return "running" }
+		containerIPGetter = func(ctx context.Context, name string) (string, error) { return "10.0.1.2", nil }
+
+		containers := []ActiveContainer{
+			{ContainerName: "worker-0", Ports: nil, TaskID: "task-1"},
+		}
+
+		agent.restoreActiveContainers(context.Background(), containers)
+
+		// Container should still be tracked (for health reporting)
+		tracked := agent.containers.List()
+		if len(tracked) != 1 {
+			t.Fatalf("expected 1 tracked container, got %d", len(tracked))
+		}
+
+		// But no proxy backends (no ports)
+		if p.ListenerCount() != 0 {
+			t.Errorf("expected 0 proxy listeners, got %d", p.ListenerCount())
+		}
+	})
+
+	t.Run("empty list is no-op", func(t *testing.T) {
+		agent := &Agent{containers: &containerTracker{}}
+		agent.restoreActiveContainers(context.Background(), nil)
+
+		if len(agent.containers.List()) != 0 {
+			t.Error("expected no containers after empty restore")
+		}
+	})
+}

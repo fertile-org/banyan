@@ -366,12 +366,13 @@ func TestVXLANDriver_Cleanup(t *testing.T) {
 		t.Fatalf("Cleanup failed: %v", err)
 	}
 
-	// Should check existence and delete both VXLAN and bridge
-	if ops.callCount("LinkExists") != 2 {
-		t.Errorf("expected 2 LinkExists calls, got %d", ops.callCount("LinkExists"))
+	// Should only delete VXLAN interface, NOT the bridge
+	// (bridge must be preserved for running container veth pairs)
+	if ops.callCount("LinkExists") != 1 {
+		t.Errorf("expected 1 LinkExists call, got %d", ops.callCount("LinkExists"))
 	}
-	if ops.callCount("DeleteLink") != 2 {
-		t.Errorf("expected 2 DeleteLink calls, got %d", ops.callCount("DeleteLink"))
+	if ops.callCount("DeleteLink") != 1 {
+		t.Errorf("expected 1 DeleteLink call, got %d", ops.callCount("DeleteLink"))
 	}
 }
 

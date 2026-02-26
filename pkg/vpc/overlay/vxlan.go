@@ -218,16 +218,12 @@ func (d *VXLANDriver) WriteCNIConfig(subnet net.IPNet) error {
 
 // Cleanup removes the VXLAN and bridge interfaces.
 func (d *VXLANDriver) Cleanup(ctx context.Context) error {
-	// Delete VXLAN first (it's attached to the bridge)
+	// Delete VXLAN interface only — the bridge must be preserved
+	// because running containers have veth pairs attached to it.
+	// Deleting the bridge would orphan those veths and break networking.
 	if exists, _ := d.linkOps.LinkExists(d.vxlanName); exists {
 		if err := d.linkOps.DeleteLink(d.vxlanName); err != nil {
 			return fmt.Errorf("delete VXLAN interface: %w", err)
-		}
-	}
-
-	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
-		if err := d.linkOps.DeleteLink(d.bridgeName); err != nil {
-			return fmt.Errorf("delete bridge: %w", err)
 		}
 	}
 

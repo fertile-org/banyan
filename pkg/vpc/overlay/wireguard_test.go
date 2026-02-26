@@ -215,11 +215,16 @@ func TestWireGuardDriver_Cleanup(t *testing.T) {
 		t.Fatalf("Cleanup failed: %v", err)
 	}
 
-	if linkOps.callCount("LinkExists") != 2 {
-		t.Errorf("expected 2 LinkExists calls, got %d", linkOps.callCount("LinkExists"))
+	// Should only delete WireGuard interface, NOT the bridge
+	// (bridge must be preserved for running container veth pairs)
+	if linkOps.callCount("LinkExists") != 1 {
+		t.Errorf("expected 1 LinkExists call, got %d", linkOps.callCount("LinkExists"))
 	}
-	if linkOps.callCount("DeleteLink") != 2 {
-		t.Errorf("expected 2 DeleteLink calls, got %d", linkOps.callCount("DeleteLink"))
+	if linkOps.callCount("DeleteLink") != 1 {
+		t.Errorf("expected 1 DeleteLink call, got %d", linkOps.callCount("DeleteLink"))
+	}
+	if linkOps.calls[1].args[0] != "banyan-wg" {
+		t.Errorf("expected delete of 'banyan-wg', got %q", linkOps.calls[1].args[0])
 	}
 }
 

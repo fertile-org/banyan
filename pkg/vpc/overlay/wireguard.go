@@ -176,17 +176,12 @@ func (d *WireGuardDriver) WriteCNIConfig(subnet net.IPNet) error {
 
 // Cleanup removes the WireGuard and bridge interfaces.
 func (d *WireGuardDriver) Cleanup(ctx context.Context) error {
-	// Delete WireGuard interface
+	// Delete WireGuard interface only — the bridge must be preserved
+	// because running containers have veth pairs attached to it.
+	// Deleting the bridge would orphan those veths and break networking.
 	if exists, _ := d.linkOps.LinkExists(d.wgName); exists {
 		if err := d.linkOps.DeleteLink(d.wgName); err != nil {
 			return fmt.Errorf("delete WireGuard interface: %w", err)
-		}
-	}
-
-	// Delete bridge
-	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
-		if err := d.linkOps.DeleteLink(d.bridgeName); err != nil {
-			return fmt.Errorf("delete bridge: %w", err)
 		}
 	}
 

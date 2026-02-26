@@ -7,6 +7,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 )
@@ -72,11 +73,19 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 	return resp.RegistryUrl, vpcConfig, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string) ([]VPCPeer, []ServiceBackend, error) {
+func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string, sysMetrics metrics.SystemMetrics) ([]VPCPeer, []ServiceBackend, error) {
 	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    name,
 		SessionToken: sessionToken,
 		Tags:         tags,
+		SystemMetrics: &banyanpb.SystemMetrics{
+			CpuUsageRatio:    sysMetrics.CPUUsageRatio,
+			MemoryUsedBytes:  sysMetrics.MemoryUsedBytes,
+			MemoryTotalBytes: sysMetrics.MemoryTotalBytes,
+			DiskUsedBytes:    sysMetrics.DiskUsedBytes,
+			DiskTotalBytes:   sysMetrics.DiskTotalBytes,
+			CpuCores:         sysMetrics.CPUCores,
+		},
 	})
 	if err != nil {
 		return nil, nil, fmt.Errorf("heartbeat failed: %w", err)

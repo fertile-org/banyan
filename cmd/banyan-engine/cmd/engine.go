@@ -430,12 +430,16 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Resolve metrics port from config
+	metricsPort := cfg.Engine.MetricsPort
+
 	eng, err := engine.New(&engine.Options{
 		StoreBackend:    storeBackend,
 		StoreAddress:    storeAddress,
 		VPCCIDR:         engineVPCCIDR,
 		RegistryPort:    engineRegistryPort,
 		GRPCPort:        engineGRPCPort,
+		MetricsPort:     metricsPort,
 		DataDir:         engineDataDir,
 		EtcdUsername:    cfg.Engine.EtcdUsername,
 		EtcdPassword:    cfg.Engine.EtcdPassword,

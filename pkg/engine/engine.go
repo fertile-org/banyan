@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/registry"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
@@ -23,6 +25,7 @@ type Options struct {
 	VPCCIDR         string
 	RegistryPort    string
 	GRPCPort        string
+	MetricsPort     string            // Prometheus /metrics HTTP port (default "9090")
 	DataDir         string
 	EtcdUsername    string            // etcd RBAC username
 	EtcdPassword    string            // etcd RBAC password
@@ -35,10 +38,14 @@ type Options struct {
 
 // Engine is the Banyan control plane.
 type Engine struct {
-	store       storage.StateStore
-	grpcServer  *engineGRPCServer
-	opts        Options
-	registryURL string
+	store           storage.StateStore
+	grpcServer      *engineGRPCServer
+	opts            Options
+	registryURL     string
+	metricsRegistry *metrics.EngineMetricsRegistry
+	metricsCollector *metrics.SystemCollector
+	events          EventLog
+	startedAt       time.Time
 }
 
 // New creates a new Engine. It opens the store and sets up authentication.
@@ -56,10 +63,29 @@ func New(opts *Options) (*Engine, error) {
 		return nil, fmt.Errorf("failed to connect to %s: %w", opts.StoreBackend, err)
 	}
 
-	e := &Engine{
-		opts:  *opts,
-		store: store,
+	// Initialize event store — WAL-backed when DataDir is set, in-memory fallback otherwise
+	var eventLog EventLog
+	if opts.DataDir != "" {
+		walPath := filepath.Join(opts.DataDir, "events.wal")
+		es, esErr := NewEventStore(walPath, DefaultMaxEvents)
+		if esErr != nil {
+			return nil, fmt.Errorf("failed to open event WAL: %w", esErr)
+		}
+		eventLog = es
+	} else {
+		eventLog = NewEventBuffer(100)
 	}
+
+	e := &Engine{
+		opts:             *opts,
+		store:            store,
+		metricsRegistry:  metrics.NewEngineMetricsRegistry(),
+		metricsCollector: metrics.NewSystemCollector(),
+		events:           eventLog,
+		startedAt:        time.Now(),
+	}
+	// Seed the CPU sample so the first metrics read gets a real value
+	e.metricsCollector.Collect()
 
 	return e, nil
 }
@@ -120,12 +146,25 @@ func (e *Engine) Run(ctx context.Context) error {
 		VPCCIDR:         e.opts.VPCCIDR,
 		WhitelistedKeys: e.opts.WhitelistedKeys,
 		OverlayType:     e.opts.OverlayType,
+		MetricsRegistry: e.metricsRegistry,
+		Events:          e.events,
+		StartedAt:       e.startedAt,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
 	e.grpcServer = grpcSrv
 	fmt.Printf("Engine gRPC server listening on :%s\n", e.opts.GRPCPort)
+
+	// Start Prometheus metrics HTTP server
+	metricsPort := e.opts.MetricsPort
+	if metricsPort == "" {
+		metricsPort = "9090"
+	}
+	if startErr := e.startMetricsHTTP(ctx, metricsPort); startErr != nil {
+		return fmt.Errorf("failed to start metrics server: %w", startErr)
+	}
+	fmt.Printf("Prometheus metrics available at :%s/metrics\n", metricsPort)
 
 	// Start the orchestration loop
 	go e.engineLoop(ctx)
@@ -134,11 +173,55 @@ func (e *Engine) Run(ctx context.Context) error {
 	return nil
 }
 
+// emitEvent adds an event to the buffer and increments the Prometheus counter.
+func (e *Engine) emitEvent(eventType, message, severity string) {
+	if e.events != nil {
+		e.events.Add(Event{
+			Timestamp: time.Now(),
+			Type:      eventType,
+			Message:   message,
+			Severity:  severity,
+		})
+	}
+	if e.metricsRegistry != nil {
+		e.metricsRegistry.IncrementEvent(eventType)
+	}
+}
+
 // Close releases engine resources.
 func (e *Engine) Close() {
 	if e.store != nil {
 		e.store.Close()
 	}
+	if es, ok := e.events.(*EventStore); ok {
+		es.Close()
+	}
+}
+
+// startMetricsHTTP starts the Prometheus /metrics HTTP server.
+func (e *Engine) startMetricsHTTP(ctx context.Context, port string) error {
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", e.metricsRegistry.Handler())
+
+	lis, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		return fmt.Errorf("failed to listen on metrics port %s: %w", port, err)
+	}
+
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		if err := server.Serve(lis); err != nil && err != http.ErrServerClosed {
+			fmt.Printf("Metrics server error: %v\n", err)
+		}
+	}()
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		_ = server.Shutdown(shutdownCtx)
+	}()
+
+	return nil
 }
 
 // engineLoop is the main orchestration loop.
@@ -152,8 +235,123 @@ func (e *Engine) engineLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			e.processDeployments(ctx)
+			e.updateMetrics(ctx)
 		}
 	}
+}
+
+// updateMetrics refreshes engine system metrics and cluster aggregate metrics in the Prometheus registry.
+func (e *Engine) updateMetrics(ctx context.Context) {
+	// Engine's own system metrics
+	sysMetrics := e.metricsCollector.Collect()
+	uptime := time.Since(e.startedAt)
+	e.metricsRegistry.UpdateEngine(sysMetrics, uptime)
+
+	// Cluster aggregates
+	e.metricsRegistry.UpdateCluster(e.collectClusterStats(ctx))
+	e.metricsRegistry.UpdateDeployments(e.collectDeploymentMetrics(ctx))
+}
+
+// collectClusterStats computes aggregated cluster statistics from the store.
+func (e *Engine) collectClusterStats(ctx context.Context) metrics.ClusterStats {
+	stats := metrics.ClusterStats{
+		DeploymentsByStatus: make(map[string]int32),
+		TasksByStatus:       make(map[string]int32),
+	}
+
+	// Agents
+	nodeKeys, _ := e.store.List(ctx, types.KeyNodes)
+	stats.TotalAgents = int32(len(nodeKeys)) //nolint:gosec // count is always small
+	for _, key := range nodeKeys {
+		var node types.NodeRecord
+		if err := e.store.Get(ctx, key, &node); err != nil {
+			continue
+		}
+		if node.Status == "ready" && time.Since(node.LastSeen) < 60*time.Second {
+			stats.ConnectedAgents++
+		}
+	}
+
+	// Deployments
+	deployKeys, _ := e.store.List(ctx, types.KeyDeployments)
+	for _, key := range deployKeys {
+		var record types.DeploymentRecord
+		if err := e.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		stats.DeploymentsByStatus[record.Status]++
+	}
+
+	// Tasks and containers
+	for _, nodeKey := range nodeKeys {
+		var node types.NodeRecord
+		if err := e.store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+		taskKeys, _ := e.store.List(ctx, types.KeyTasks+node.Name+"/")
+		for _, taskKey := range taskKeys {
+			var task types.TaskRecord
+			if err := e.store.Get(ctx, taskKey, &task); err != nil {
+				continue
+			}
+			if task.Type == types.TaskTypeCreateAndStart {
+				stats.TasksByStatus[task.Status]++
+				if task.Status == types.StatusCompleted {
+					stats.TotalContainers++
+					if task.ContainerStatus == types.StatusRunning {
+						stats.HealthyContainers++
+					}
+				}
+			}
+		}
+	}
+
+	return stats
+}
+
+// collectDeploymentMetrics gathers per-deployment replica metrics for Prometheus.
+func (e *Engine) collectDeploymentMetrics(ctx context.Context) []metrics.DeploymentMetrics {
+	deployKeys, _ := e.store.List(ctx, types.KeyDeployments)
+	var result []metrics.DeploymentMetrics
+
+	for _, key := range deployKeys {
+		var record types.DeploymentRecord
+		if err := e.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+
+		dm := metrics.DeploymentMetrics{
+			Name:     record.Name,
+			Status:   record.Status,
+			Strategy: record.UpdateStrategy,
+			Services: make(map[string]metrics.ServiceReplicaMetrics),
+		}
+
+		// Initialize desired replicas from service definitions
+		for svcName, svc := range record.Services {
+			dm.Services[svcName] = metrics.ServiceReplicaMetrics{
+				Desired: int32(svc.Replicas), //nolint:gosec // replica count is always small
+			}
+		}
+
+		// Count healthy replicas from tasks
+		allTasks := types.CollectDeploymentTasks(ctx, e.store, record.ID)
+		for i := range allTasks {
+			if allTasks[i].Type != types.TaskTypeCreateAndStart {
+				continue
+			}
+			if allTasks[i].ContainerStatus == types.StatusRunning {
+				if srm, ok := dm.Services[allTasks[i].ServiceName]; ok {
+					srm.Healthy++
+					dm.Services[allTasks[i].ServiceName] = srm
+				}
+			}
+		}
+
+		result = append(result, dm)
+	}
+
+	return result
 }
 
 // processDeployments checks for pending, deploying, and stopping deployments.
@@ -327,11 +525,13 @@ func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types
 	if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err == nil {
 		if newStatus == types.StatusFailed {
 			fmt.Printf("[Engine] Deployment '%s' FAILED: %s\n", deployment.Name, errMsg)
+			e.emitEvent("deployment.failed", fmt.Sprintf("Deployment %s failed: %s", deployment.Name, errMsg), "error")
 			if deployment.ReplacesID != "" {
 				fmt.Printf("[Engine] Blue-green: keeping old deployment '%s' running (new deployment failed)\n", deployment.ReplacesID)
 			}
 		} else {
 			fmt.Printf("[Engine] Deployment '%s' is RUNNING (%d containers)\n", deployment.Name, completedTasks)
+			e.emitEvent("deployment.running", fmt.Sprintf("Deployment %s is running (%d containers)", deployment.Name, completedTasks), "info")
 			if deployment.UpdateStrategy != types.UpdateStrategyRecreate {
 				e.blueGreenTeardownOld(ctx, deployment)
 			}

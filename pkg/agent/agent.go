@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -57,8 +58,9 @@ type Agent struct {
 	dnsServer       *dns.Server
 	gatewayIP       string          // bridge gateway IP (e.g., "10.0.45.1")
 	registeredDNS   map[string]bool // tracked DNS hostnames for stale cleanup
-	connected       atomic.Bool     // true when registered and heartbeat is healthy
-	allocatedSubnet string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
+	connected        atomic.Bool     // true when registered and heartbeat is healthy
+	allocatedSubnet  string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
+	metricsCollector *metrics.SystemCollector
 }
 
 // Reconnection constants.
@@ -99,6 +101,11 @@ func New(opts *Options) (*Agent, error) {
 // Run connects to the engine, registers, and starts all loops.
 // It blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
+	// Initialize system metrics collector
+	a.metricsCollector = metrics.NewSystemCollector()
+	// Seed the CPU sample so the first heartbeat gets a real reading
+	a.metricsCollector.Collect()
+
 	// Initialize iptables proxy for port management
 	p, err := proxy.New()
 	if err != nil {
@@ -431,7 +438,8 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags)
+			sysMetrics := a.metricsCollector.Collect()
+			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags, sysMetrics)
 			if err != nil {
 				consecutiveFails++
 				if consecutiveFails < maxConsecutiveHeartbeatFails {

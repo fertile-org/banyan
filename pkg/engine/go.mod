@@ -3,6 +3,7 @@ module github.com/fertile-org/banyan/pkg/engine
 go 1.24.3
 
 require (
+	github.com/fertile-org/banyan/pkg/metrics v0.0.0
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
@@ -12,10 +13,17 @@ require (
 )
 
 require (
+	github.com/beorn7/perks v1.0.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
+	github.com/prometheus/client_golang v1.22.0 // indirect
+	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/common v0.62.0 // indirect
+	github.com/prometheus/procfs v0.15.1 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/v3 v3.5.21 // indirect
@@ -34,6 +42,7 @@ require (
 )
 
 replace (
+	github.com/fertile-org/banyan/pkg/metrics => ../metrics
 	github.com/fertile-org/banyan/pkg/rpc => ../rpc
 	github.com/fertile-org/banyan/pkg/storage => ../storage
 	github.com/fertile-org/banyan/pkg/types => ../types

@@ -6,6 +6,7 @@ use (
 	./cmd/banyan-engine
 	./pkg/agent
 	./pkg/engine
+	./pkg/metrics
 	./pkg/proxy
 	./pkg/rpc
 	./pkg/shared/domain

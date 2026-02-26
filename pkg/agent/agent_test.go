@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -1387,7 +1388,7 @@ func TestAgentHeartbeat_TriggersReconnectAfterConsecutiveFailures(t *testing.T) 
 	// Simulate the heartbeat loop's failure detection logic directly
 	consecutiveFails := 0
 	for i := 0; i < maxConsecutiveHeartbeatFails; i++ {
-		_, _, err := a.client.Heartbeat(context.Background(), a.opts.NodeName, a.sessionToken, a.opts.Tags)
+		_, _, err := a.client.Heartbeat(context.Background(), a.opts.NodeName, a.sessionToken, a.opts.Tags, metrics.SystemMetrics{})
 		if err != nil {
 			consecutiveFails++
 		}

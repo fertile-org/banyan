@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -336,7 +337,7 @@ func TestEngineClient_Heartbeat(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t)
 	defer cleanup()
 
-	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil, metrics.SystemMetrics{})
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
@@ -389,7 +390,7 @@ func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
 		client: banyanpb.NewEngineServiceClient(conn),
 	}
 
-	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil)
+	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil, metrics.SystemMetrics{})
 	if hbErr != nil {
 		t.Fatalf("Heartbeat failed: %v", hbErr)
 	}
@@ -519,7 +520,7 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	})
 
 	t.Run("Heartbeat error", func(t *testing.T) {
-		_, _, err := client.Heartbeat(ctx, "worker-1", "token", nil)
+		_, _, err := client.Heartbeat(ctx, "worker-1", "token", nil, metrics.SystemMetrics{})
 		if err == nil {
 			t.Error("expected error from Heartbeat on stopped server")
 		}

@@ -1,5 +1,5 @@
 ---
-name: user-docs
+name: banyan-document-writer
 description: Write user-facing documentation for Banyan that speaks to the target audience — teams who want container orchestration without Kubernetes complexity. Use when creating, updating, or reviewing any user documentation, guides, quickstarts, or reference pages. Triggers on "write docs", "update docs", "user guide", "documentation for users", "doc review", or any work in website/.
 ---
 
@@ -81,7 +81,7 @@ Don't dwell on it, but name it so the reader feels understood:
 Let the experience speak. When the reader sees a 3-step deployment that mirrors their Docker Compose workflow, they feel the contrast without you having to say "see how much simpler this is."
 
 **3. Land the outcome (always end with success)**
-Every guide should end with the user seeing a working result. The feeling of "I did that in 10 minutes" is more persuasive than any marketing copy.
+Every guide should end with the user seeing a working result. The feeling of "that was straightforward" is more persuasive than any marketing copy.
 
 ### Competitive Positioning (without bashing)
 
@@ -101,7 +101,7 @@ Never trash Kubernetes, Docker Swarm, or Nomad. Instead, use **respectful contra
 
 **Landing page / Index**: This is the hook. Lead with the user's situation ("You know Docker Compose..."), show the minimal diff to Banyan, and end with the three-command cluster. The reader should think: "Wait, that's it?"
 
-**Quickstart**: This is the proof. The reader is testing your claim. If they can deploy in 5 minutes, your marketing writes itself. If they can't — no amount of nice copy will save it. Time-to-first-deploy is the most important metric.
+**Quickstart**: This is the proof. The reader is testing whether Banyan is actually simple. If they can follow the steps without confusion, the simplicity speaks for itself. If they can't — no amount of nice copy will save it. Clarity-to-first-deploy is the most important metric.
 
 **Guides**: These build confidence and stickiness. Each guide should solve a real problem (not demonstrate a feature). Frame titles as user goals:
 - "Deploy across multiple servers" (not "Multi-node architecture")
@@ -143,7 +143,7 @@ Pattern for limitations:
 
 When evaluating doc quality, optimize for these (in order):
 
-1. **Time to first successful deploy** — Can someone go from zero to running in under 15 minutes?
+1. **Clarity to first successful deploy** — Can someone follow the quickstart without confusion or opening a second tab?
 2. **Zero-confusion flow** — Can they follow the quickstart without opening a second tab to Google something?
 3. **Return visits** — Do they come back to the reference docs, or do they memorize the 6 commands?
 4. **Shareability** — Would someone send the landing page to a colleague with "check this out"?
@@ -157,7 +157,7 @@ The voice is someone who has been where the reader is, built something better, a
 | Do | Don't |
 |---|---|
 | "Run this command" | "You might want to consider running..." |
-| "This takes about 5 minutes" | "Follow these simple steps" (let them judge) |
+| "Here are the steps" (let the brevity speak) | "Follow these simple steps" (don't tell them it's simple) |
 | "Banyan distributes your containers across servers" | "Banyan leverages distributed orchestration paradigms" |
 | "You need root to start the engine because it manages containerd" | (silently require sudo without explaining) |
 | "Volumes aren't supported yet" | "Volume support is coming in a future release" (be honest about gaps) |
@@ -170,7 +170,7 @@ The voice is someone who has been where the reader is, built something better, a
 - **Name the gap they feel** — "You've outgrown one server but Kubernetes feels like overkill." This builds instant rapport.
 - **Contrast with K8s pain points** — but don't trash K8s. "No Helm charts, no YAML templating, no CRDs." Let the absence speak.
 - **Acknowledge the step up** — going from single-server to multi-server is real. Don't minimize it. Then show how Banyan makes it a small step, not a leap.
-- **Time-box everything** — "This takes ~5 minutes", "You'll have a running cluster in under an hour." Concrete time claims are more convincing than adjectives.
+- **Don't promise time** — Never claim "5 minutes" or "under an hour." The commands may run quickly, but learning, reading docs, and understanding concepts takes real time. Making time promises feels dishonest. Instead, let the brevity and clarity of the docs prove the simplicity.
 
 ### What NOT to say
 
@@ -197,7 +197,7 @@ The voice is someone who has been where the reader is, built something better, a
 ### Page types and their focus
 
 #### Getting Started pages
-- **Goal**: First successful deployment in under 15 minutes of reading
+- **Goal**: First successful deployment with minimal friction and no confusion
 - **Tone**: Encouraging, momentum-building
 - **Structure**: Linear flow, no branching, no "if you want X instead..."
 - **Key principle**: Show the shortest path. Advanced options go in reference docs.
@@ -274,15 +274,9 @@ ports:                    ports:
 \`\`\`
 ```
 
-### 4. Time-box setup steps
+### 4. Don't promise time
 
-Add time estimates to section headers when the task takes more than 1 minute:
-
-```markdown
-## 1. Start the Engine (~2 minutes)
-## 2. Start Workers (~1 minute per worker)
-## 3. Deploy your app (~3 minutes including image build)
-```
+Never add time estimates to docs ("~5 minutes", "under an hour"). The commands may run quickly, but the reader's total experience includes reading, understanding, and troubleshooting. Time claims feel like marketing hype — let the short, clear steps prove the simplicity.
 
 ### 5. Address the "what if" before it's asked
 
@@ -331,7 +325,7 @@ Use these when framing features. Don't list them all — weave them naturally. E
 | Value | How to communicate it | Why it resonates (the pain it solves) |
 |---|---|---|
 | Docker Compose syntax | "Write the same YAML you already know" | Teams spent months learning Compose. Banyan says: that investment carries forward. |
-| 1-hour setup | "From zero to running cluster in under an hour" | K8s clusters take days to set up properly. Teams need to ship this sprint, not next month. |
+| Short setup | "A few steps from zero to a running cluster" | K8s clusters take days to set up properly. Teams need to ship this sprint, not next month. |
 | Three binaries | "No package managers, no plugins — three focused binaries" | K8s has kubelet, kube-proxy, kube-apiserver, etcd, controller-manager, scheduler, CoreDNS, kubectl, Helm, Tiller... |
 | Built-in registry | "No Docker Hub account needed, no private registry to manage" | Setting up Harbor or ECR is a whole project. Banyan includes it. |
 | Built-in monitoring | "`banyan-cli status` shows everything — no dashboards to set up" | Grafana + Prometheus + Loki stack takes longer to configure than the actual application. |
@@ -353,11 +347,13 @@ Before documenting any feature, verify its implementation status:
 | Authentication (password + token) | Done | Document fully |
 | Built-in image registry | Done | Document fully |
 | VPC networking | Done | Document fully |
-| Prometheus metrics | Planned (M4) | Mention on roadmap only |
-| CLI terminal dashboard | Planned (M4) | Mention on roadmap only |
-| Resource-aware scheduling | Planned (M5) | Mention on roadmap only |
-| Multi-engine HA | Planned (M6) | Don't document |
-| Auto-scaling | Planned (M7) | Don't document |
+| Blue-green redeployment | Done | Document fully |
+| Per-service deployment | Done | Document fully |
+| Prometheus metrics | Planned (M5) | Mention on roadmap only |
+| CLI terminal dashboard | Planned (M5) | Mention on roadmap only |
+| Resource-aware scheduling | Planned (M6) | Mention on roadmap only |
+| Multi-engine HA | Planned (M7) | Don't document |
+| Auto-scaling | Planned (M8) | Don't document |
 | Volumes | Not planned yet | Note as limitation |
 | mTLS | Planned | Mention as upcoming |
 
@@ -370,11 +366,12 @@ User documentation lives in: `website/src/content/docs/`
 ```
 getting-started/
   installation.md     — Install Banyan and dependencies
-  quickstart.md       — First deployment in 5 minutes
+  quickstart.md       — First deployment on Banyan
 
 guides/                       — Task-oriented: "How do I do X?"
-  multi-node.md       — Deploy across multiple servers
   authentication.md   — Secure cluster communication
+  multi-node.md       — Deploy across multiple servers
+  redeployment.md     — Update running apps with zero downtime
 
 reference/                    — Lookup-oriented: "What's the syntax for X?"
   manifest.md         — All banyan.yaml fields
@@ -405,7 +402,7 @@ For every doc page, verify:
 - [ ] **Target audience fit** — Would a team of 5 engineers without a DevOps person understand this?
 - [ ] **Copy-pasteable** — Every command can be pasted and run (with noted customizations)
 - [ ] **Expected output shown** — User knows what success looks like
-- [ ] **Time estimates** — User knows how long each section takes
+- [ ] **No time promises** — No "5 minutes" or "under an hour" claims (let brevity prove simplicity)
 - [ ] **Honest about limitations** — Nothing promised that doesn't exist yet
 - [ ] **Docker Compose bridge** — Familiar concepts referenced where applicable
 - [ ] **No jargon without context** — Technical terms explained on first use

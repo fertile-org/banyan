@@ -1,11 +1,11 @@
 ---
-title: Multi-Node Setup
-description: Deploy containers across multiple servers.
+title: Deploy Across Multiple Servers
+description: Scale from one server to many — your manifest doesn't change.
 sidebar:
   order: 2
 ---
 
-This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you just have more servers running Agents.
+This is where Banyan earns its keep. Your `banyan.yaml` doesn't change — you add more servers, and Banyan distributes your containers across them.
 
 ## Architecture
 
@@ -52,18 +52,34 @@ The engine's public key is displayed during init. **Copy it** — agents and CLI
 The Engine starts a gRPC server on port 50051 by default. Verify from another machine:
 
 ```bash
-# On the deploy machine, configure the CLI to point at the engine
 sudo banyan-cli init
 # The wizard asks for: engine host and gRPC port
 # It generates a WireGuard keypair and displays the public key
 
 # Copy the CLI's public key to the engine
 echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
+```
 
+Verify the connection:
+
+```bash
 banyan-cli status
 ```
 
-## 2. Start the Agents
+```
+Banyan Cluster - Status
+========================================
+Engine: RUNNING
+Connection: 192.168.1.10:50051
+
+Agents: 0
+
+Deployments: 0
+
+========================================
+```
+
+## 2. Add Workers
 
 On Worker 1 (`192.168.1.11`):
 
@@ -73,7 +89,7 @@ sudo banyan-agent start --node-name worker-1
 ```
 
 The init wizard asks for:
-- **Engine host** — IP or hostname of the engine server (e.g. `192.168.1.10`).
+- **Engine host** — IP or hostname of the engine server (e.g., `192.168.1.10`).
 - **Engine gRPC port** — default `50051`.
 - **Node name** — unique name for this worker (default: hostname).
 - **Engine WireGuard public key** — the engine's public key from `banyan-engine init` (optional, enables encrypted control tunnel).
@@ -137,7 +153,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=my-app-db-0
+      - DB_HOST=db
       - DB_PORT=5432
     depends_on:
       - db
@@ -156,7 +172,7 @@ services:
 banyan-cli up -f banyan.yaml
 ```
 
-The CLI connects to the Engine using the host and port configured during `banyan-cli init`. Banyan distributes 5 containers across 2 workers using round-robin:
+Banyan distributes 5 containers across 2 workers using round-robin:
 
 | Worker 1 | Worker 2 |
 |----------|----------|
@@ -164,9 +180,17 @@ The CLI connects to the Engine using the host and port configured during `banyan
 | my-app-api-1 | my-app-api-2 |
 | my-app-db-0 | |
 
+**The manifest didn't change.** You went from one server to two — same YAML, more capacity.
+
 ## 5. Check containers on workers
 
-SSH into each worker and list running containers:
+From the CLI:
+
+```bash
+banyan-cli status
+```
+
+Or SSH into a worker and list running containers directly:
 
 ```bash
 sudo nerdctl ps
@@ -184,7 +208,7 @@ sudo banyan-cli init
 # Copy the CLI's public key to the engine
 echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
 
-# Then deploy
+# Deploy from anywhere
 banyan-cli up -f banyan.yaml
 ```
 
@@ -196,6 +220,8 @@ banyan-cli up -f banyan.yaml
 4. Run `sudo banyan-agent start`
 
 The new worker appears in `banyan-cli status` within seconds. Future deployments include it automatically.
+
+That's the point — **scaling is adding a server, not editing a manifest.**
 
 ## Firewall requirements
 

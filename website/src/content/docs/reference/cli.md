@@ -5,11 +5,11 @@ sidebar:
   order: 1
 ---
 
-Banyan uses three binaries:
+Banyan uses three binaries. Install only what each machine needs.
 
 | Binary | Role | Install on |
 |--------|------|------------|
-| `banyan-engine` | Control plane (store backend, gRPC server, scheduling) | Engine node |
+| `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes |
 | `banyan-cli` | Client (up, status, logs, down) | Any machine |
 
@@ -21,7 +21,7 @@ Run on your control plane node.
 
 ### init
 
-Prepare the Engine node: creates data directories and walks you through an interactive setup wizard.
+Set up the Engine node: creates data directories and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-engine init
@@ -40,7 +40,7 @@ The engine's public key is displayed during init. Share this key with agents and
 
 ### start
 
-Start the Engine. Starts managed etcd (or connects to external etcd), initializes networking, starts the gRPC server, and watches for deployments.
+Start the Engine. Launches managed etcd (or connects to external etcd), initializes networking, starts the gRPC server, and watches for deployments.
 
 ```bash
 sudo banyan-engine start
@@ -98,7 +98,7 @@ sudo banyan-agent init
 
 The wizard generates a WireGuard keypair and asks:
 
-1. **Engine host** — hostname or IP of the Banyan engine (e.g. `192.168.1.10`).
+1. **Engine host** — hostname or IP of the Banyan engine (e.g., `192.168.1.10`).
 2. **Engine gRPC port** — default `50051`.
 3. **Node name** — unique name for this worker (default: hostname).
 4. **Engine WireGuard public key** — displayed during `banyan-engine init` (optional, enables encrypted tunnel).
@@ -126,7 +126,7 @@ sudo banyan-agent init
 
 ### start
 
-Start the Agent. Connects to the Engine via gRPC, registers the node, and begins executing tasks.
+Start the Agent. Connects to the Engine, registers the node, and begins executing tasks.
 
 ```bash
 sudo banyan-agent start --node-name worker-1
@@ -137,11 +137,11 @@ The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `init`). 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
-| `--engine` | (from config) | Engine gRPC endpoint override (e.g. `192.168.1.10:50051`) |
+| `--engine` | (from config) | Engine gRPC endpoint override (e.g., `192.168.1.10:50051`) |
 | `--node-name` | hostname | Name for this node. Must be unique in the cluster. |
 | `--pid-file` | `/var/run/banyan-agent.pid` | Agent PID file |
 | `--api-port` | `50052` | Agent gRPC server port (used for log streaming from engine) |
-| `--api-address` | | Agent API address override (e.g. `192.168.1.10:50052`) |
+| `--api-address` | | Agent API address override (e.g., `192.168.1.10:50052`) |
 
 ### stop
 
@@ -167,7 +167,7 @@ banyan-agent status
 
 ## banyan-cli
 
-Run on any machine to manage deployments. Before using up/status/down/logs commands, run `banyan-cli init` once to configure the engine connection.
+Run on any machine to manage deployments. Run `banyan-cli init` once to configure the engine connection, then use `up`, `status`, `down`, and `logs` freely.
 
 ### init
 
@@ -190,21 +190,21 @@ Run this once on any machine where you want to use `banyan-cli` commands. If a k
 
 ### up
 
-Deploy an application from a `banyan.yaml` manifest.
+Deploy or redeploy an application from a manifest.
 
 ```bash
 banyan-cli up -f banyan.yaml
 ```
 
-Sends the deployment to the Engine via gRPC, then waits for agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
+Sends the deployment to the Engine, then waits for agents to run all containers. Exits when the deployment reaches `running` or `failed` status.
 
-**Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: it starts the new containers alongside the old ones, waits for the new deployment to reach `running` status, then tears down the old containers. If the new deployment fails, the old containers keep running — no downtime.
+**Redeployment is automatic.** If the application is already running, Banyan uses a blue-green strategy: new containers start alongside old ones, and old containers are torn down only after the new deployment is healthy. If the new deployment fails, old containers keep running. See [Redeployment](/guides/redeployment/) for details.
 
-**Per-service deployment.** Pass service names as arguments to redeploy only those services. The full manifest is still sent to the Engine for validation, but only the specified services are redeployed. Per-service deploys use the same blue-green strategy as full deploys — new containers start alongside old ones and old containers are torn down only after the new deployment is healthy. Zero downtime. Services not listed are untouched.
+**Per-service deployment.** Pass service names as arguments to redeploy only those services. Per-service deploys use the same blue-green strategy as full deploys — new containers start alongside old ones and old containers are torn down only after the new deployment is healthy. Zero downtime. Services not listed are untouched.
 
-`depends_on` is validated: if a target service depends on another service, that dependency must already be running or be included in the same deploy command. Otherwise the deploy is rejected.
+`depends_on` is validated: if a service being deployed depends on another service, that dependency must already be running or be included in the same deploy command.
 
-Services with a `build:` directive are built locally with `nerdctl build`, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
+Services with `build:` are built locally, pushed to the Engine's embedded OCI registry, and deployed with the registry-prefixed image name so agents can pull them.
 
 :::tip
 `banyan-cli deploy` still works as an alias for `up`. If you're coming from an older version, your scripts don't need to change.
@@ -250,7 +250,7 @@ Stop and remove services from a deployment.
 banyan-cli down --name my-app
 ```
 
-Creates `stop_and_remove` tasks for each running container and waits for agents to complete them. By default, stops all services. Pass service names as arguments to stop only specific ones.
+Creates `stop_and_remove` tasks for each running container and waits for agents to complete them. By default, stops all services. Pass service names as arguments to stop specific ones.
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
@@ -282,8 +282,6 @@ Show cluster status: connected agents, active deployments, and container health.
 ```bash
 banyan-cli status
 ```
-
-Example output:
 
 ```
 Banyan Cluster - Status

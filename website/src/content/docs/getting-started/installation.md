@@ -1,13 +1,13 @@
 ---
 title: Installation
-description: Install Banyan on your servers. One command per machine, under 2 minutes.
+description: Install Banyan on your servers. One command per machine.
 sidebar:
   order: 1
 ---
 
 Banyan runs as three binaries — install only what each machine needs.
 
-## Quick install (~1 minute)
+## Quick install
 
 The install script detects your OS, downloads the Banyan binaries, and installs all runtime dependencies.
 

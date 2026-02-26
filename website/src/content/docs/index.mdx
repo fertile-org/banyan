@@ -1,13 +1,13 @@
 ---
-title: Docker Compose syntax that scales
-description: Deploy containers across multiple servers with a YAML file you already know how to write. No Helm charts, no new syntax, no steep learning curve.
+title: Container orchestration you already know
+description: Run containers across multiple servers with the Docker Compose syntax you already know. No Helm charts, no new syntax, no steep learning curve.
 template: splash
 hero:
-  tagline: Bring your docker-compose.yml to production — same syntax, distributed across your servers.
+  tagline: Run containers across multiple servers with the Docker Compose syntax you already know.
   image:
     file: ../../assets/logo.png
   actions:
-    - text: Get Started in 5 Minutes
+    - text: Get Started
       link: /getting-started/quickstart/
       icon: right-arrow
       variant: primary
@@ -17,6 +17,26 @@ hero:
 ---
 
 import { Card, CardGrid, Aside } from "@astrojs/starlight/components";
+
+<div class="not-content" style="display: flex; align-items: stretch; justify-content: center; gap: 1.5rem; margin: 1rem auto 2.75rem; flex-wrap: wrap;">
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.25rem 2rem; background: linear-gradient(160deg, #f5f0e8, #e8ddd0); border: 1px solid #d4c9bb; border-radius: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);">
+    <span style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; color: #7a6e60;">Secured by</span>
+    <img src="/wireguard.webp" alt="WireGuard" style="height: 75px; margin: auto 0;" />
+  </div>
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 1.25rem 2rem; background: linear-gradient(160deg, #f5f0e8, #e8ddd0); border: 1px solid #d4c9bb; border-radius: 12px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);">
+    <span style="font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; color: #7a6e60;">Built with</span>
+    <div style="display: flex; flex-direction: column; align-items: center; gap: 1rem; margin: auto 0;">
+      <div style="display: flex; align-items: center; gap: 1.5rem;">
+        <img src="/containerd-logo.png" alt="containerd" style="height: 32px;" />
+        <img src="/nerdctl-logo.webp" alt="nerdctl" style="height: 32px;" />
+      </div>
+      <div style="display: flex; align-items: center; gap: 1.5rem;">
+        <img src="/etcd-logo.png" alt="etcd" style="height: 32px;" />
+        <img src="/go_logo.png" alt="Go" style="height: 32px;" />
+      </div>
+    </div>
+  </div>
+</div>
 
 <Aside type="caution" title="Under experiment">
   Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
@@ -105,11 +125,11 @@ Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and
 
 - A team of 5 who needs their API running on 3 servers
 - A team of 50 who wants a lighter option for staging and internal tools
-- Anyone who wants to write a YAML file and deploy — not operate a platform
+- Anyone who wants to write a YAML file and ship — not operate a platform
 
 Banyan handles the orchestration so you can focus on the software you're building.
 
-## Get a running cluster in under an hour
+## Get a running cluster
 
 One-time setup on each machine:
 

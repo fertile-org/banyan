@@ -1,10 +1,10 @@
 <div align="center">
-  <img src="website/src/assets/logo.png" alt="Banyan" width="240">
+  <img src="website/public/shipping-banner-transparent.png" alt="Banyan — containers distributed across servers" width="100%">
 </div>
 
 <h1 align="center">Banyan</h1>
 
-<p align="center"><strong>Docker Compose syntax that scales.</strong></p>
+<p align="center"><strong>Container orchestration you already know.</strong></p>
 
 <p align="center">
   <a href="https://github.com/fertile-org/banyan/actions/workflows/ci.yml"><img src="https://github.com/fertile-org/banyan/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -13,7 +13,7 @@
   <img src="https://img.shields.io/badge/go-1.24-00ADD8?logo=go" alt="Go 1.24">
 </p>
 
-<p align="center">Deploy containers across multiple servers with a YAML file you already know how to write.</p>
+<p align="center">Run containers across multiple servers with the Docker Compose syntax you already know.</p>
 
 <p align="center">
   <a href="https://getbanyan.dev/">Documentation</a> &middot;
@@ -22,7 +22,24 @@
   <a href="./DEVELOPMENT.md">Development</a>
 </p>
 
----
+<table align="center">
+  <tr>
+    <td align="center" valign="top">
+      <sub><strong>SECURED BY</strong></sub><br><br>
+      <img src="website/public/wireguard.webp" alt="WireGuard" height="60">
+    </td>
+    <td align="center" valign="top">
+      <sub><strong>BUILT WITH</strong></sub><br><br>
+      <img src="website/public/containerd-logo.png" alt="containerd" height="25">
+      &nbsp;&nbsp;
+      <img src="website/public/nerdctl-logo.webp" alt="nerdctl" height="25">
+      <br><br>
+      <img src="website/public/etcd-logo.png" alt="etcd" height="25">
+      &nbsp;&nbsp;
+      <img src="website/public/go_logo.png" alt="Go" height="25">
+    </td>
+  </tr>
+</table>
 
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
@@ -95,7 +112,7 @@ Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and
 
 **Teams who've outgrown a single server but don't need — or don't want — Kubernetes.**
 
-You might be a team of 5 who needs your API on 3 servers. Or a team of 50 who wants a lighter option for staging environments and internal tools. Either way, you want to write a YAML file and deploy, not operate a platform.
+You might be a team of 5 who needs your API on 3 servers. Or a team of 50 who wants a lighter option for staging environments and internal tools. Either way, you want to write a YAML file and ship, not operate a platform.
 
 Banyan handles the orchestration so you can focus on the software you're building.
 
@@ -205,3 +222,4 @@ See the [Development Guide](./DEVELOPMENT.md) for project structure, build comma
 ## License
 
 Apache License 2.0. See [LICENSE](./LICENSE) for details.
+

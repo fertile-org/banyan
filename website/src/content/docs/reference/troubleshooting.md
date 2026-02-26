@@ -11,7 +11,7 @@ sidebar:
 
 **Managed etcd**: If etcd fails to start, check that port 2379 is not already in use and that the data directory (`/var/lib/banyan/etcd/` by default) is writable.
 
-**"failed to connect to etcd"** — For external etcd, ensure your etcd server is running and reachable at the configured address:
+**"failed to connect to etcd"** — For external etcd, make sure your etcd server is running and reachable at the configured address:
 
 ```bash
 sudo apt-get install etcd-server    # Debian/Ubuntu
@@ -139,7 +139,7 @@ banyan-cli status
 
 ### Redeployment doesn't replace old containers
 
-When you run `banyan-cli up` again, Banyan should automatically replace old containers using a blue-green strategy. If the old containers aren't being replaced:
+When you run `banyan-cli up` again, Banyan should automatically replace old containers using a blue-green strategy. If old containers aren't being replaced:
 
 1. Check that the application name in `banyan.yaml` matches the running deployment. The name must be identical for Banyan to recognize it as a redeployment.
 2. If the old deployment is in `stopping` or `deploying` state, the Engine waits for it to finish before scheduling the new one. Check `banyan-cli status` and wait a few seconds.
@@ -151,6 +151,18 @@ During blue-green redeployment, old containers run alongside new ones until the 
 
 1. The new deployment may have failed. Check `banyan-cli status` for the deployment status and error message.
 2. If the new deployment failed, old containers are intentionally kept running to avoid downtime. Fix the issue and redeploy.
+
+See [Redeployment](/guides/redeployment/) for details on how blue-green and per-service deploys work.
+
+### Per-service deploy fails with dependency error
+
+When deploying specific services (e.g., `banyan-cli up -f banyan.yaml web`), Banyan validates that all `depends_on` dependencies are satisfied. If you see an error like:
+
+```
+Error: service "web" depends on "api" which is not running and not being deployed
+```
+
+Either deploy the dependency too (`banyan-cli up -f banyan.yaml web api`) or make sure the dependency is already running in the existing deployment.
 
 ### Containers are running but the application doesn't work
 

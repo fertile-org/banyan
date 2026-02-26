@@ -1,9 +1,17 @@
 ---
-title: Authentication
-description: How Banyan secures communication between engine, agents, and CLI.
+title: Secure Your Cluster
+description: How Banyan authenticates engines, agents, and CLI clients.
 sidebar:
   order: 1
 ---
+
+<div style="display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0 2rem; padding: 1rem 1.5rem; border: 1px solid var(--sl-color-gray-5); border-radius: 12px;">
+  <img src="/wireguard.webp" alt="WireGuard" style="height: 48px;" />
+  <div>
+    <strong style="font-size: 1.1rem;">Secured by WireGuard&reg;</strong><br />
+    <span style="opacity: 0.7;">All control plane and container traffic encrypted end-to-end. No TLS certificates to manage — just keypairs.</span>
+  </div>
+</div>
 
 Banyan authenticates all gRPC communication between components. Every RPC call carries credentials that the engine validates before processing the request.
 
@@ -170,11 +178,11 @@ When the engine's WireGuard public key is provided during agent/CLI init, Banyan
 
 ```
 Control plane tunnel (wg-control):
-  Engine (10.200.0.1) ←→ Agent (10.200.X.Y)    # encrypted gRPC
-  Engine (10.200.0.1) ←→ CLI   (10.200.X.Y)    # encrypted gRPC
+  Engine (10.200.0.1) <-> Agent (10.200.X.Y)    # encrypted gRPC
+  Engine (10.200.0.1) <-> CLI   (10.200.X.Y)    # encrypted gRPC
 
 Data plane tunnel (banyan-wg):
-  Agent ←→ Agent                                 # encrypted container traffic
+  Agent <-> Agent                                 # encrypted container traffic
 ```
 
 **How it works:**
@@ -229,7 +237,7 @@ sequenceDiagram
     Engine-->>Agent: Authenticated connection
 ```
 
-This method will be suitable for environments with existing PKI infrastructure or stricter security requirements. Configuration details will be documented when this feature is implemented.
+This will be suitable for environments with existing PKI infrastructure or stricter security requirements. See the [roadmap](/roadmap/) for status.
 
 ---
 
@@ -254,4 +262,4 @@ sequenceDiagram
     CLI->>CLI: Save config
 ```
 
-This method will be suitable for teams that want centralized identity management. Configuration details will be documented when this feature is implemented.
+This will be suitable for teams with centralized identity management. See the [roadmap](/roadmap/) for status.

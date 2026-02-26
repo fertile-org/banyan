@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -17,11 +18,16 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
-// newTestProxy creates a proxy with noop iptables and noop sysctl for use in agent tests.
+// TestMain mocks sysctl writes for the entire package so proxy creation
+// doesn't require root (avoids /proc/sys/net/ipv4/conf/all/route_localnet permission errors).
+func TestMain(m *testing.M) {
+	proxy.SetSysctlWriter(func(string, string) error { return nil })
+	os.Exit(m.Run())
+}
+
+// newTestProxy creates a proxy with noop iptables for use in agent tests.
 func newTestProxy(t *testing.T) *proxy.Proxy {
 	t.Helper()
-	restore := proxy.SetSysctlWriter(func(string, string) error { return nil })
-	t.Cleanup(restore)
 	p, err := proxy.NewWithIPTables(proxy.NewNoopIPTables())
 	if err != nil {
 		t.Fatalf("failed to create test proxy: %v", err)

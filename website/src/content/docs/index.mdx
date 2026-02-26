@@ -109,7 +109,7 @@ Same `services`. Same `build`. Same `ports`. Same `environment`. Add `name:` and
     Use `build:` in your manifest and Banyan builds, stores, and distributes images across your cluster. No Docker Hub account needed. No private registry to configure.
   </Card>
   <Card title="Containers talk across servers" icon="seti:license">
-    Services on different machines communicate as if they were on the same network. Banyan sets up the overlay network and DNS automatically.
+    Services on different machines communicate as if they were on the same network. All traffic is encrypted with WireGuard. Banyan sets up the overlay network and DNS automatically.
   </Card>
   <Card title="Monitor from your terminal" icon="seti:cake_php">
     `banyan-cli status` shows every container, which server it's on, and whether it's healthy. `banyan-cli logs` streams from any container, any node. A live terminal dashboard (`banyan-cli monitor`) is [coming soon](/roadmap/).

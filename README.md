@@ -26,17 +26,17 @@
   <tr>
     <td align="center" valign="top">
       <sub><strong>SECURED BY</strong></sub><br><br>
-      <img src="website/public/wireguard.webp" alt="WireGuard" height="60">
+      <img src="website/public/wireguard.webp" alt="WireGuard" height="100">
     </td>
     <td align="center" valign="top">
       <sub><strong>BUILT WITH</strong></sub><br><br>
-      <img src="website/public/containerd-logo.png" alt="containerd" height="25">
+      <img src="website/public/containerd-logo.png" alt="containerd" height="40">
       &nbsp;&nbsp;
-      <img src="website/public/nerdctl-logo.webp" alt="nerdctl" height="25">
+      <img src="website/public/nerdctl-logo.webp" alt="nerdctl" height="40">
       <br><br>
-      <img src="website/public/etcd-logo.png" alt="etcd" height="25">
+      <img src="website/public/etcd-logo.png" alt="etcd" height="40">
       &nbsp;&nbsp;
-      <img src="website/public/go_logo.png" alt="Go" height="25">
+      <img src="website/public/go_logo.png" alt="Go" height="40">
     </td>
   </tr>
 </table>

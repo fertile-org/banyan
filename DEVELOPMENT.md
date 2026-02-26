@@ -85,7 +85,26 @@ This installs:
 
 Installation directory: `/opt/cni/bin/`
 
-**Note**: Flannel is no longer required. Banyan uses a built-in VXLAN overlay managed by the engine.
+**Note**: Flannel is no longer required. Banyan uses a built-in overlay managed by the engine. WireGuard is the default overlay driver (encrypted L3 tunneling). VXLAN is kept as a fallback for environments without WireGuard kernel support. Both implement the `OverlayDriver` interface in `pkg/vpc/overlay/`.
+
+### WireGuard Control Tunnel
+
+In addition to the data plane overlay, Banyan uses a separate WireGuard tunnel (`wg-control`) to encrypt all control plane gRPC traffic between engine, agents, and CLI. This is distinct from the data plane overlay (`banyan-wg`).
+
+```
+Control plane (wg-control, port 51821/UDP):
+  Engine (10.200.0.1) ←→ Agent (10.200.X.Y)    # encrypted gRPC
+  Engine (10.200.0.1) ←→ CLI   (10.200.X.Y)    # encrypted gRPC
+
+Data plane (banyan-wg, port 51820/UDP):
+  Agent ←→ Agent                                 # encrypted container traffic
+```
+
+- Engine generates a keypair during `init` and displays its public key
+- Agents/CLI provide the engine's public key during their `init` to enable the tunnel
+- Tunnel IPs are deterministic (derived from the public key hash)
+- If WireGuard is unavailable, gRPC falls back to direct TCP with public key metadata auth
+- Implementation: `pkg/vpc/overlay/control_tunnel.go`
 
 ### Manual Installation
 
@@ -161,7 +180,7 @@ The integration test container uses an isolated approach:
 
 1. **Base Image**: `golang:1.24-alpine` with necessary tools
 2. **Container Runtime**: containerd with nerdctl CLI
-3. **Networking**: Built-in VXLAN overlay managed by Engine
+3. **Networking**: Built-in overlay managed by Engine (WireGuard default, VXLAN fallback)
 4. **Coordination**: etcd for distributed state
 5. **CNI Plugins**: Standard CNI plugins (bridge, host-local, portmap, loopback)
 
@@ -173,7 +192,7 @@ The integration test container uses an isolated approach:
   - Running nested containers (containerd inside Docker)
 
 - **Kernel modules** (`/lib/modules:/lib/modules:ro`) are mounted for:
-  - VXLAN module support
+  - WireGuard and VXLAN module support
   - Bridge networking
   - Network filtering
 

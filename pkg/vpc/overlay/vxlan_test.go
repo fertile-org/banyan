@@ -112,15 +112,19 @@ func TestVXLANDriver_Init(t *testing.T) {
 		t.Fatalf("Init failed: %v", err)
 	}
 
-	// Verify call sequence
+	// Verify call sequence (includes cleanup of leftover interfaces)
 	expectedMethods := []string{
-		"CreateVXLAN",    // 1. Create VXLAN interface
-		"CreateBridge",   // 2. Create bridge
-		"SetLinkAddress", // 3. Set bridge MAC to deterministic VTEP MAC
-		"SetLinkMaster",  // 4. Attach VXLAN to bridge
-		"AddAddress",     // 5. Assign VTEP IP
-		"SetLinkUp",      // 6. Bring up VXLAN
-		"SetLinkUp",      // 7. Bring up bridge
+		"LinkExists",     // 0. Check VXLAN exists (cleanup)
+		"DeleteLink",     // 1. Delete old VXLAN (mock returns exists=true)
+		"LinkExists",     // 2. Check bridge exists (cleanup)
+		"DeleteLink",     // 3. Delete old bridge
+		"CreateVXLAN",    // 4. Create VXLAN interface
+		"CreateBridge",   // 5. Create bridge
+		"SetLinkAddress", // 6. Set bridge MAC to deterministic VTEP MAC
+		"SetLinkMaster",  // 7. Attach VXLAN to bridge
+		"AddAddress",     // 8. Assign VTEP IP
+		"SetLinkUp",      // 9. Bring up VXLAN
+		"SetLinkUp",      // 10. Bring up bridge
 	}
 
 	if len(ops.calls) != len(expectedMethods) {
@@ -133,27 +137,27 @@ func TestVXLANDriver_Init(t *testing.T) {
 		}
 	}
 
-	// Verify VXLAN was created with correct name
-	if ops.calls[0].args[0] != "banyan.1" {
-		t.Errorf("expected VXLAN name 'banyan.1', got %q", ops.calls[0].args[0])
+	// Verify VXLAN was created with correct name (after cleanup)
+	if ops.calls[4].args[0] != "banyan.1" {
+		t.Errorf("expected VXLAN name 'banyan.1', got %q", ops.calls[4].args[0])
 	}
 
 	// Verify bridge was created with correct name
-	if ops.calls[1].args[0] != "banyan0" {
-		t.Errorf("expected bridge name 'banyan0', got %q", ops.calls[1].args[0])
+	if ops.calls[5].args[0] != "banyan0" {
+		t.Errorf("expected bridge name 'banyan0', got %q", ops.calls[5].args[0])
 	}
 
 	// Verify bridge MAC was set to deterministic VTEP MAC (02:42:0a:00:2d:01 for 10.0.45.0/24)
-	if ops.calls[2].args[0] != "banyan0" {
-		t.Errorf("expected SetLinkAddress on 'banyan0', got %q", ops.calls[2].args[0])
+	if ops.calls[6].args[0] != "banyan0" {
+		t.Errorf("expected SetLinkAddress on 'banyan0', got %q", ops.calls[6].args[0])
 	}
-	if ops.calls[2].args[1] != "02:42:0a:00:2d:01" {
-		t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", ops.calls[2].args[1])
+	if ops.calls[6].args[1] != "02:42:0a:00:2d:01" {
+		t.Errorf("expected bridge MAC '02:42:0a:00:2d:01', got %q", ops.calls[6].args[1])
 	}
 
 	// Verify VTEP IP was assigned correctly (10.0.45.1/24)
-	if ops.calls[4].args[1] != "10.0.45.1/24" {
-		t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", ops.calls[4].args[1])
+	if ops.calls[8].args[1] != "10.0.45.1/24" {
+		t.Errorf("expected VTEP IP '10.0.45.1/24', got %q", ops.calls[8].args[1])
 	}
 }
 

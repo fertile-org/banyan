@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/fertile-org/banyan/pkg/agent"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // Agent configuration flags.
@@ -29,7 +31,6 @@ var (
 	agentPidFile        string
 	agentAPIPort        string
 	agentAPIAddress     string
-	agentInitPassword   string
 )
 
 // configPath is the default path to the Banyan config file.
@@ -82,9 +83,6 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 
 	rootCmd.PersistentFlags().StringVar(&agentDataDir, "data-dir", "/var/lib/banyan", "Data directory")
-
-	// Init flags
-	initCmd.Flags().StringVar(&agentInitPassword, "password", "", "Cluster password (non-interactive mode)")
 
 	startCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "localhost:50051", "Engine gRPC endpoint")
 	startCmd.Flags().StringVar(&agentNodeName, "node-name", "", "Node name (defaults to hostname)")
@@ -148,60 +146,43 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// --- Engine connection + token exchange ---
+	// --- WireGuard keypair generation ---
 	existingCfg, _ := types.LoadConfig(configPath)
+	fmt.Println(styleInfo.Render("\nGenerating WireGuard keypair..."))
+	if existingCfg.Agent.WGPrivateKey != "" && existingCfg.Agent.WGPublicKey != "" {
+		fmt.Printf("  %s WireGuard keypair already configured\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), existingCfg.Agent.WGPublicKey)
+	} else {
+		privKey, pubKey, genErr := overlay.GenerateKeyPair()
+		if genErr != nil {
+			return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
+		}
+		existingCfg.Agent.WGPrivateKey = privKey
+		existingCfg.Agent.WGPublicKey = pubKey
+		fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
+	}
+
+	// --- Engine connection + config ---
 	fmt.Println()
-	switch {
-	case existingCfg.Agent.AuthToken != "" && existingCfg.Agent.EngineHost != "":
+	if existingCfg.Agent.EngineHost != "" && existingCfg.Agent.WGPublicKey != "" {
 		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
-		fmt.Printf("         Engine: %s:%s (token set)\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
-	case agentInitPassword != "" && existingCfg.Agent.EngineHost != "":
-		// Password provided via --password flag — exchange token non-interactively.
+		fmt.Printf("         Engine: %s:%s\n", existingCfg.Agent.EngineHost, existingCfg.Agent.EnginePort)
+	} else {
 		hostname, _ := os.Hostname()
-		nodeName := existingCfg.Agent.NodeName
-		if nodeName == "" {
-			nodeName = hostname
+		engineHost := existingCfg.Agent.EngineHost
+		if engineHost == "" {
+			engineHost = "localhost"
 		}
 		enginePort := existingCfg.Agent.EnginePort
 		if enginePort == "" {
 			enginePort = "50051"
 		}
-
-		engineAddr := fmt.Sprintf("%s:%s", existingCfg.Agent.EngineHost, enginePort)
-		fmt.Printf("  %s Connecting to engine at %s...\n", styleInfo.Render("[..]"), engineAddr)
-
-		client, connErr := agent.NewEngineClientWithPassword(engineAddr, agentInitPassword)
-		if connErr != nil {
-			return fmt.Errorf("failed to connect to engine: %w", connErr)
+		nodeName := existingCfg.Agent.NodeName
+		if nodeName == "" {
+			nodeName = hostname
 		}
-		defer client.Close()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		token, tokenErr := client.ExchangeToken(ctx, nodeName, "agent")
-		if tokenErr != nil {
-			fmt.Printf("  %s Token exchange failed: %v\n", styleWarn.Render("[FAIL]"), tokenErr)
-			return fmt.Errorf("token exchange failed: %w", tokenErr)
-		}
-
-		fmt.Printf("  %s Token obtained from engine\n", styleOK.Render("[OK]"))
-
-		existingCfg.Agent.AuthToken = token
-		existingCfg.Agent.NodeName = nodeName
-		existingCfg.Agent.EnginePort = enginePort
-
-		if err := types.SaveConfig(configPath, &existingCfg); err != nil {
-			fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
-		} else {
-			fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
-		}
-	default:
-		hostname, _ := os.Hostname()
-		engineHost := "localhost"
-		enginePort := "50051"
-		nodeName := hostname
-		var password string
+		engineWGPubKey := existingCfg.Agent.EngineWGPublicKey
 		var tagsInput string
 
 		form := huh.NewForm(
@@ -218,20 +199,13 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 					Description("Unique name for this agent node").
 					Value(&nodeName),
 				huh.NewInput().
+					Title("Engine WireGuard public key").
+					Description("Displayed during 'banyan-engine init' (optional, enables encrypted tunnel)").
+					Value(&engineWGPubKey),
+				huh.NewInput().
 					Title("Tags").
 					Description("Comma-separated tags for environment isolation (optional)").
 					Value(&tagsInput),
-				huh.NewInput().
-					Title("Banyan cluster password").
-					Description("Used once to obtain an auth token from the engine").
-					EchoMode(huh.EchoModePassword).
-					Validate(func(s string) error {
-						if s == "" {
-							return fmt.Errorf("password is required")
-						}
-						return nil
-					}).
-					Value(&password),
 			),
 		)
 		if err := form.Run(); err != nil {
@@ -242,41 +216,31 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("agent config input: %w", err)
 		}
 
-		// Connect to engine and exchange password for token
-		engineAddr := fmt.Sprintf("%s:%s", engineHost, enginePort)
-		fmt.Printf("  %s Connecting to engine at %s...\n", styleInfo.Render("[..]"), engineAddr)
+		existingCfg.Agent.EngineHost = engineHost
+		existingCfg.Agent.EnginePort = enginePort
+		existingCfg.Agent.NodeName = nodeName
+		existingCfg.Agent.EngineWGPublicKey = engineWGPubKey
+		existingCfg.Agent.Tags = parseTags(tagsInput)
+	}
 
-		client, connErr := agent.NewEngineClientWithPassword(engineAddr, password)
-		if connErr != nil {
-			return fmt.Errorf("failed to connect to engine: %w", connErr)
+	// --- Save config ---
+	if err := types.SaveConfig(configPath, &existingCfg); err != nil {
+		fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
+	} else {
+		fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
+	}
+
+	// --- Display next steps for public key auth ---
+	if existingCfg.Agent.WGPublicKey != "" {
+		keyFileName := existingCfg.Agent.NodeName
+		if keyFileName == "" {
+			keyFileName, _ = os.Hostname()
 		}
-		defer client.Close()
-
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		token, tokenErr := client.ExchangeToken(ctx, nodeName, "agent")
-		if tokenErr != nil {
-			fmt.Printf("  %s Token exchange failed: %v\n", styleWarn.Render("[FAIL]"), tokenErr)
-			return fmt.Errorf("token exchange failed: %w", tokenErr)
-		}
-
-		fmt.Printf("  %s Token obtained from engine\n", styleOK.Render("[OK]"))
-
-		cfg := existingCfg
-		cfg.Agent = types.AgentConfig{
-			EngineHost: engineHost,
-			EnginePort: enginePort,
-			AuthToken:  token,
-			NodeName:   nodeName,
-			Tags:       parseTags(tagsInput),
-		}
-
-		if err := types.SaveConfig(configPath, &cfg); err != nil {
-			fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
-		} else {
-			fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
-		}
+		fmt.Println()
+		fmt.Println(styleInfo.Render("To whitelist this agent on the engine:"))
+		fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n",
+			existingCfg.Agent.WGPublicKey,
+			keyFileName)
 	}
 
 	fmt.Println()
@@ -331,10 +295,10 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get auth token from config
-	authToken := types.GetAgentAuthToken(configPath)
-	if authToken == "" {
-		return fmt.Errorf("auth token not configured. Run 'banyan-agent init' to obtain a token from the engine")
+	// Verify public key auth is configured
+	publicKey := cfg.Agent.WGPublicKey
+	if publicKey == "" {
+		return fmt.Errorf("no authentication configured (missing WireGuard public key). Run 'banyan-agent init' to generate a keypair")
 	}
 
 	// Check for nerdctl
@@ -354,12 +318,45 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write PID file: %w", writeErr)
 	}
 
+	// Set up WireGuard control tunnel (required when engine public key is configured)
+	controlTunnelActive := false
+	if cfg.Agent.EngineWGPublicKey != "" && cfg.Agent.WGPrivateKey != "" {
+		myTunnelIP := types.TunnelIPFromPublicKey(cfg.Agent.WGPublicKey)
+		fmt.Printf("Setting up WireGuard control tunnel (%s)...\n", myTunnelIP)
+		engineEndpointWG := cfg.Agent.EngineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceAgent, cfg.Agent.WGPrivateKey, myTunnelIP, 0); tunnelErr != nil {
+			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
+		}
+		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
+		if peerErr := overlay.AddControlPeerExec(types.ControlIfaceAgent, cfg.Agent.EngineWGPublicKey, engineEndpointWG, engineIP); peerErr != nil {
+			_ = overlay.CleanupControlTunnelExec(types.ControlIfaceAgent)
+			return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
+		}
+		controlTunnelActive = true
+		// Override gRPC endpoint to route through tunnel
+		enginePort := cfg.Agent.EnginePort
+		if enginePort == "" {
+			enginePort = "50051"
+		}
+		agentEngineEndpoint = types.ControlTunnelEngineIP + ":" + enginePort
+		fmt.Printf("Control tunnel ready, gRPC via %s\n", agentEngineEndpoint)
+	}
+
+	// Determine API address — use tunnel IP if control tunnel is active
+	apiAddress := agentAPIAddress
+	if controlTunnelActive && apiAddress == "" {
+		tunnelIP := types.TunnelIPFromPublicKey(cfg.Agent.WGPublicKey)
+		apiAddress = tunnelIP.String() + ":" + agentAPIPort
+	}
+
 	a, err := agent.New(&agent.Options{
 		NodeName:       nodeName,
 		EngineEndpoint: agentEngineEndpoint,
-		AuthToken:      authToken,
+		PublicKey:      publicKey,
+		WGPrivateKey:   cfg.Agent.WGPrivateKey,
+		WGPublicKey:    cfg.Agent.WGPublicKey,
 		APIPort:        agentAPIPort,
-		APIAddress:     agentAPIAddress,
+		APIAddress:     apiAddress,
 		PidFile:        agentPidFile,
 		Tags:           cfg.Agent.Tags,
 	})
@@ -373,6 +370,11 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	fmt.Println("Press Ctrl+C to stop")
 
 	runErr := a.Run(ctx)
+
+	// Cleanup control tunnel
+	if controlTunnelActive {
+		_ = overlay.CleanupControlTunnelExec(types.ControlIfaceAgent)
+	}
 
 	// Cleanup PID file
 	os.Remove(agentPidFile)
@@ -428,15 +430,16 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Print("Engine connection: ")
-	authToken := types.GetAgentAuthToken(configPath)
-	if authToken == "" {
-		fmt.Println("NOT CONFIGURED (no auth token)")
+	statusCfg, _ := types.LoadConfig(configPath)
+	statusPubKey := statusCfg.Agent.WGPublicKey
+	if statusPubKey == "" {
+		fmt.Println("NOT CONFIGURED (no public key)")
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		client, err := agent.NewEngineClient(agentEngineEndpoint, authToken)
-		if err != nil {
-			fmt.Printf("FAILED (%v)\n", err)
+		client, connErr := agent.NewEngineClient(agentEngineEndpoint, statusPubKey)
+		if connErr != nil {
+			fmt.Printf("FAILED (%v)\n", connErr)
 		} else {
 			defer client.Close()
 			if err := client.Health(ctx); err != nil {

@@ -33,27 +33,43 @@ Agents connect to the Engine's gRPC port (default: 50051). Check:
    agent:
      engine_host: <engine-ip>
      engine_port: "50051"
-     auth_token: <token>
+     wg_public_key: "<base64-key>"
    ```
 
 3. Port 50051 is open in your firewall between workers and the engine.
 
-4. The agent has a valid auth token. If the token was revoked or the engine was re-initialized, run `sudo banyan-agent auth` to get a new token (or `sudo banyan-agent init` for full setup).
+4. The agent's public key is whitelisted on the engine. Check that a `.pub` file containing the agent's public key exists in `/etc/banyan/whitelisted-keys/` on the engine machine.
 
 ### "Unauthenticated" errors
 
 If agents or CLI clients receive "Unauthenticated" errors:
 
-1. The auth token may have been revoked. Run `sudo banyan-agent auth` (or `sudo banyan-cli auth`) to re-authenticate with just the cluster password — no need to re-enter engine host/port/node name.
-2. If the engine was re-initialized, all existing tokens are invalidated. Run `auth` on all agents and CLI clients.
-3. If no config exists yet, run `sudo banyan-agent init` (or `sudo banyan-cli init`) for the full setup wizard.
-4. Make sure the engine was running when you ran `auth` or `init` — the password-to-token exchange requires a live connection.
+1. Verify the component's public key is whitelisted on the engine. Check `/etc/banyan/whitelisted-keys/` for a `.pub` file containing the key.
+2. If the engine was re-initialized, the whitelisted keys directory is recreated empty. Re-copy all agent and CLI public keys.
+3. If no config exists yet, run `sudo banyan-agent init` (or `sudo banyan-cli init`) to generate a keypair, then whitelist the public key on the engine.
+4. To find a component's public key: `grep wg_public_key /etc/banyan/banyan.yaml`
 
-See [Authentication](/guides/authentication/) for details on how tokens work and their lifecycle.
+See [Authentication](/guides/authentication/) for details on key management.
 
-### "VPC initialization: failed to write Flannel config"
+### WireGuard overlay issues
 
-This warning about `etcdctl` not being found is safe to ignore. It does not affect deployment functionality.
+If containers on different workers cannot communicate:
+
+1. Check that `wireguard-tools` is installed on all workers: `wg --version`
+2. Verify WireGuard kernel support: `ip link add wg-test type wireguard && ip link delete wg-test` — if this fails, the kernel module is missing (requires Linux 5.6+ or `wireguard-dkms`).
+3. Ensure port 51820/UDP is open between workers.
+4. If WireGuard is unavailable, Banyan falls back to VXLAN automatically. You can also force VXLAN by setting `overlay_type: "vxlan"` in the engine config.
+
+### Control tunnel issues
+
+If agents or CLI cannot connect through the WireGuard control tunnel:
+
+1. Check that the `wg-control` interface exists: `ip link show wg-control`
+2. Verify the tunnel peer: `wg show wg-control`
+3. Ensure port 51821/UDP is open from agents/CLI to the engine.
+4. Test connectivity: `ping 10.200.0.1` from the agent/CLI.
+5. If the control tunnel fails, Banyan falls back to direct TCP with public key metadata authentication. Check the agent/engine logs for "Control tunnel setup failed" messages.
+6. The CLI creates its tunnel during `banyan-cli init` (requires root). Subsequent CLI commands don't need root because the tunnel persists as a kernel interface.
 
 ---
 

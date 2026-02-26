@@ -26,7 +26,10 @@ const (
 	cniBinDir = "/opt/cni/bin"
 )
 
-func defaultOverlayDriverFactory() overlay.OverlayDriver {
+func defaultOverlayDriverFactory(overlayType, wgPrivateKey, wgPublicKey string) overlay.OverlayDriver {
+	if overlayType == "wireguard" && wgPrivateKey != "" && wgPublicKey != "" {
+		return overlay.NewWireGuardDriver(wgPrivateKey, wgPublicKey)
+	}
 	return overlay.NewVXLANDriver()
 }
 
@@ -56,7 +59,7 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 	}
 
 	// 5. Create overlay driver and call Init()
-	driver := overlayDriverFactory()
+	driver := overlayDriverFactory(vpcConfig.OverlayType, a.opts.WGPrivateKey, a.opts.WGPublicKey)
 	if initErr := driver.Init(ctx, *subnet, hostIP); initErr != nil {
 		return fmt.Errorf("overlay init failed: %w", initErr)
 	}
@@ -82,7 +85,13 @@ func (a *Agent) reconcileVPCPeers(ctx context.Context, peers []VPCPeer) error {
 
 	overlayPeers := make([]overlay.Peer, 0, len(peers))
 	for _, p := range peers {
-		peer, err := overlay.PeerFromSubnetAndHost(p.Subnet, p.HostIP, p.VTEPMAC)
+		var peer overlay.Peer
+		var err error
+		if p.PublicKey != "" {
+			peer, err = overlay.PeerFromSubnetAndHostWG(p.Subnet, p.HostIP, p.PublicKey)
+		} else {
+			peer, err = overlay.PeerFromSubnetAndHost(p.Subnet, p.HostIP, p.VTEPMAC)
+		}
 		if err != nil {
 			fmt.Printf("[Agent] WARNING: skipping invalid peer: %v\n", err)
 			continue

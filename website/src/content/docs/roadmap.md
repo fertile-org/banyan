@@ -42,11 +42,11 @@ Status: **Done**
 
 Secure gRPC communication between CLI, Engine, and Agents.
 
-- All inter-component communication uses gRPC with password authentication
-- Agent → Engine: password in gRPC metadata on every call
-- CLI → Engine: password in gRPC metadata on every call
+- All inter-component communication uses gRPC with public key authentication
+- Each component generates an X25519 keypair during `init`
+- Agent/CLI → Engine: public key in gRPC metadata, validated against whitelist
 - Engine → Agent: session token authentication for log streaming
-- Config file at `/etc/banyan/banyan.yaml` with sections: `security`, `engine`, `agent`, `cli`
+- Config file at `/etc/banyan/banyan.yaml` with sections: `engine`, `agent`, `cli`
 - `init` commands for engine, agent, and CLI prompt for credentials and connection info
 - Three separate binaries: `banyan-engine`, `banyan-agent`, `banyan-cli`
 
@@ -72,7 +72,8 @@ Status: **Done**
 
 Built-in overlay networking and cross-host load balancing without external dependencies.
 
-- Built-in VXLAN overlay managed by Engine (replaced Flannel) with deterministic VTEP MACs
+- WireGuard overlay (default) with VXLAN fallback, both managed by Engine via abstract `OverlayDriver` interface
+- Built-in VXLAN overlay managed by Engine with deterministic VTEP MACs
 - Per-agent /24 subnet allocation from VPC CIDR via `SubnetAllocator`
 - Peer discovery via heartbeat RPC (15s convergence)
 - iptables DNAT proxy on each agent for port forwarding to container backends
@@ -155,11 +156,14 @@ Note: CLI monitoring interface (terminal UI) is delivered in Milestone 4.
 
 ## Milestone 9 — Advanced Security
 
+Status: **Partially Done**
+
 Stronger authentication model for production environments.
 
-- Private key authentication for agent-to-engine connections
-- Private key authentication for CLI-to-engine and CLI-to-agent
-- Key generation and distribution tooling
+- ~~Private key authentication for agent-to-engine connections~~ → **Done**: X25519 public key whitelist authentication
+- ~~Private key authentication for CLI-to-engine and CLI-to-agent~~ → **Done**: CLI uses same public key auth
+- ~~Key generation and distribution tooling~~ → **Done**: `init` commands generate keypairs, admin copies public keys to engine
+- ~~Encrypted control plane~~ → **Done**: WireGuard control tunnel (`wg-control`) encrypts all gRPC traffic between engine, agents, and CLI (port 51821/UDP)
 - Certificate rotation support
 
 ---
@@ -200,7 +204,7 @@ Service discovery, traffic policies, and encrypted communication across the clus
 - **Health-check-based routing**: Only route to healthy containers — filter backends by `container_status` before including in HeartbeatResponse
 - **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
 - **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
-- **WireGuard overlay driver**: Alternative to VXLAN via the existing `OverlayDriver` interface — better performance and built-in encryption, no separate mTLS needed
+- ~~**WireGuard overlay driver**: Alternative to VXLAN via the existing `OverlayDriver` interface~~ → **Done**: WireGuard is the default overlay, VXLAN kept as fallback
 - **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
 - **mTLS between services**: Encrypted service-to-service communication — WireGuard approach (transparent at network layer) or sidecar proxy pattern
 - **Multi-tenant network isolation**: Separate VPC CIDRs per deployment or tag group with different VNIs

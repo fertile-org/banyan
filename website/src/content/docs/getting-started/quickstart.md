@@ -17,8 +17,9 @@ sudo banyan-engine start
 ```
 
 The init wizard asks for:
-- **Cluster password** — authenticates agents and CLI clients. Stored as a bcrypt hash, never in plain text.
 - **Etcd setup** — pick **Managed** (recommended). Banyan runs the data store for you, nothing to configure.
+
+During init, Banyan generates a WireGuard keypair for the engine and creates the whitelisted keys directory at `/etc/banyan/whitelisted-keys/`. The engine's **public key** is displayed — save it if you plan to enable encrypted control tunnels on agents and CLI (see [Authentication](/guides/authentication/#wireguard-control-tunnel)).
 
 The Engine runs in the foreground. Open a new terminal for the next steps.
 
@@ -35,9 +36,8 @@ The init wizard asks for:
 - **Engine host** — `localhost` for single-machine setup.
 - **Engine port** — default `50051`.
 - **Node name** — a name for this worker (default: your hostname).
-- **Cluster password** — same password you set on the engine.
 
-The agent connects to the engine, exchanges the password for an auth token, and registers itself. The password is never stored on the agent.
+During init, Banyan generates a WireGuard keypair and displays the agent's public key. For a single-machine setup, the key is automatically whitelisted. For multi-node setups, copy the public key to the engine (see [Authentication](/guides/authentication/)).
 
 ## 3. Configure the CLI (~30 seconds)
 
@@ -47,7 +47,7 @@ In a third terminal:
 sudo banyan-cli init
 ```
 
-Same questions: engine host, port, and cluster password. After init, verify the cluster:
+The wizard asks for engine host and port. It generates a WireGuard keypair and displays whitelisting instructions. After init, verify the cluster:
 
 ```bash
 banyan-cli status
@@ -199,7 +199,7 @@ sudo banyan-engine stop
 3. The **Agent** pulled images and started containers using containerd.
 4. The CLI waited until all containers reported healthy, then showed success.
 
-Your `banyan.yaml` didn't reference any specific servers. When you add more workers — run `banyan-agent init && banyan-agent start` on another machine — Banyan distributes containers across all of them automatically. **The manifest doesn't change.**
+Your `banyan.yaml` didn't reference any specific servers. When you add more workers — run `banyan-agent init` on another machine, whitelist its public key on the engine, then `banyan-agent start` — Banyan distributes containers across all of them automatically. **The manifest doesn't change.**
 
 ## Next steps
 

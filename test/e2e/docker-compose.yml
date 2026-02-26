@@ -4,6 +4,9 @@ version: '3.8'
 # 1 Engine + 2 Agents
 #
 # Pre-requisite: Build binaries first (see run-e2e.sh)
+#
+# Auth: Public key exchange via shared volume (keys-exchange).
+# Engine waits for worker keys, workers wait for engine-ready signal.
 
 services:
   engine:
@@ -14,14 +17,13 @@ services:
     hostname: engine
     privileged: true
     command: ["/entrypoint-engine.sh"]
-    environment:
-      - E2E_PASSWORD=banyan-e2e-secret
     ports:
       - "50051:50051"
     networks:
       banyan-net:
         ipv4_address: 172.28.0.10
     volumes:
+      - keys-exchange:/tmp/keys-exchange
       - engine-data:/var/lib/banyan
       - ./examples:/examples:ro
     healthcheck:
@@ -29,7 +31,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-      start_period: 15s
+      start_period: 30s
 
   worker-1:
     build:
@@ -43,16 +45,16 @@ services:
       - NODE_NAME=worker-1
       - ENGINE_HOST=engine
       - ENGINE_GRPC_PORT=50051
-      - E2E_PASSWORD=banyan-e2e-secret
     networks:
       banyan-net:
         ipv4_address: 172.28.0.11
     volumes:
+      - keys-exchange:/tmp/keys-exchange
       - worker1-data:/var/lib/banyan
       - worker1-containerd:/var/lib/containerd
     depends_on:
       engine:
-        condition: service_healthy
+        condition: service_started
 
   worker-2:
     build:
@@ -66,16 +68,16 @@ services:
       - NODE_NAME=worker-2
       - ENGINE_HOST=engine
       - ENGINE_GRPC_PORT=50051
-      - E2E_PASSWORD=banyan-e2e-secret
     networks:
       banyan-net:
         ipv4_address: 172.28.0.12
     volumes:
+      - keys-exchange:/tmp/keys-exchange
       - worker2-data:/var/lib/banyan
       - worker2-containerd:/var/lib/containerd
     depends_on:
       engine:
-        condition: service_healthy
+        condition: service_started
 
 networks:
   banyan-net:
@@ -85,6 +87,7 @@ networks:
         - subnet: 172.28.0.0/16
 
 volumes:
+  keys-exchange:
   engine-data:
   worker1-data:
   worker1-containerd:

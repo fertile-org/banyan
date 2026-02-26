@@ -126,7 +126,7 @@ func TestInitializeVPCNetworking(t *testing.T) {
 		mockDriver := &mockOverlayDriver{}
 
 		prerequisiteChecker = func() error { return nil }
-		overlayDriverFactory = func() overlay.OverlayDriver { return mockDriver }
+		overlayDriverFactory = func(_, _, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
 
 		a := &Agent{}
@@ -230,7 +230,7 @@ func TestInitializeVPCNetworking(t *testing.T) {
 		mockDriver := &mockOverlayDriver{initErr: os.ErrPermission}
 
 		prerequisiteChecker = func() error { return nil }
-		overlayDriverFactory = func() overlay.OverlayDriver { return mockDriver }
+		overlayDriverFactory = func(_, _, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
 
 		a := &Agent{}
@@ -259,7 +259,7 @@ func TestInitializeVPCNetworking(t *testing.T) {
 		mockDriver := &mockOverlayDriver{writeCNIErr: os.ErrPermission}
 
 		prerequisiteChecker = func() error { return nil }
-		overlayDriverFactory = func() overlay.OverlayDriver { return mockDriver }
+		overlayDriverFactory = func(_, _, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
 
 		a := &Agent{}

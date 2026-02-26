@@ -16,6 +16,7 @@ RUN apt-get update && apt-get install -y \
     netcat-openbsd \
     procps \
     ca-certificates \
+    wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Create CNI directories

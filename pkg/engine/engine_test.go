@@ -481,6 +481,45 @@ func TestCheckDeployingDeployment(t *testing.T) {
 			t.Errorf("expected deploying (unchanged), got %s", updated.Status)
 		}
 	})
+
+	t.Run("ignores stop_and_remove tasks with same deployment ID", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		// Two completed create tasks
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-2", &types.TaskRecord{
+			ID: "task-2", DeploymentID: "deploy-1", AgentID: "agent-1",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		})
+		// Stop tasks from a previous selective Down — same deployment ID
+		store.Save(ctx, types.KeyTasks+"agent-1/task-3-stop", &types.TaskRecord{
+			ID: "task-3-stop", DeploymentID: "deploy-1", AgentID: "agent-1",
+			Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-4-stop", &types.TaskRecord{
+			ID: "task-4-stop", DeploymentID: "deploy-1", AgentID: "agent-1",
+			Type: types.TaskTypeStopAndRemove, Status: types.StatusRunning,
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "myapp", Status: types.StatusDeploying,
+		}
+		store.Save(ctx, types.KeyDeployments+"deploy-1", deployment)
+
+		eng.checkDeployingDeployment(ctx, deployment)
+
+		var updated types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"deploy-1", &updated)
+		// Should be running (2/2 create tasks completed), not stuck in deploying
+		if updated.Status != types.StatusRunning {
+			t.Errorf("expected running, got %s", updated.Status)
+		}
+	})
 }
 
 func TestCheckStoppingDeployment(t *testing.T) {
@@ -1410,6 +1449,144 @@ func TestBlueGreenTeardownOld(t *testing.T) {
 		// Should not panic — just log the error
 		eng.blueGreenTeardownOld(ctx, deployment)
 	})
+
+	t.Run("selective deploy adopts unreplaced services", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment with api + db services
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+			Services: map[string]types.ServiceRecord{
+				"api": {Image: "api:latest", Replicas: 1},
+				"db":  {Image: "postgres:15", Replicas: 1},
+			},
+		})
+		// api task
+		store.Save(ctx, types.KeyTasks+"agent-1/task-api", &types.TaskRecord{
+			ID: "task-api", DeploymentID: "old-deploy", ServiceName: "api",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-api-0",
+		})
+		// db task
+		store.Save(ctx, types.KeyTasks+"agent-1/task-db", &types.TaskRecord{
+			ID: "task-db", DeploymentID: "old-deploy", ServiceName: "db",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-db-0",
+		})
+
+		// New deployment replaces only api
+		newDeploy := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusRunning,
+			ReplacesID: "old-deploy",
+			Services: map[string]types.ServiceRecord{
+				"api": {Image: "api:v2", Replicas: 1},
+			},
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", newDeploy)
+
+		eng.blueGreenTeardownOld(ctx, newDeploy)
+
+		// db task should be adopted into new deployment
+		var dbTask types.TaskRecord
+		store.Get(ctx, types.KeyTasks+"agent-1/task-db", &dbTask)
+		if dbTask.DeploymentID != "new-deploy" {
+			t.Errorf("expected db task adopted to new-deploy, got %s", dbTask.DeploymentID)
+		}
+
+		// api task should NOT be adopted (it's being replaced)
+		var apiTask types.TaskRecord
+		store.Get(ctx, types.KeyTasks+"agent-1/task-api", &apiTask)
+		if apiTask.DeploymentID != "old-deploy" {
+			t.Errorf("expected api task to stay in old-deploy, got %s", apiTask.DeploymentID)
+		}
+
+		// Only api should have a stop task (not db)
+		var apiStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-api-stop", &apiStop); err != nil {
+			t.Fatalf("expected stop task for api: %v", err)
+		}
+		if apiStop.Type != types.TaskTypeStopAndRemove {
+			t.Errorf("expected stop_and_remove for api, got %s", apiStop.Type)
+		}
+
+		// db should NOT have a stop task
+		var dbStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-db-stop", &dbStop); err == nil {
+			t.Error("expected NO stop task for db, but one was created")
+		}
+
+		// New deployment should now include db service
+		var updatedNew types.DeploymentRecord
+		store.Get(ctx, types.KeyDeployments+"new-deploy", &updatedNew)
+		if _, ok := updatedNew.Services["db"]; !ok {
+			t.Error("expected db service adopted into new deployment")
+		}
+		if _, ok := updatedNew.Services["api"]; !ok {
+			t.Error("expected api service still in new deployment")
+		}
+	})
+
+	t.Run("full deploy does not adopt anything", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		// Old deployment with api + db
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
+			ID: "old-deploy", Name: "app", Status: types.StatusRunning,
+			Services: map[string]types.ServiceRecord{
+				"api": {Image: "api:latest", Replicas: 1},
+				"db":  {Image: "postgres:15", Replicas: 1},
+			},
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-api", &types.TaskRecord{
+			ID: "task-api", DeploymentID: "old-deploy", ServiceName: "api",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-api-0",
+		})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-db", &types.TaskRecord{
+			ID: "task-db", DeploymentID: "old-deploy", ServiceName: "db",
+			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerName: "app-db-0",
+		})
+
+		// New deployment replaces ALL services
+		newDeploy := &types.DeploymentRecord{
+			ID: "new-deploy", Name: "app", Status: types.StatusRunning,
+			ReplacesID: "old-deploy",
+			Services: map[string]types.ServiceRecord{
+				"api": {Image: "api:v2", Replicas: 1},
+				"db":  {Image: "postgres:16", Replicas: 1},
+			},
+		}
+		store.Save(ctx, types.KeyDeployments+"new-deploy", newDeploy)
+
+		eng.blueGreenTeardownOld(ctx, newDeploy)
+
+		// Both tasks should stay in old deployment (both being replaced)
+		var apiTask types.TaskRecord
+		store.Get(ctx, types.KeyTasks+"agent-1/task-api", &apiTask)
+		if apiTask.DeploymentID != "old-deploy" {
+			t.Errorf("expected api task in old-deploy, got %s", apiTask.DeploymentID)
+		}
+		var dbTask types.TaskRecord
+		store.Get(ctx, types.KeyTasks+"agent-1/task-db", &dbTask)
+		if dbTask.DeploymentID != "old-deploy" {
+			t.Errorf("expected db task in old-deploy, got %s", dbTask.DeploymentID)
+		}
+
+		// Both should have stop tasks
+		var apiStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-api-stop", &apiStop); err != nil {
+			t.Fatalf("expected stop task for api: %v", err)
+		}
+		var dbStop types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"agent-1/task-db-stop", &dbStop); err != nil {
+			t.Fatalf("expected stop task for db: %v", err)
+		}
+	})
 }
 
 func TestCheckDeployingDeployment_BlueGreen(t *testing.T) {
@@ -1775,13 +1952,13 @@ func TestHasConflictingDeployment_WithTags(t *testing.T) {
 }
 
 func TestCheckCIDRConflict(t *testing.T) {
-	origFunc := interfaceAddrsFunc
-	t.Cleanup(func() { interfaceAddrsFunc = origFunc })
+	origFunc := listInterfaceAddrsFunc
+	t.Cleanup(func() { listInterfaceAddrsFunc = origFunc })
 
 	t.Run("no conflict with non-overlapping CIDR", func(t *testing.T) {
-		interfaceAddrsFunc = func() ([]net.Addr, error) {
-			return []net.Addr{
-				&net.IPNet{IP: net.ParseIP("192.168.1.100"), Mask: net.CIDRMask(24, 32)},
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				{Name: "eth0", Addr: &net.IPNet{IP: net.ParseIP("192.168.1.100"), Mask: net.CIDRMask(24, 32)}},
 			}, nil
 		}
 
@@ -1792,9 +1969,9 @@ func TestCheckCIDRConflict(t *testing.T) {
 	})
 
 	t.Run("conflict when CIDR overlaps host interface", func(t *testing.T) {
-		interfaceAddrsFunc = func() ([]net.Addr, error) {
-			return []net.Addr{
-				&net.IPNet{IP: net.ParseIP("10.0.1.5"), Mask: net.CIDRMask(24, 32)},
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				{Name: "eth0", Addr: &net.IPNet{IP: net.ParseIP("10.0.1.5"), Mask: net.CIDRMask(24, 32)}},
 			}, nil
 		}
 
@@ -1805,10 +1982,10 @@ func TestCheckCIDRConflict(t *testing.T) {
 	})
 
 	t.Run("skips loopback and IPv6", func(t *testing.T) {
-		interfaceAddrsFunc = func() ([]net.Addr, error) {
-			return []net.Addr{
-				&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
-				&net.IPNet{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)},
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				{Name: "lo", Addr: &net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)}},
+				{Name: "lo", Addr: &net.IPNet{IP: net.ParseIP("::1"), Mask: net.CIDRMask(128, 128)}},
 			}, nil
 		}
 
@@ -1825,27 +2002,48 @@ func TestCheckCIDRConflict(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error when interface addrs fails", func(t *testing.T) {
-		interfaceAddrsFunc = func() ([]net.Addr, error) {
+	t.Run("returns error when interfaces fails", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
 			return nil, fmt.Errorf("no interfaces")
 		}
 
 		err := checkCIDRConflict("10.0.0.0/16")
 		if err == nil {
-			t.Fatal("expected error when interface addrs fails")
+			t.Fatal("expected error when interfaces fails")
 		}
 	})
 
-	t.Run("skips non-IPNet addresses", func(t *testing.T) {
-		interfaceAddrsFunc = func() ([]net.Addr, error) {
-			return []net.Addr{
-				&mockAddr{network: "tcp", str: "not-an-ipnet"},
+	t.Run("skips banyan-owned interfaces", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				// banyan0 bridge has 10.0.x.1 — should be skipped
+				{Name: "banyan0", Addr: &net.IPNet{IP: net.ParseIP("10.0.45.1"), Mask: net.CIDRMask(24, 32)}},
+				// banyan-wg has 10.0.x.1 — should be skipped
+				{Name: "banyan-wg", Addr: &net.IPNet{IP: net.ParseIP("10.0.45.1"), Mask: net.CIDRMask(24, 32)}},
+				// wg-ctl-eng has control tunnel IP — should be skipped
+				{Name: "wg-ctl-eng", Addr: &net.IPNet{IP: net.ParseIP("10.200.0.1"), Mask: net.CIDRMask(16, 32)}},
 			}, nil
 		}
 
 		err := checkCIDRConflict("10.0.0.0/16")
 		if err != nil {
-			t.Errorf("expected no conflict with non-IPNet addr, got: %v", err)
+			t.Errorf("expected no conflict (banyan interfaces skipped), got: %v", err)
+		}
+	})
+
+	t.Run("detects conflict on non-banyan interface", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				// banyan0 — skipped
+				{Name: "banyan0", Addr: &net.IPNet{IP: net.ParseIP("10.0.45.1"), Mask: net.CIDRMask(24, 32)}},
+				// docker0 — NOT a banyan interface, should trigger conflict
+				{Name: "docker0", Addr: &net.IPNet{IP: net.ParseIP("10.0.0.1"), Mask: net.CIDRMask(24, 32)}},
+			}, nil
+		}
+
+		err := checkCIDRConflict("10.0.0.0/16")
+		if err == nil {
+			t.Fatal("expected conflict with docker0")
 		}
 	})
 }

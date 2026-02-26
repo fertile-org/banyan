@@ -7,9 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
-
-	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -20,18 +17,6 @@ import (
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
-
-// testTokenValidator validates tokens against a set of known valid hashes.
-type testTokenValidator struct {
-	validTokens map[string]bool
-}
-
-func (v *testTokenValidator) ValidateToken(ctx context.Context, tokenHash string) error {
-	if !v.validTokens[tokenHash] {
-		return status.Error(codes.Unauthenticated, "invalid auth token")
-	}
-	return nil
-}
 
 // mockAgentService implements AgentServiceServer for testing the GetLogs proxy path.
 type mockAgentService struct {
@@ -118,7 +103,7 @@ func startMockAgentServer(t *testing.T, logData [][]byte) (string, func()) {
 
 const bufSize = 1024 * 1024
 
-func setupTestServer(t *testing.T, _ string) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
+func setupTestServer(t *testing.T) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
 	t.Helper()
 
 	store := storage.NewMemoryStore()
@@ -158,7 +143,7 @@ func setupTestServer(t *testing.T, _ string) (banyanpb.EngineServiceClient, *eng
 }
 
 func TestRegister(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -208,7 +193,7 @@ func TestRegister(t *testing.T) {
 }
 
 func TestHeartbeat(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -242,7 +227,7 @@ func TestHeartbeat(t *testing.T) {
 }
 
 func TestPollTasks(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -311,7 +296,7 @@ func TestPollTasks(t *testing.T) {
 }
 
 func TestReportTaskResult(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -363,7 +348,7 @@ func TestReportTaskResult(t *testing.T) {
 }
 
 func TestReportContainerHealth(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -401,7 +386,7 @@ func TestReportContainerHealth(t *testing.T) {
 }
 
 func TestDeploy(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -500,7 +485,7 @@ func TestGetSessionToken(t *testing.T) {
 }
 
 func TestHeartbeat_NewNode(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -524,7 +509,7 @@ func TestHeartbeat_NewNode(t *testing.T) {
 }
 
 func TestReportContainerHealth_MissingAgent(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	_, err := client.ReportContainerHealth(context.Background(), &banyanpb.ReportContainerHealthRequest{})
@@ -537,7 +522,7 @@ func TestReportContainerHealth_MissingAgent(t *testing.T) {
 }
 
 func TestReportContainerHealth_NonMatchingTask(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -565,7 +550,7 @@ func TestReportContainerHealth_NonMatchingTask(t *testing.T) {
 }
 
 func TestReportTaskResult_NotFound(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	_, err := client.ReportTaskResult(context.Background(), &banyanpb.ReportTaskResultRequest{
@@ -582,7 +567,7 @@ func TestReportTaskResult_NotFound(t *testing.T) {
 }
 
 func TestDown(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -639,7 +624,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("with service filter", func(t *testing.T) {
-		client2, srv2, cleanup2 := setupTestServer(t, "test-password")
+		client2, srv2, cleanup2 := setupTestServer(t)
 		defer cleanup2()
 
 		deployment2 := &types.DeploymentRecord{
@@ -679,7 +664,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("invalid service name", func(t *testing.T) {
-		client3, srv3, cleanup3 := setupTestServer(t, "test-password")
+		client3, srv3, cleanup3 := setupTestServer(t)
 		defer cleanup3()
 
 		srv3.store.Save(ctx, types.KeyDeployments+"deploy-inv", &types.DeploymentRecord{
@@ -698,7 +683,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("no completed tasks returns zero", func(t *testing.T) {
-		client4, srv4, cleanup4 := setupTestServer(t, "test-password")
+		client4, srv4, cleanup4 := setupTestServer(t)
 		defer cleanup4()
 
 		srv4.store.Save(ctx, types.KeyDeployments+"deploy-norun", &types.DeploymentRecord{
@@ -717,7 +702,7 @@ func TestDown(t *testing.T) {
 	})
 
 	t.Run("clears stale deployment error", func(t *testing.T) {
-		client5, srv5, cleanup5 := setupTestServer(t, "test-password")
+		client5, srv5, cleanup5 := setupTestServer(t)
 		defer cleanup5()
 
 		// Deployment failed during deploy (1 task failed) but has completed tasks
@@ -755,7 +740,7 @@ func TestDown(t *testing.T) {
 }
 
 func TestGetStatus(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -806,7 +791,7 @@ func TestGetStatus(t *testing.T) {
 }
 
 func TestGetInfo(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -823,7 +808,7 @@ func TestGetInfo(t *testing.T) {
 }
 
 func TestHealth(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1015,7 +1000,7 @@ func TestFindContainerAgent(t *testing.T) {
 }
 
 func TestGetLogs(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1071,375 +1056,6 @@ func TestGetLogs(t *testing.T) {
 			t.Errorf("expected Unavailable, got %v", status.Code(recvErr))
 		}
 	})
-}
-
-func TestTokenAuth(t *testing.T) {
-	const testToken = "valid-test-token"
-	tokenHash := banyanrpc.HashPassword(testToken)
-	validator := &testTokenValidator{validTokens: map[string]bool{tokenHash: true}}
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), validator)),
-	)
-	engineSrv := &engineGRPCServer{
-		store:       storage.NewMemoryStore(),
-		registryURL: "localhost:5000",
-	}
-	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
-	go srv.Serve(lis)
-	defer srv.Stop()
-
-	t.Run("valid token succeeds", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-				return lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: testToken}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
-		if err != nil {
-			t.Fatalf("expected success with valid token, got: %v", err)
-		}
-	})
-
-	t.Run("wrong token rejected", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-				return lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: "wrong-token"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
-		if err == nil {
-			t.Fatal("expected error with wrong token")
-		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-		}
-	})
-
-	t.Run("missing token rejected", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-				return lis.DialContext(ctx)
-			}),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "test"})
-		if err == nil {
-			t.Fatal("expected error with no token")
-		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-		}
-	})
-}
-
-func TestExchangeToken(t *testing.T) {
-	store := storage.NewMemoryStore()
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
-
-	engineSrv := &engineGRPCServer{
-		store:        store,
-		registryURL:  "localhost:5000",
-		passwordHash: string(passwordHash),
-	}
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), engineSrv)),
-	)
-	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
-	go srv.Serve(lis)
-	defer srv.Stop()
-
-	dialer := func(ctx context.Context, s string) (net.Conn, error) {
-		return lis.DialContext(ctx)
-	}
-
-	t.Run("valid password returns token", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-1", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("ExchangeToken failed: %v", err)
-		}
-		if resp.Token == "" {
-			t.Error("expected non-empty token")
-		}
-
-		// Verify the returned token works for other RPCs
-		tokenConn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp.Token}),
-		)
-		defer tokenConn.Close()
-
-		tokenClient := banyanpb.NewEngineServiceClient(tokenConn)
-		_, err = tokenClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-1"})
-		if err != nil {
-			t.Fatalf("Heartbeat with exchanged token failed: %v", err)
-		}
-	})
-
-	t.Run("wrong password rejected", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "wrong-password"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-		_, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-2", Role: "agent",
-		})
-		if err == nil {
-			t.Fatal("expected error with wrong password")
-		}
-		if status.Code(err) != codes.Unauthenticated {
-			t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-		}
-	})
-
-	t.Run("re-issue replaces old token", func(t *testing.T) {
-		conn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
-		)
-		defer conn.Close()
-
-		client := banyanpb.NewEngineServiceClient(conn)
-
-		resp1, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-reissue", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("first ExchangeToken failed: %v", err)
-		}
-
-		resp2, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "agent-reissue", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("second ExchangeToken failed: %v", err)
-		}
-
-		if resp1.Token == resp2.Token {
-			t.Error("re-issued token should be different from original")
-		}
-
-		// Old token should no longer work
-		oldConn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp1.Token}),
-		)
-		defer oldConn.Close()
-
-		oldClient := banyanpb.NewEngineServiceClient(oldConn)
-		_, err = oldClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-reissue"})
-		if err == nil {
-			t.Fatal("expected error with old token after re-issue")
-		}
-
-		// New token should work
-		newConn, _ := grpc.NewClient("passthrough:///bufnet",
-			grpc.WithContextDialer(dialer),
-			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithPerRPCCredentials(&banyanrpc.TokenCredentials{Token: resp2.Token}),
-		)
-		defer newConn.Close()
-
-		newClient := banyanpb.NewEngineServiceClient(newConn)
-		_, err = newClient.Heartbeat(context.Background(), &banyanpb.HeartbeatRequest{AgentName: "agent-reissue"})
-		if err != nil {
-			t.Fatalf("Heartbeat with new token failed: %v", err)
-		}
-	})
-}
-
-func TestExchangeToken_CLITokenHasExpiry(t *testing.T) {
-	store := storage.NewMemoryStore()
-	passwordHash, _ := bcrypt.GenerateFromPassword([]byte("test-password"), bcrypt.MinCost)
-
-	engineSrv := &engineGRPCServer{
-		store:        store,
-		registryURL:  "localhost:5000",
-		passwordHash: string(passwordHash),
-	}
-
-	lis := bufconn.Listen(bufSize)
-	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.NewAuthInterceptor(string(passwordHash), engineSrv)),
-	)
-	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
-	go srv.Serve(lis)
-	defer srv.Stop()
-
-	dialer := func(ctx context.Context, s string) (net.Conn, error) {
-		return lis.DialContext(ctx)
-	}
-
-	conn, _ := grpc.NewClient("passthrough:///bufnet",
-		grpc.WithContextDialer(dialer),
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PasswordCredentials{Password: "test-password"}),
-	)
-	defer conn.Close()
-
-	client := banyanpb.NewEngineServiceClient(conn)
-
-	t.Run("CLI token has expiry set", func(t *testing.T) {
-		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "cli-laptop", Role: "cli",
-		})
-		if err != nil {
-			t.Fatalf("ExchangeToken failed: %v", err)
-		}
-
-		// Verify the stored record has an ExpiresAt set
-		tokenHash := banyanrpc.HashPassword(resp.Token)
-		var record types.TokenRecord
-		if err := store.Get(context.Background(), types.KeyTokens+tokenHash, &record); err != nil {
-			t.Fatalf("failed to get token record: %v", err)
-		}
-		if record.Name != "cli-laptop" {
-			t.Errorf("expected name 'cli-laptop', got %q", record.Name)
-		}
-		if record.Role != "cli" {
-			t.Errorf("expected role 'cli', got %q", record.Role)
-		}
-		if record.ExpiresAt.IsZero() {
-			t.Error("expected non-zero ExpiresAt for CLI token")
-		}
-		// Expiry should be ~30 days from now (allow 1 minute tolerance)
-		expectedExpiry := time.Now().Add(types.DefaultCLITokenTTL)
-		if record.ExpiresAt.Before(expectedExpiry.Add(-time.Minute)) || record.ExpiresAt.After(expectedExpiry.Add(time.Minute)) {
-			t.Errorf("ExpiresAt %v not within 1 minute of expected %v", record.ExpiresAt, expectedExpiry)
-		}
-	})
-
-	t.Run("agent token has no expiry", func(t *testing.T) {
-		resp, err := client.ExchangeToken(context.Background(), &banyanpb.ExchangeTokenRequest{
-			Name: "worker-1", Role: "agent",
-		})
-		if err != nil {
-			t.Fatalf("ExchangeToken failed: %v", err)
-		}
-
-		tokenHash := banyanrpc.HashPassword(resp.Token)
-		var record types.TokenRecord
-		if err := store.Get(context.Background(), types.KeyTokens+tokenHash, &record); err != nil {
-			t.Fatalf("failed to get token record: %v", err)
-		}
-		if record.Name != "worker-1" {
-			t.Errorf("expected name 'worker-1', got %q", record.Name)
-		}
-		if record.Role != "agent" {
-			t.Errorf("expected role 'agent', got %q", record.Role)
-		}
-		if !record.ExpiresAt.IsZero() {
-			t.Errorf("expected zero ExpiresAt for agent token, got %v", record.ExpiresAt)
-		}
-	})
-}
-
-func TestValidateToken_Expired(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	// Store a token that expired 1 hour ago
-	expiredRecord := &types.TokenRecord{
-		Name:      "cli-expired",
-		Role:      "cli",
-		ExpiresAt: time.Now().Add(-time.Hour),
-	}
-	store.Save(ctx, types.KeyTokens+"expired-hash", expiredRecord)
-
-	err := srv.ValidateToken(ctx, "expired-hash")
-	if err == nil {
-		t.Fatal("expected error for expired token")
-	}
-	if status.Code(err) != codes.Unauthenticated {
-		t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-	}
-	if status.Convert(err).Message() != "token expired, run 'auth' to re-authenticate" {
-		t.Errorf("unexpected error message: %q", status.Convert(err).Message())
-	}
-}
-
-func TestValidateToken_Valid(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	// Store a valid non-expired CLI token
-	validRecord := &types.TokenRecord{
-		Name:      "cli-valid",
-		Role:      "cli",
-		ExpiresAt: time.Now().Add(time.Hour),
-	}
-	store.Save(ctx, types.KeyTokens+"valid-hash", validRecord)
-
-	if err := srv.ValidateToken(ctx, "valid-hash"); err != nil {
-		t.Fatalf("expected no error for valid token, got: %v", err)
-	}
-}
-
-func TestValidateToken_AgentNeverExpires(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	// Store an agent token (no expiry)
-	agentRecord := &types.TokenRecord{
-		Name: "worker-1",
-		Role: "agent",
-	}
-	store.Save(ctx, types.KeyTokens+"agent-hash", agentRecord)
-
-	if err := srv.ValidateToken(ctx, "agent-hash"); err != nil {
-		t.Fatalf("expected no error for agent token, got: %v", err)
-	}
-}
-
-func TestValidateToken_NotFound(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-	ctx := context.Background()
-
-	err := srv.ValidateToken(ctx, "nonexistent-hash")
-	if err == nil {
-		t.Fatal("expected error for nonexistent token")
-	}
-	if status.Code(err) != codes.Unauthenticated {
-		t.Errorf("expected Unauthenticated, got %v", status.Code(err))
-	}
 }
 
 func TestGetLogs_SuccessProxy(t *testing.T) {
@@ -1673,7 +1289,7 @@ func TestFindContainerAgent_NoNodes(t *testing.T) {
 }
 
 func TestGetStatus_EmptyStore(t *testing.T) {
-	client, _, cleanup := setupTestServer(t, "test-password")
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	resp, err := client.GetStatus(context.Background(), &banyanpb.GetStatusRequest{})
@@ -1689,7 +1305,7 @@ func TestGetStatus_EmptyStore(t *testing.T) {
 }
 
 func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1792,7 +1408,7 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 }
 
 func TestReportTaskResult_NilResult(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1831,7 +1447,7 @@ func TestReportTaskResult_NilResult(t *testing.T) {
 }
 
 func TestHeartbeat_EmptySessionToken(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1859,7 +1475,7 @@ func TestHeartbeat_EmptySessionToken(t *testing.T) {
 }
 
 func TestDeploy_WithBuildAndDeploy(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -1909,7 +1525,7 @@ func TestDeploy_WithBuildAndDeploy(t *testing.T) {
 }
 
 func TestDown_ServiceFilterNoMatchingTasks(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -3585,7 +3201,7 @@ func TestDeployServices(t *testing.T) {
 }
 
 func TestReportContainerHealth_StoresIP(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t, "test-password")
+	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -3624,13 +3240,20 @@ func TestCollectServiceBackends(t *testing.T) {
 	srv := &engineGRPCServer{store: store}
 	ctx := context.Background()
 
-	// Register an agent
+	// Register agents and a running deployment
 	store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
 	store.Save(ctx, types.KeyNodes+"worker-2", &types.NodeRecord{Name: "worker-2", Status: "ready"})
+	store.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
+		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
+	})
+	// Old stopped deployment — backends should be excluded
+	store.Save(ctx, types.KeyDeployments+"deploy-old", &types.DeploymentRecord{
+		ID: "deploy-old", Name: "app", Status: types.StatusStopped,
+	})
 
 	// Task with IP, ports, running, completed — should be included
 	store.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
-		ID: "task-1", AgentID: "worker-1", ServiceName: "web",
+		ID: "task-1", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "web",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-0", ContainerStatus: "running",
 		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
@@ -3638,7 +3261,7 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Task without IP — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
-		ID: "task-2", AgentID: "worker-1", ServiceName: "api",
+		ID: "task-2", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "api",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-api-0", ContainerStatus: "running",
 		Ports: []string{"9090:90"},
@@ -3646,7 +3269,7 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Task with IP but no ports — should be INCLUDED (DNS needs portless containers)
 	store.Save(ctx, types.KeyTasks+"worker-2/task-3", &types.TaskRecord{
-		ID: "task-3", AgentID: "worker-2", ServiceName: "db",
+		ID: "task-3", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "db",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-worker-0", ContainerStatus: "running",
 		ContainerIP: "10.0.2.5",
@@ -3654,7 +3277,7 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Task with IP and ports but not running — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
-		ID: "task-4", AgentID: "worker-2", ServiceName: "db",
+		ID: "task-4", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "db",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-db-0", ContainerStatus: "exited",
 		ContainerIP: "10.0.2.6", Ports: []string{"5432:5432"},
@@ -3662,17 +3285,25 @@ func TestCollectServiceBackends(t *testing.T) {
 
 	// Stop task — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-1/task-5", &types.TaskRecord{
-		ID: "task-5", AgentID: "worker-1",
+		ID: "task-5", DeploymentID: "deploy-1", AgentID: "worker-1",
 		Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
 		ContainerName: "app-old-0",
 	})
 
 	// Full match on worker-2
 	store.Save(ctx, types.KeyTasks+"worker-2/task-6", &types.TaskRecord{
-		ID: "task-6", AgentID: "worker-2", ServiceName: "web",
+		ID: "task-6", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "web",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-1", ContainerStatus: "running",
 		ContainerIP: "10.0.2.7", Ports: []string{"8080:80"},
+	})
+
+	// Task from old stopped deployment — should be excluded
+	store.Save(ctx, types.KeyTasks+"worker-1/task-7", &types.TaskRecord{
+		ID: "task-7", DeploymentID: "deploy-old", AgentID: "worker-1", ServiceName: "web",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-old-web-0", ContainerStatus: "running",
+		ContainerIP: "10.0.1.99", Ports: []string{"8080:80"},
 	})
 
 	backends := srv.collectServiceBackends(ctx)
@@ -3721,10 +3352,13 @@ func TestHeartbeat_ReturnsServiceBackends(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Register agent and add a running container with IP
+	// Register agent, deployment, and add a running container with IP
 	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
+		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
+	})
 	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb1", &types.TaskRecord{
-		ID: "task-hb1", AgentID: "worker-1", ServiceName: "web",
+		ID: "task-hb1", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "web",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-0", ContainerStatus: "running",
 		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},

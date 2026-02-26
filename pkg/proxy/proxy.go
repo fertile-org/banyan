@@ -2,11 +2,19 @@ package proxy
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 
 	"github.com/coreos/go-iptables/iptables"
 )
+
+// sysctlWriter allows tests to override sysctl writes.
+var sysctlWriter = writeSysctl
+
+func writeSysctl(path, value string) error {
+	return os.WriteFile(path, []byte(value), 0o644)
+}
 
 // Chain name constants for iptables rules.
 // Uses "BANYAN-P-" prefix to avoid collision with VPC security chains
@@ -67,6 +75,19 @@ func NewWithIPTables(ipt IPTables) (*Proxy, error) {
 
 // init sets up the base iptables chain hierarchy and hooks.
 func (p *Proxy) init() error {
+	// Enable route_localnet so that iptables DNAT from localhost (127.0.0.1)
+	// can route to container IPs on bridge interfaces. Without this,
+	// "curl localhost:<port>" would be silently dropped by the kernel.
+	// This is the same approach used by kube-proxy in iptables mode.
+	if err := sysctlWriter("/proc/sys/net/ipv4/conf/all/route_localnet", "1"); err != nil {
+		return fmt.Errorf("failed to enable route_localnet: %w", err)
+	}
+
+	// Ensure IP forwarding is enabled (usually set by containerd, but be explicit)
+	if err := sysctlWriter("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
+		return fmt.Errorf("failed to enable ip_forward: %w", err)
+	}
+
 	// Clean up any stale chains from a previous crash
 	if err := p.cleanupStaleChains(); err != nil {
 		return fmt.Errorf("failed to clean stale chains: %w", err)
@@ -186,8 +207,11 @@ func (p *Proxy) AddBackend(hostPort, containerPort int, containerName, container
 			return fmt.Errorf("failed to create chain %s: %w", chainName, err)
 		}
 
-		// Add jump from BANYAN-SERVICES to the per-port chain
-		jumpRule := []string{"-p", "tcp", "--dport", fmt.Sprintf("%d", hostPort), "-j", chainName}
+		// Add jump from BANYAN-SERVICES to the per-port chain.
+		// --dst-type LOCAL ensures only host-bound traffic is DNAT'd;
+		// container-to-container traffic on the bridge is excluded
+		// (container IPs are not LOCAL addresses on the host).
+		jumpRule := []string{"-m", "addrtype", "--dst-type", "LOCAL", "-p", "tcp", "--dport", fmt.Sprintf("%d", hostPort), "-j", chainName}
 		if err := p.ipt.Append("nat", chainServices, jumpRule...); err != nil {
 			return fmt.Errorf("failed to add jump to %s: %w", chainName, err)
 		}
@@ -249,7 +273,7 @@ func (p *Proxy) RemoveBackend(containerName string) error {
 
 		if len(remaining) == 0 {
 			// No backends left — remove the service chain
-			jumpRule := []string{"-p", "tcp", "--dport", fmt.Sprintf("%d", ps.hostPort), "-j", ps.chainName}
+			jumpRule := []string{"-m", "addrtype", "--dst-type", "LOCAL", "-p", "tcp", "--dport", fmt.Sprintf("%d", ps.hostPort), "-j", ps.chainName}
 			p.ipt.Delete("nat", chainServices, jumpRule...) //nolint:errcheck // best-effort cleanup
 			clearAndDeleteChain(p.ipt, "nat", ps.chainName) //nolint:errcheck // best-effort cleanup
 			delete(p.ports, port)

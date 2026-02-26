@@ -1,18 +1,17 @@
 package cmd
 
 import (
-	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
-	"time"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
-	"github.com/fertile-org/banyan/pkg/agent"
 	"github.com/fertile-org/banyan/pkg/types"
+	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
 // TUI styles for the init wizard.
@@ -24,31 +23,27 @@ var (
 	styleDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
 )
 
-var cliInitPassword string
-
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Initialize CLI configuration",
 	Long: `Initialize the Banyan CLI configuration.
 
-This command prompts for the engine host, port, and cluster password,
-then exchanges the password for an auth token and writes the
-configuration to /etc/banyan/banyan.yaml.
+This command generates a WireGuard keypair for authentication and
+prompts for the engine host, port, and engine WireGuard public key.
+Configuration is written to /etc/banyan/banyan.yaml.
 
-The engine must be running for this command to succeed.
+After running init, whitelist the CLI public key on the engine.
 
 Run this once on any machine where you want to use banyan-cli commands
 (up, down, status, logs).
 
 Example:
-  sudo banyan-cli init
-  sudo banyan-cli init --password "my-cluster-secret"`,
+  sudo banyan-cli init`,
 	RunE: runInit,
 }
 
 func init() {
 	rootCmd.AddCommand(initCmd)
-	initCmd.Flags().StringVar(&cliInitPassword, "password", "", "Cluster password (non-interactive mode)")
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -57,9 +52,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Check for existing config
 	existingCfg, _ := types.LoadConfig(configPath)
-	if existingCfg.CLI.EngineHost != "" && existingCfg.CLI.AuthToken != "" {
+	if existingCfg.CLI.EngineHost != "" && existingCfg.CLI.WGPublicKey != "" {
 		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
-		fmt.Printf("         Engine: %s:%s (token set)\n", existingCfg.CLI.EngineHost, existingCfg.CLI.EnginePort)
+		fmt.Printf("         Engine: %s:%s\n", existingCfg.CLI.EngineHost, existingCfg.CLI.EnginePort)
 
 		var overwrite bool
 		form := huh.NewForm(
@@ -82,87 +77,66 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
+	// Generate WireGuard keypair
+	fmt.Println(styleInfo.Render("\nGenerating WireGuard keypair..."))
+	privKey, pubKey, genErr := overlay.GenerateKeyPair()
+	if genErr != nil {
+		return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
+	}
+	fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+	fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
+
 	hostname, _ := os.Hostname()
-	engineHost := "localhost"
-	enginePort := "50051"
-	cliName := "cli-" + hostname
-	var password string
-
-	if cliInitPassword != "" && existingCfg.CLI.EngineHost != "" {
-		// Non-interactive: password via flag, connection details from config.
-		password = cliInitPassword
-		engineHost = existingCfg.CLI.EngineHost
-		enginePort = existingCfg.CLI.EnginePort
-		if enginePort == "" {
-			enginePort = "50051"
-		}
-		if existingCfg.CLI.Name != "" {
-			cliName = existingCfg.CLI.Name
-		}
-	} else {
-		form := huh.NewForm(
-			huh.NewGroup(
-				huh.NewInput().
-					Title("Engine host").
-					Description("Hostname or IP of the Banyan engine").
-					Value(&engineHost),
-				huh.NewInput().
-					Title("Engine gRPC port").
-					Value(&enginePort),
-				huh.NewInput().
-					Title("CLI name").
-					Description("Unique name for this CLI client").
-					Value(&cliName),
-				huh.NewInput().
-					Title("Banyan cluster password").
-					Description("Used once to obtain an auth token from the engine").
-					EchoMode(huh.EchoModePassword).
-					Validate(func(s string) error {
-						if s == "" {
-							return fmt.Errorf("password is required")
-						}
-						return nil
-					}).
-					Value(&password),
-			),
-		)
-		if err := form.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println("\nInitialization cancelled.")
-				return nil
-			}
-			return fmt.Errorf("cli config input: %w", err)
-		}
+	engineHost := existingCfg.CLI.EngineHost
+	if engineHost == "" {
+		engineHost = "localhost"
 	}
-
-	// Connect to engine and exchange password for token
-	engineAddr := fmt.Sprintf("%s:%s", engineHost, enginePort)
-	fmt.Printf("  %s Connecting to engine at %s...\n", styleInfo.Render("[..]"), engineAddr)
-
-	client, connErr := agent.NewEngineClientWithPassword(engineAddr, password)
-	if connErr != nil {
-		return fmt.Errorf("failed to connect to engine: %w", connErr)
+	enginePort := existingCfg.CLI.EnginePort
+	if enginePort == "" {
+		enginePort = "50051"
 	}
-	defer client.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	token, tokenErr := client.ExchangeToken(ctx, cliName, "cli")
-	if tokenErr != nil {
-		fmt.Printf("  %s Token exchange failed: %v\n", styleWarn.Render("[FAIL]"), tokenErr)
-		return fmt.Errorf("token exchange failed: %w", tokenErr)
+	cliName := existingCfg.CLI.Name
+	if cliName == "" {
+		cliName = "cli-" + hostname
 	}
+	engineWGPubKey := existingCfg.CLI.EngineWGPublicKey
 
-	fmt.Printf("  %s Token obtained from engine\n", styleOK.Render("[OK]"))
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().
+				Title("Engine host").
+				Description("Hostname or IP of the Banyan engine").
+				Value(&engineHost),
+			huh.NewInput().
+				Title("Engine gRPC port").
+				Value(&enginePort),
+			huh.NewInput().
+				Title("CLI name").
+				Description("Unique name for this CLI client").
+				Value(&cliName),
+			huh.NewInput().
+				Title("Engine WireGuard public key").
+				Description("Displayed during 'banyan-engine init' (optional, enables encrypted tunnel)").
+				Value(&engineWGPubKey),
+		),
+	)
+	if err := form.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println("\nInitialization cancelled.")
+			return nil
+		}
+		return fmt.Errorf("cli config input: %w", err)
+	}
 
 	// Load existing config to preserve other sections (agent, engine)
 	cfg, _ := types.LoadConfig(configPath)
 	cfg.CLI = types.CLIConfig{
-		EngineHost: engineHost,
-		EnginePort: enginePort,
-		AuthToken:  token,
-		Name:       cliName,
+		EngineHost:        engineHost,
+		EnginePort:        enginePort,
+		Name:              cliName,
+		WGPrivateKey:      privKey,
+		WGPublicKey:       pubKey,
+		EngineWGPublicKey: engineWGPubKey,
 	}
 
 	if err := types.SaveConfig(configPath, &cfg); err != nil {
@@ -170,6 +144,27 @@ func runInit(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
 	}
+
+	// Set up WireGuard control tunnel (if engine public key provided)
+	if engineWGPubKey != "" {
+		myTunnelIP := types.TunnelIPFromPublicKey(pubKey)
+		fmt.Printf("\n  %s Setting up WireGuard control tunnel (%s)...\n", styleInfo.Render("[..]"), myTunnelIP)
+		engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceCLI, privKey, myTunnelIP, 0); tunnelErr != nil {
+			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure this runs with sudo and wireguard kernel module is loaded)", tunnelErr)
+		}
+		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
+		if peerErr := overlay.AddControlPeerExec(types.ControlIfaceCLI, engineWGPubKey, engineEndpointWG, engineIP); peerErr != nil {
+			_ = overlay.CleanupControlTunnelExec(types.ControlIfaceCLI)
+			return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
+		}
+		fmt.Printf("  %s Control tunnel ready (persists as kernel interface)\n", styleOK.Render("[OK]"))
+	}
+
+	// Display next steps for public key auth
+	fmt.Println()
+	fmt.Println(styleInfo.Render("To whitelist this CLI on the engine:"))
+	fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n", pubKey, cliName)
 
 	fmt.Println()
 	fmt.Println(styleDim.Render("========================================"))

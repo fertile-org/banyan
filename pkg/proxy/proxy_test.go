@@ -7,6 +7,11 @@ import (
 	"testing"
 )
 
+func init() {
+	// Override sysctl writer in tests to avoid requiring /proc/sys access
+	sysctlWriter = func(path, value string) error { return nil }
+}
+
 func newTestProxy(t *testing.T) (*Proxy, *mockIPTables) {
 	t.Helper()
 	mock := newMockIPTables()
@@ -43,6 +48,47 @@ func TestProxyInit(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected MASQUERADE rule in BANYAN-POSTROUTING")
+	}
+}
+
+func TestProxyInit_EnablesSysctls(t *testing.T) {
+	written := make(map[string]string)
+	origWriter := sysctlWriter
+	sysctlWriter = func(path, value string) error {
+		written[path] = value
+		return nil
+	}
+	defer func() { sysctlWriter = origWriter }()
+
+	mock := newMockIPTables()
+	p, err := NewWithIPTables(mock)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+	defer p.Close()
+
+	if written["/proc/sys/net/ipv4/conf/all/route_localnet"] != "1" {
+		t.Error("expected route_localnet to be enabled")
+	}
+	if written["/proc/sys/net/ipv4/ip_forward"] != "1" {
+		t.Error("expected ip_forward to be enabled")
+	}
+}
+
+func TestProxyInit_SysctlError(t *testing.T) {
+	origWriter := sysctlWriter
+	sysctlWriter = func(path, value string) error {
+		return fmt.Errorf("permission denied")
+	}
+	defer func() { sysctlWriter = origWriter }()
+
+	mock := newMockIPTables()
+	_, err := NewWithIPTables(mock)
+	if err == nil {
+		t.Fatal("expected error when sysctl write fails")
+	}
+	if !strings.Contains(err.Error(), "route_localnet") {
+		t.Errorf("expected route_localnet error, got: %v", err)
 	}
 }
 
@@ -94,17 +140,17 @@ func TestProxyAddBackend_SingleBackend(t *testing.T) {
 		t.Errorf("expected FORWARD accept rule for 172.17.0.5:8080, got %v", fwdRules)
 	}
 
-	// Verify jump from BANYAN-SERVICES to SVC chain
+	// Verify jump from BANYAN-SERVICES to SVC chain (with --dst-type LOCAL)
 	svcRules := mock.getRules("nat", chainServices)
 	found = false
 	for _, r := range svcRules {
-		if strings.Contains(r, "--dport 80") && strings.Contains(r, svcChain) {
+		if strings.Contains(r, "--dport 80") && strings.Contains(r, svcChain) && strings.Contains(r, "LOCAL") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected jump rule in BANYAN-SERVICES for port 80, got %v", svcRules)
+		t.Errorf("expected jump rule with --dst-type LOCAL in BANYAN-SERVICES for port 80, got %v", svcRules)
 	}
 }
 

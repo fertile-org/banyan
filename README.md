@@ -117,15 +117,17 @@ One-time setup (run once per machine):
 
 ```bash
 # Control plane
-sudo banyan-engine init        # Set a cluster password
+sudo banyan-engine init        # Generate keypair, configure etcd
 sudo banyan-engine start       # Starts the engine, etcd, and image registry
 
 # Each worker
-sudo banyan-agent init         # Connect to the engine
+sudo banyan-agent init         # Generate keypair, set engine address
+# Copy agent's public key to engine: echo '<key>' > /etc/banyan/whitelisted-keys/worker-1.pub
 sudo banyan-agent start        # Register and start accepting containers
 
 # Your machine
-sudo banyan-cli init           # Authenticate with the engine
+sudo banyan-cli init           # Generate keypair, set engine address
+# Copy CLI's public key to engine: echo '<key>' > /etc/banyan/whitelisted-keys/cli.pub
 ```
 
 Then deploy — every time, one command:
@@ -179,7 +181,7 @@ graph TD
     Engine -.-|/metrics| Prom
 ```
 
-The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is authenticated over gRPC.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All gRPC communication is authenticated via public key whitelist and optionally encrypted through a WireGuard control tunnel (port 51821/UDP).
 
 ## Documentation
 

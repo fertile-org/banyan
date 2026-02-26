@@ -69,7 +69,16 @@ func NewVXLANDriverWithOps(ops LinkOperations) *VXLANDriver {
 }
 
 // Init creates the VXLAN interface, bridge, and sets up networking.
+// If interfaces exist from a previous run, they are cleaned up first.
 func (d *VXLANDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP) error {
+	// Clean up any leftover interfaces from a previous run
+	if exists, _ := d.linkOps.LinkExists(d.vxlanName); exists {
+		_ = d.linkOps.DeleteLink(d.vxlanName)
+	}
+	if exists, _ := d.linkOps.LinkExists(d.bridgeName); exists {
+		_ = d.linkOps.DeleteLink(d.bridgeName)
+	}
+
 	// 1. Create VXLAN interface
 	if err := d.linkOps.CreateVXLAN(d.vxlanName, d.vni, d.port, hostIP); err != nil {
 		return fmt.Errorf("create VXLAN interface: %w", err)

@@ -6,10 +6,8 @@ require (
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
-	github.com/fertile-org/banyan/pkg/vpc v0.0.0
 	github.com/fertile-org/banyan/pkg/vpc/overlay v0.0.0
 	github.com/google/go-containerregistry v0.20.7
-	golang.org/x/crypto v0.48.0
 	google.golang.org/grpc v1.72.1
 )
 
@@ -21,8 +19,11 @@ require (
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/v3 v3.5.21 // indirect
+	go.opentelemetry.io/otel/metric v1.37.0 // indirect
+	go.opentelemetry.io/otel/trace v1.37.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.uber.org/zap v1.27.0 // indirect
+	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect

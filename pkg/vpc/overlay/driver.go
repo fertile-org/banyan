@@ -10,10 +10,11 @@ import (
 
 // Peer represents a remote agent in the overlay network.
 type Peer struct {
-	Subnet net.IPNet        // allocated /24 subnet for this agent
-	HostIP net.IP           // agent's public/reachable IP
-	VTEPIP net.IP           // VTEP tunnel endpoint IP (first IP in subnet)
-	MAC    net.HardwareAddr // VTEP MAC address (deterministic from subnet)
+	Subnet    net.IPNet        // allocated /24 subnet for this agent
+	HostIP    net.IP           // agent's public/reachable IP
+	VTEPIP    net.IP           // VTEP tunnel endpoint IP (first IP in subnet)
+	MAC       net.HardwareAddr // VTEP MAC address (deterministic from subnet) — VXLAN
+	PublicKey string           // WireGuard public key (base64) — WireGuard
 }
 
 // OverlayDriver manages the data-plane for overlay networking on an agent.
@@ -74,5 +75,30 @@ func PeerFromSubnetAndHost(subnetStr, hostIPStr, vtepMACStr string) (Peer, error
 		HostIP: hostIP,
 		VTEPIP: VTEPIP(*subnet),
 		MAC:    mac,
+	}, nil
+}
+
+// PeerFromSubnetAndHostWG constructs a WireGuard Peer from a subnet string, host IP, and public key.
+func PeerFromSubnetAndHostWG(subnetStr, hostIPStr, publicKey string) (Peer, error) {
+	_, subnet, err := net.ParseCIDR(subnetStr)
+	if err != nil {
+		return Peer{}, fmt.Errorf("invalid subnet %q: %w", subnetStr, err)
+	}
+
+	hostIP := net.ParseIP(hostIPStr)
+	if hostIP == nil {
+		return Peer{}, fmt.Errorf("invalid host IP %q", hostIPStr)
+	}
+
+	if publicKey == "" {
+		return Peer{}, fmt.Errorf("empty public key")
+	}
+
+	return Peer{
+		Subnet:    *subnet,
+		HostIP:    hostIP,
+		VTEPIP:    VTEPIP(*subnet),
+		MAC:       DeterministicMAC(*subnet),
+		PublicKey: publicKey,
 	}, nil
 }

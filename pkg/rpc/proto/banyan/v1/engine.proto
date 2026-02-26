@@ -18,9 +18,6 @@ service EngineService {
   rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
   rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
-
-  // Auth RPC — authenticated with password, returns a token
-  rpc ExchangeToken(ExchangeTokenRequest) returns (ExchangeTokenResponse);
 }
 
 // --- Agent messages ---
@@ -30,6 +27,7 @@ message RegisterRequest {
   string api_address = 2;
   string session_token = 3;
   repeated string tags = 4;
+  string wg_public_key = 5;       // agent's WireGuard public key
 }
 
 message RegisterResponse {
@@ -37,6 +35,7 @@ message RegisterResponse {
   repeated string store_endpoints = 2;  // DEPRECATED: was etcd endpoints for Flannel
   string vpc_cidr = 3;                  // VPC network CIDR (e.g., "10.0.0.0/16")
   string allocated_subnet = 4;          // /24 subnet for this agent (e.g., "10.0.45.0/24")
+  string overlay_type = 5;             // "wireguard" or "vxlan"
 }
 
 message HeartbeatRequest {
@@ -53,7 +52,8 @@ message HeartbeatResponse {
 message VPCPeer {
   string subnet = 1;                    // peer's allocated subnet
   string host_ip = 2;                   // peer's reachable IP
-  string vtep_mac = 3;                  // deterministic VTEP MAC
+  string vtep_mac = 3;                  // deterministic VTEP MAC (VXLAN)
+  string public_key = 4;               // WireGuard public key
 }
 
 message PollTasksRequest {
@@ -242,13 +242,4 @@ message HealthRequest {}
 
 message HealthResponse {
   string status = 1;
-}
-
-message ExchangeTokenRequest {
-  string name = 1;
-  string role = 2;
-}
-
-message ExchangeTokenResponse {
-  string token = 1;
 }

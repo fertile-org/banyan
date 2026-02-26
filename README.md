@@ -43,11 +43,10 @@
 
 > **Under experiment.** Banyan is not yet production-ready. We encourage you to experiment, break things, and [share feedback](https://github.com/fertile-org/banyan/issues).
 
+
+
 <div align="center">
-  <video src="website/public/dashboard/demo-dashboard.mp4" autoplay loop muted playsinline>
-    <img src="website/public/dashboard/dashboard-overview.png" alt="Banyan CLI dashboard">
-  </video>
-  <br>
+  <video src="https://github.com/user-attachments/assets/26d4e454-48b8-402f-b837-5cc00a251738" autoplay loop muted playsinline></video>
   <sub><code>banyan-cli dashboard</code> — monitor your entire cluster from the terminal</sub>
 </div>
 

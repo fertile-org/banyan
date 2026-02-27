@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/types"
 )
 
@@ -108,11 +109,11 @@ func buildImageArgs(imageName, contextPath, dockerfile string) []string {
 }
 
 func runDeploy(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Up")
-	fmt.Println("========================================")
+	log := logging.New("cli")
+	log.Info("Banyan Up")
 
 	// Read and parse manifest
-	fmt.Printf("Reading manifest: %s\n", deployFile)
+	log.Info("Reading manifest", "file", deployFile)
 	data, err := os.ReadFile(deployFile)
 	if err != nil {
 		return fmt.Errorf("failed to read manifest: %w", err)
@@ -187,21 +188,21 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	}
 
 	// Deploy via engine gRPC
-	fmt.Printf("\nConnecting to Engine at %s...\n", engineAddr)
+	log.Info("Connecting to engine", "address", engineAddr)
 	resp, err := client.Deploy(ctx, manifest, args, deployTags)
 	if err != nil {
 		return fmt.Errorf("failed to create deployment: %w", err)
 	}
 
-	fmt.Printf("Deployment '%s' created (ID: %s)\n", manifest.Name, resp.DeploymentId)
+	log.Info("Deployment created", "name", manifest.Name, "id", resp.DeploymentId)
 
 	if deployNoWait {
-		fmt.Println("Use 'banyan-cli status' to check deployment status.")
+		log.Info("Use 'banyan-cli status' to check deployment status")
 		return nil
 	}
 
 	// Poll for status changes
-	fmt.Println("Waiting for deployment to complete...")
+	log.Info("Waiting for deployment to complete")
 	return waitForDeployment(ctx, client, manifest.Name)
 }
 
@@ -216,7 +217,7 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("\nTimeout waiting for deployment.")
+			logging.Warn("Timeout waiting for deployment")
 			return fmt.Errorf("deployment timed out")
 		case <-ticker.C:
 			status, err := client.Status(ctx)
@@ -233,15 +234,12 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 				lastStatus = d.Status
 				switch d.Status {
 				case types.StatusDeploying:
-					fmt.Println("  Status: deploying (tasks dispatched to agents)")
+					logging.Info("Deployment status: deploying")
 				case types.StatusRunning:
-					fmt.Println("  Status: running")
-					fmt.Println("\n========================================")
-					fmt.Printf("Deployment '%s' is RUNNING!\n", d.Name)
+					logging.Info("Deployment is RUNNING", "name", d.Name)
 					return nil
 				case types.StatusFailed:
-					fmt.Printf("  Status: FAILED (%s)\n", d.Error)
-					fmt.Println("\n========================================")
+					logging.Error("Deployment FAILED", "name", d.Name, "error", d.Error)
 					return fmt.Errorf("deployment failed: %s", d.Error)
 				}
 			}
@@ -249,13 +247,9 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 			// Warn if deployment is stuck in pending (no agents picking it up)
 			if d.Status == types.StatusPending && !pendingWarned && time.Since(pendingStart) > 10*time.Second {
 				pendingWarned = true
-				fmt.Println("  WARNING: Deployment is still pending — no tasks have been scheduled.")
-				fmt.Println("  Possible causes:")
-				fmt.Println("    - No agents are connected with matching tags")
-				fmt.Println("    - A previous deployment is still being torn down")
-				if len(deployTags) > 0 {
-					fmt.Printf("  Deployment tags: %v\n", deployTags)
-				}
+				logging.Warn("Deployment still pending, no tasks scheduled",
+					"hint", "check that agents are connected with matching tags",
+					"tags", deployTags)
 			}
 		}
 	}
@@ -274,7 +268,7 @@ func buildServiceImages(manifestDir, appName string, services map[string]types.M
 		return nil
 	}
 
-	fmt.Println("\nBuilding images...")
+	logging.Info("Building images")
 
 	for name, svc := range services { //nolint:gocritic // map iteration
 		if svc.Build == nil {
@@ -293,13 +287,13 @@ func buildServiceImages(manifestDir, appName string, services map[string]types.M
 			contextPath = filepath.Join(manifestDir, contextPath)
 		}
 
-		fmt.Printf("  Building %s → %s\n", name, imageName)
+		logging.Info("Building image", "service", name, "image", imageName)
 		if err := buildImageFunc(imageName, contextPath, svc.Build.Dockerfile); err != nil {
 			return fmt.Errorf("failed to build image for service %q: %w", name, err)
 		}
 	}
 
-	fmt.Println("Images built successfully.")
+	logging.Info("Images built successfully")
 	return nil
 }
 
@@ -333,11 +327,11 @@ func pushServiceImages(registryURL string, services map[string]types.ManifestSer
 	}
 
 	if registryURL == "" {
-		fmt.Println("Warning: No registry URL available. Skipping image push.")
+		logging.Warn("No registry URL available, skipping image push")
 		return nil
 	}
 
-	fmt.Printf("\nPushing images to registry %s...\n", registryURL)
+	logging.Info("Pushing images to registry", "url", registryURL)
 
 	for name, svc := range services { //nolint:gocritic // map iteration
 		if svc.Build == nil {
@@ -347,12 +341,12 @@ func pushServiceImages(registryURL string, services map[string]types.ManifestSer
 		localImage := svc.Image
 		registryImage := fmt.Sprintf("%s/%s", registryURL, localImage)
 
-		fmt.Printf("  Tagging %s → %s\n", localImage, registryImage)
+		logging.Info("Tagging image", "from", localImage, "to", registryImage)
 		if err := tagImageFunc(localImage, registryImage); err != nil {
 			return fmt.Errorf("failed to tag image for service %q: %w", name, err)
 		}
 
-		fmt.Printf("  Pushing %s...\n", registryImage)
+		logging.Info("Pushing image", "image", registryImage)
 		if err := pushImageFunc(registryImage); err != nil {
 			return fmt.Errorf("failed to push image for service %q: %w", name, err)
 		}
@@ -362,7 +356,7 @@ func pushServiceImages(registryURL string, services map[string]types.ManifestSer
 		services[name] = svc
 	}
 
-	fmt.Println("Images pushed successfully.")
+	logging.Info("Images pushed successfully")
 	return nil
 }
 

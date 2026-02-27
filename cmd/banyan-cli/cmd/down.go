@@ -9,6 +9,7 @@ import (
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
 )
@@ -67,8 +68,8 @@ func resolveAppName(name, filePath string) (string, error) {
 }
 
 func runDown(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Down")
-	fmt.Println("========================================")
+	log := logging.New("cli")
+	log.Info("Banyan Down")
 
 	appName, err := resolveAppName(downName, downFile)
 	if err != nil {
@@ -90,25 +91,25 @@ func runDown(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	fmt.Printf("Connecting to Engine at %s...\n", engineAddr)
+	log.Info("Connecting to engine", "address", engineAddr)
 	resp, err := client.Down(ctx, appName, args, downTags)
 	if err != nil {
 		return fmt.Errorf("failed to stop deployment: %w", err)
 	}
 
 	if resp.TaskCount == 0 {
-		fmt.Println("No running services found to stop.")
+		log.Info("No running services found to stop")
 		return nil
 	}
 
-	fmt.Printf("Created %d stop task(s) for deployment '%s'\n", resp.TaskCount, appName)
+	log.Info("Created stop tasks", "count", resp.TaskCount, "app", appName)
 
 	if downNoWait {
-		fmt.Println("Use 'banyan-cli status' to check progress.")
+		log.Info("Use 'banyan-cli status' to check progress")
 		return nil
 	}
 
-	fmt.Println("Waiting for services to stop...")
+	log.Info("Waiting for services to stop")
 	return waitForDown(ctx, client, appName)
 }
 
@@ -138,7 +139,7 @@ func waitForDown(ctx context.Context, client *EngineClient, appName string) erro
 	for {
 		select {
 		case <-ctx.Done():
-			fmt.Println("\nTimeout waiting for services to stop.")
+			logging.Warn("Timeout waiting for services to stop")
 			return fmt.Errorf("down timed out")
 		case <-ticker.C:
 			status, err := client.Status(ctx)
@@ -155,12 +156,10 @@ func waitForDown(ctx context.Context, client *EngineClient, appName string) erro
 				lastStatus = d.Status
 				switch d.Status {
 				case types.StatusStopped:
-					fmt.Println("\n========================================")
-					fmt.Printf("All services stopped for '%s'.\n", appName)
+					logging.Info("All services stopped", "app", appName)
 					return nil
 				case types.StatusFailed:
-					fmt.Printf("\n========================================\n")
-					fmt.Printf("Down FAILED: %s\n", d.Error)
+					logging.Error("Down FAILED", "app", appName, "error", d.Error)
 					return fmt.Errorf("down failed: %s", d.Error)
 				}
 			}

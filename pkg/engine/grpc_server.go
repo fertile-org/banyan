@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"fmt"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -13,6 +12,7 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/metrics"
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
@@ -35,6 +35,7 @@ type engineGRPCServer struct {
 	metricsRegistry *metrics.EngineMetricsRegistry
 	events          EventLog
 	startedAt       time.Time
+	log             *logging.Logger
 }
 
 // grpcServerOptions configures the engine gRPC server.
@@ -50,6 +51,14 @@ type grpcServerOptions struct {
 	MetricsRegistry *metrics.EngineMetricsRegistry
 	Events          EventLog
 	StartedAt       time.Time
+}
+
+// logger returns the gRPC server's logger, initializing it if nil (for test convenience).
+func (s *engineGRPCServer) logger() *logging.Logger {
+	if s.log == nil {
+		s.log = logging.New("engine")
+	}
+	return s.log
 }
 
 // startEngineGRPC starts the gRPC server for agent communication.
@@ -70,6 +79,7 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		metricsRegistry: opts.MetricsRegistry,
 		events:          opts.Events,
 		startedAt:       opts.StartedAt,
+		log:             logging.New("engine"),
 	}
 
 	var srv *grpc.Server
@@ -88,7 +98,7 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 
 	go func() {
 		if err := srv.Serve(lis); err != nil {
-			fmt.Printf("Engine gRPC server error: %v\n", err)
+			engineSrv.logger().Error("gRPC server error", "error", err)
 		}
 	}()
 
@@ -132,7 +142,7 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 		return nil, status.Errorf(codes.Internal, "failed to register node: %v", err)
 	}
 
-	fmt.Printf("[Engine] Agent registered: %s (api: %s)\n", req.AgentName, req.ApiAddress)
+	s.logger().Info("Agent registered", "agent", req.AgentName, "api", req.ApiAddress)
 	s.emitEvent("agent.registered", fmt.Sprintf("Agent %s registered (api: %s)", req.AgentName, req.ApiAddress), "info")
 
 	resp := &banyanpb.RegisterResponse{
@@ -416,7 +426,7 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 				task.ContainerIP = ip
 			}
 			if err := s.store.Save(ctx, key, &task); err != nil {
-				log.Printf("WARNING: failed to save container health for %s: %v", task.ContainerName, err)
+				s.logger().Warn("Failed to save container health", "container", task.ContainerName, "error", err)
 			}
 			if task.DeploymentID != "" {
 				affectedDeployments[task.DeploymentID] = true
@@ -464,7 +474,7 @@ func (s *engineGRPCServer) reconcileDeploymentStatus(ctx context.Context, deploy
 		record.Status = types.StatusStopped
 		record.UpdatedAt = time.Now()
 		if err := s.store.Save(ctx, key, &record); err != nil {
-			log.Printf("WARNING: failed to update deployment %s status to stopped: %v", deploymentID, err)
+			s.logger().Warn("Failed to update deployment status to stopped", "deployment_id", deploymentID, "error", err)
 		} else {
 			s.emitEvent("deployment.stopped", fmt.Sprintf("Deployment %s stopped (all containers dead)", record.Name), "warn")
 		}
@@ -774,7 +784,7 @@ func teardownDeployment(ctx context.Context, store storage.StateStore, deploymen
 		deployment.Error = ""
 		deployment.UpdatedAt = time.Now()
 		if err := store.Save(ctx, deploymentKey, deployment); err != nil {
-			log.Printf("WARNING: failed to update deployment status: %v", err)
+			logging.Warn("Failed to update deployment status", "error", err)
 		}
 		return 0, nil
 	}
@@ -802,7 +812,7 @@ func teardownDeployment(ctx context.Context, store storage.StateStore, deploymen
 	deployment.Error = ""
 	deployment.UpdatedAt = time.Now()
 	if err := store.Save(ctx, deploymentKey, deployment); err != nil {
-		log.Printf("WARNING: failed to update deployment status: %v", err)
+		logging.Warn("Failed to update deployment status", "error", err)
 	}
 
 	return len(targetTasks), nil
@@ -841,7 +851,7 @@ func (s *engineGRPCServer) prepareForRedeploy(ctx context.Context, name string, 
 			// Pending/deploying/failed: teardown immediately (recreate behavior)
 			r := record
 			if _, teardownErr := teardownDeployment(ctx, s.store, &r, key); teardownErr != nil {
-				log.Printf("WARNING: failed to teardown deployment %s: %v", record.ID, teardownErr)
+				logging.Warn("Failed to teardown deployment", "deployment_id", record.ID, "error", teardownErr)
 			}
 		}
 	}
@@ -995,7 +1005,7 @@ func (s *engineGRPCServer) teardownDeploymentServices(ctx context.Context, deplo
 		}
 		taskKey := types.KeyTasks + tasks[i].AgentID + "/" + stopTask.ID
 		if err := s.store.Save(ctx, taskKey, stopTask); err != nil {
-			log.Printf("WARNING: failed to create stop task for service %s: %v", tasks[i].ServiceName, err)
+			s.logger().Warn("Failed to create stop task", "service", tasks[i].ServiceName, "error", err)
 		}
 	}
 }
@@ -1022,7 +1032,7 @@ func (s *engineGRPCServer) teardownNonRunningDeployments(ctx context.Context, na
 		// Pending/deploying/failed: teardown immediately
 		r := record
 		if _, teardownErr := teardownDeployment(ctx, s.store, &r, key); teardownErr != nil {
-			log.Printf("WARNING: failed to teardown deployment %s: %v", record.ID, teardownErr)
+			logging.Warn("Failed to teardown deployment", "deployment_id", record.ID, "error", teardownErr)
 		}
 	}
 }
@@ -1270,7 +1280,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 			d.record.Status = types.StatusStopped
 			d.record.UpdatedAt = time.Now()
 			if err := s.store.Save(ctx, d.key, &d.record); err != nil {
-				log.Printf("WARNING: failed to mark superseded deployment %s as stopped: %v", d.record.ID, err)
+				s.logger().Warn("Failed to mark superseded deployment as stopped", "deployment_id", d.record.ID, "error", err)
 			} else {
 				s.emitEvent("deployment.stopped", fmt.Sprintf("Deployment %s superseded by newer version", d.record.Name), "info")
 			}

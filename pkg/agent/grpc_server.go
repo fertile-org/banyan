@@ -2,13 +2,13 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"net"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -22,9 +22,10 @@ type agentGRPCServer struct {
 
 // startAgentGRPC starts the agent's gRPC server for log streaming.
 func startAgentGRPC(ctx context.Context, logProvider types.LogProvider, port, sessionToken string) {
+	log := logging.New("agent.grpc")
 	lis, err := net.Listen("tcp", ":"+port)
 	if err != nil {
-		fmt.Printf("Agent gRPC server failed to listen on port %s: %v\n", port, err)
+		log.Error("Failed to listen", "port", port, "error", err)
 		return
 	}
 
@@ -38,7 +39,7 @@ func startAgentGRPC(ctx context.Context, logProvider types.LogProvider, port, se
 
 	go func() {
 		if err := srv.Serve(lis); err != nil {
-			fmt.Printf("Agent gRPC server error: %v\n", err)
+			log.Error("gRPC server error", "error", err)
 		}
 	}()
 
@@ -47,7 +48,7 @@ func startAgentGRPC(ctx context.Context, logProvider types.LogProvider, port, se
 		srv.GracefulStop()
 	}()
 
-	fmt.Printf("Agent gRPC server listening on :%s\n", port)
+	log.Info("gRPC server listening", "port", port)
 }
 
 func (s *agentGRPCServer) StreamLogs(req *banyanpb.StreamLogsRequest, stream banyanpb.AgentService_StreamLogsServer) error {

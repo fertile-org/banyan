@@ -3,6 +3,7 @@ package cmd
 import (
 	"github.com/spf13/cobra"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/types"
 )
 
@@ -38,5 +39,6 @@ Quick Start:
 
 // Execute runs the root command
 func Execute() error {
+	logging.Setup(nil)
 	return rootCmd.Execute()
 }

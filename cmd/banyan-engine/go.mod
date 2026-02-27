@@ -6,6 +6,7 @@ require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/fertile-org/banyan/pkg/engine v0.0.0
+	github.com/fertile-org/banyan/pkg/logging v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
 	github.com/fertile-org/banyan/pkg/vpc/overlay v0.0.0
@@ -70,6 +71,7 @@ require (
 
 replace (
 	github.com/fertile-org/banyan/pkg/engine => ../../pkg/engine
+	github.com/fertile-org/banyan/pkg/logging => ../../pkg/logging
 	github.com/fertile-org/banyan/pkg/metrics => ../../pkg/metrics
 	github.com/fertile-org/banyan/pkg/rpc => ../../pkg/rpc
 	github.com/fertile-org/banyan/pkg/storage => ../../pkg/storage

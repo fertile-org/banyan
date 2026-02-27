@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/vpc/registry"
 	"github.com/fertile-org/banyan/pkg/storage"
@@ -98,7 +99,7 @@ func (r *Runtime) configureContainerDNS(ctx context.Context, containerID string)
 
 	if err := cmd.Run(); err != nil {
 		// Log warning but don't fail - DNS config is optional
-		fmt.Fprintf(os.Stderr, "Warning: failed to configure container DNS: %v (stderr: %s)\n", err, stderr.String())
+		logging.Warn("Failed to configure container DNS", "error", err, "stderr", stderr.String())
 	}
 
 	return nil
@@ -244,10 +245,12 @@ func (r *Runtime) AddToNetworkWithService(ctx context.Context, containerID, netw
 	selfNsOutput, _ := selfNsCmd.Output()
 	targetNsCmd := exec.Command("stat", "-L", "-c", "%i", netnsPath)
 	targetNsOutput, _ := targetNsCmd.Output()
-	fmt.Fprintf(os.Stderr, "DEBUG: Current process netns inode: %s", string(selfNsOutput))
-	fmt.Fprintf(os.Stderr, "DEBUG: Target CNI_NETNS (%s) inode: %s", netnsPath, string(targetNsOutput))
+	logging.Debug("Network namespace inode check",
+		"self_inode", string(bytes.TrimSpace(selfNsOutput)),
+		"target_inode", string(bytes.TrimSpace(targetNsOutput)),
+		"netns_path", netnsPath)
 	if bytes.Equal(selfNsOutput, targetNsOutput) {
-		fmt.Fprintf(os.Stderr, "WARNING: Current netns and target netns have the SAME inode!\n")
+		logging.Warn("Current netns and target netns have the SAME inode")
 	}
 
 	var stdout, stderr bytes.Buffer
@@ -275,7 +278,7 @@ func (r *Runtime) AddToNetworkWithService(ctx context.Context, containerID, netw
 	if serviceName != "" && r.serviceRegistry != nil {
 		if err := r.serviceRegistry.PutService(ctx, serviceName, containerID, ip); err != nil {
 			// Log warning but don't fail container creation
-			fmt.Fprintf(os.Stderr, "Warning: failed to register service: %v\n", err)
+			logging.Warn("Failed to register service", "error", err)
 		}
 	}
 
@@ -283,7 +286,7 @@ func (r *Runtime) AddToNetworkWithService(ctx context.Context, containerID, netw
 	if len(r.dnsServers) > 0 {
 		if err := r.configureContainerDNS(ctx, containerID); err != nil {
 			// Log warning but don't fail container creation
-			fmt.Fprintf(os.Stderr, "Warning: failed to configure DNS: %v\n", err)
+			logging.Warn("Failed to configure DNS", "error", err)
 		}
 	}
 
@@ -291,7 +294,7 @@ func (r *Runtime) AddToNetworkWithService(ctx context.Context, containerID, netw
 	if r.securityManager != nil {
 		if err := r.securityManager.ApplyRules(ctx, networkID); err != nil {
 			// Log warning but don't fail container creation
-			fmt.Fprintf(os.Stderr, "Warning: failed to apply security rules: %v\n", err)
+			logging.Warn("Failed to apply security rules", "error", err)
 		}
 	}
 
@@ -360,7 +363,7 @@ func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID 
 		cmd.Stderr = &stderr
 		if err := cmd.Run(); err != nil {
 			// Log but don't fail - namespace cleanup is optional
-			fmt.Fprintf(os.Stderr, "Warning: failed to delete network namespace: %v (stderr: %s)\n", err, stderr.String())
+			logging.Warn("Failed to delete network namespace", "error", err, "stderr", stderr.String())
 		}
 	}
 
@@ -368,7 +371,7 @@ func (r *Runtime) RemoveFromNetwork(ctx context.Context, containerID, networkID 
 	if container.ServiceName != "" && r.serviceRegistry != nil {
 		if err := r.serviceRegistry.DeleteService(ctx, container.ServiceName, containerID); err != nil {
 			// Log but don't fail - service cleanup is optional
-			fmt.Fprintf(os.Stderr, "Warning: failed to deregister service: %v\n", err)
+			logging.Warn("Failed to deregister service", "error", err)
 		}
 	}
 

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/proxy"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
@@ -61,6 +62,7 @@ type Agent struct {
 	connected        atomic.Bool     // true when registered and heartbeat is healthy
 	allocatedSubnet  string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
 	metricsCollector *metrics.SystemCollector
+	log              *logging.Logger
 }
 
 // Reconnection constants.
@@ -95,7 +97,16 @@ func New(opts *Options) (*Agent, error) {
 		sessionToken:   hex.EncodeToString(tokenBytes),
 		remoteBackends: make(map[string]ServiceBackend),
 		registeredDNS:  make(map[string]bool),
+		log:            logging.New("agent"),
 	}, nil
+}
+
+// logger returns the agent's logger, initializing it if nil (for test convenience).
+func (a *Agent) logger() *logging.Logger {
+	if a.log == nil {
+		a.log = logging.New("agent")
+	}
+	return a.log
 }
 
 // Run connects to the engine, registers, and starts all loops.
@@ -115,7 +126,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer a.proxy.Close()
 
 	// Connect to engine via gRPC
-	fmt.Printf("Connecting to Engine at %s...\n", a.opts.EngineEndpoint)
+	a.logger().Info("Connecting to engine", "endpoint", a.opts.EngineEndpoint)
 	if a.opts.PublicKey == "" {
 		return fmt.Errorf("no authentication configured (missing WireGuard public key)")
 	}
@@ -127,11 +138,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer client.Close()
 
 	// Wait for engine to be ready
-	fmt.Println("Waiting for Engine gRPC to be ready...")
+	a.logger().Info("Waiting for engine gRPC to be ready")
 	if waitErr := a.waitForEngineGRPC(ctx, 30*time.Second); waitErr != nil {
 		return fmt.Errorf("engine not ready: %w", waitErr)
 	}
-	fmt.Println("Connected to Engine")
+	a.logger().Info("Connected to engine")
 
 	// Determine API address for this agent
 	apiAddr := a.opts.APIAddress
@@ -144,19 +155,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
-	fmt.Printf("Node registered: %s (registry: %s)\n", a.opts.NodeName, registryURL)
+	a.logger().Info("Node registered", "node", a.opts.NodeName, "registry", registryURL)
 	a.connected.Store(true)
 
 	// Initialize VPC overlay networking after registration
 	if vpcConfig != nil && vpcConfig.AllocatedSubnet != "" {
-		fmt.Println("Initializing VPC overlay networking...")
+		a.logger().Info("Initializing VPC overlay networking")
 		if vpcErr := a.initializeVPCNetworking(ctx, vpcConfig); vpcErr != nil {
 			return fmt.Errorf("VPC networking init failed: %w", vpcErr)
 		}
 		a.vpcEnabled = true
 		a.allocatedSubnet = vpcConfig.AllocatedSubnet
 		vpcNetworkEnabled = true
-		fmt.Println("VPC overlay networking ready")
+		a.logger().Info("VPC overlay networking ready")
 
 		// Start DNS server on the bridge gateway IP
 		if dnsErr := a.initializeDNS(ctx, vpcConfig.AllocatedSubnet); dnsErr != nil {
@@ -191,11 +202,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Clean up overlay networking
 	if a.overlayDriver != nil {
 		if cleanupErr := a.overlayDriver.Cleanup(context.Background()); cleanupErr != nil {
-			fmt.Printf("[Agent] WARNING: overlay cleanup failed: %v\n", cleanupErr)
+			a.logger().Warn("Overlay cleanup failed", "error", cleanupErr)
 		}
 	}
 
-	fmt.Println("Agent stopped")
+	a.logger().Info("Agent stopped")
 	return nil
 }
 
@@ -227,7 +238,7 @@ func (a *Agent) processTasks(ctx context.Context) {
 	for _, pbTask := range tasks {
 		// Report running (best-effort)
 		if err := a.client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusRunning, "", pbTask.ContainerName, nil); err != nil {
-			fmt.Printf("[Agent] WARNING: failed to report running for task %s: %v\n", pbTask.Id, err)
+			a.logger().Warn("Failed to report running for task", "task_id", pbTask.Id, "error", err)
 		}
 
 		// Remove proxy backends before stopping a container
@@ -235,15 +246,15 @@ func (a *Agent) processTasks(ctx context.Context) {
 			a.proxy.RemoveBackend(pbTask.ContainerName)
 		}
 
-		fmt.Printf("[Agent] Executing task %s: %s (image: %s)\n", pbTask.Id, pbTask.Type, pbTask.Image)
+		a.logger().Info("Executing task", "task_id", pbTask.Id, "type", pbTask.Type, "image", pbTask.Image)
 
 		task := pbTaskToLocal(pbTask)
 		result, err := taskExecutor(ctx, task)
 		if err != nil {
 			if reportErr := a.client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusFailed, err.Error(), pbTask.ContainerName, nil); reportErr != nil {
-				fmt.Printf("[Agent] WARNING: failed to report failure for task %s: %v\n", pbTask.Id, reportErr)
+				a.logger().Warn("Failed to report failure for task", "task_id", pbTask.Id, "error", reportErr)
 			}
-			fmt.Printf("[Agent] Task %s FAILED: %v\n", pbTask.Id, err)
+			a.logger().Error("Task failed", "task_id", pbTask.Id, "error", err)
 			continue
 		}
 
@@ -252,14 +263,14 @@ func (a *Agent) processTasks(ctx context.Context) {
 			pbResult = &banyanpb.TaskResult{ContainerId: result.ContainerID}
 		}
 		if err := a.client.ReportTaskResult(ctx, pbTask.Id, pbTask.AgentId, types.StatusCompleted, "", pbTask.ContainerName, pbResult); err != nil {
-			fmt.Printf("[Agent] WARNING: failed to report completion for task %s: %v\n", pbTask.Id, err)
+			a.logger().Warn("Failed to report completion for task", "task_id", pbTask.Id, "error", err)
 		}
 
 		// Track containers and setup proxy after successful create_and_start
 		if pbTask.Type == types.TaskTypeCreateAndStart {
 			containerIP, proxyErr := a.setupProxyForContainer(ctx, task)
 			if proxyErr != nil {
-				fmt.Printf("[Agent] WARNING: proxy setup failed for %s: %v\n", task.ContainerName, proxyErr)
+				a.logger().Warn("Proxy setup failed", "container", task.ContainerName, "error", proxyErr)
 			}
 			a.containers.Add(pbTask.ContainerName, pbTask.Id, containerIP)
 
@@ -270,7 +281,7 @@ func (a *Agent) processTasks(ctx context.Context) {
 			}
 		}
 
-		fmt.Printf("[Agent] Task %s COMPLETED (container: %s)\n", pbTask.Id, pbTask.ContainerName)
+		a.logger().Info("Task completed", "task_id", pbTask.Id, "container", pbTask.ContainerName)
 	}
 }
 
@@ -304,14 +315,14 @@ func executeTask(ctx context.Context, task *types.TaskRecord) (*types.TaskResult
 }
 
 func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
-	fmt.Printf("[Agent]   Pulling image %s...\n", task.Image)
+	logging.Info("Pulling image", "image", task.Image)
 	if err := commandRunner(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
 		return nil, fmt.Errorf("failed to pull image %s: %v", task.Image, err)
 	}
 
 	args := buildNerdctlRunArgs(task, vpcNetworkEnabled)
 
-	fmt.Printf("[Agent]   Starting container %s...\n", task.ContainerName)
+	logging.Info("Starting container", "container", task.ContainerName)
 	if err := commandRunner(ctx, "nerdctl", args...); err != nil {
 		return nil, fmt.Errorf("failed to start container: %w", err)
 	}
@@ -327,7 +338,7 @@ func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.
 }
 
 func executeStopAndRemove(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
-	fmt.Printf("[Agent]   Removing container %s...\n", task.ContainerName)
+	logging.Info("Removing container", "container", task.ContainerName)
 
 	if err := containerRemover(ctx, task.ContainerName); err != nil {
 		return nil, err
@@ -344,7 +355,7 @@ func removeContainer(ctx context.Context, containerName string) error {
 	if err := rmCmd.Run(); err != nil {
 		errMsg := strings.TrimSpace(stderr.String())
 		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "No such container") {
-			fmt.Printf("[Agent]   Container %s already removed\n", containerName)
+			logging.Info("Container already removed", "container", containerName)
 			return nil
 		}
 		return fmt.Errorf("failed to remove container: %s", errMsg)
@@ -446,11 +457,11 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 			if err != nil {
 				consecutiveFails++
 				if consecutiveFails < maxConsecutiveHeartbeatFails {
-					fmt.Printf("[Agent] WARNING: heartbeat failed (%d/%d): %v\n", consecutiveFails, maxConsecutiveHeartbeatFails, err)
+					a.logger().Warn("Heartbeat failed", "attempt", consecutiveFails, "max", maxConsecutiveHeartbeatFails, "error", err)
 					continue
 				}
 
-				fmt.Printf("[Agent] Heartbeat failed %d consecutive times, reconnecting...\n", consecutiveFails)
+				a.logger().Warn("Heartbeat failed, reconnecting", "consecutive_fails", consecutiveFails)
 				a.connected.Store(false)
 				a.reconnect(ctx)
 				if ctx.Err() != nil {
@@ -458,14 +469,14 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 				}
 				a.connected.Store(true)
 				consecutiveFails = 0
-				fmt.Println("[Agent] Reconnected, resuming heartbeat")
+				a.logger().Info("Reconnected, resuming heartbeat")
 				continue
 			}
 			consecutiveFails = 0
 
 			if a.vpcEnabled && len(peers) > 0 {
 				if reconcileErr := a.reconcileVPCPeers(ctx, peers); reconcileErr != nil {
-					fmt.Printf("[Agent] WARNING: peer reconciliation failed: %v\n", reconcileErr)
+					a.logger().Warn("Peer reconciliation failed", "error", reconcileErr)
 				}
 			}
 			if a.vpcEnabled && a.proxy != nil {
@@ -512,7 +523,7 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 	}
 
 	if err := a.client.ReportContainerHealth(ctx, a.opts.NodeName, statuses); err != nil {
-		fmt.Printf("[Agent] WARNING: failed to report container health: %v\n", err)
+		a.logger().Warn("Failed to report container health", "error", err)
 	}
 }
 
@@ -564,7 +575,7 @@ func (a *Agent) restoreActiveContainers(ctx context.Context, containers []Active
 		// Re-fetch container IP (may have changed if network was recreated)
 		containerIP, err := containerIPGetter(ctx, ac.ContainerName)
 		if err != nil {
-			fmt.Printf("[Agent] WARNING: could not get IP for %s: %v\n", ac.ContainerName, err)
+			a.logger().Warn("Could not get IP for container", "container", ac.ContainerName, "error", err)
 			continue
 		}
 
@@ -573,11 +584,11 @@ func (a *Agent) restoreActiveContainers(ctx context.Context, containers []Active
 			for _, portStr := range ac.Ports {
 				hostPort, containerPort, parseErr := proxy.ParsePort(portStr)
 				if parseErr != nil {
-					fmt.Printf("[Agent] WARNING: bad port %q for %s: %v\n", portStr, ac.ContainerName, parseErr)
+					a.logger().Warn("Bad port for container", "port", portStr, "container", ac.ContainerName, "error", parseErr)
 					continue
 				}
 				if addErr := a.proxy.AddBackend(hostPort, containerPort, ac.ContainerName, containerIP); addErr != nil {
-					fmt.Printf("[Agent] WARNING: proxy restore failed for %s port %s: %v\n", ac.ContainerName, portStr, addErr)
+					a.logger().Warn("Proxy restore failed", "container", ac.ContainerName, "port", portStr, "error", addErr)
 				}
 			}
 		}
@@ -595,7 +606,7 @@ func (a *Agent) restoreActiveContainers(ctx context.Context, containers []Active
 	}
 
 	if restored > 0 || skipped > 0 {
-		fmt.Printf("[Agent] Container restore: %d restored, %d skipped (not running)\n", restored, skipped)
+		a.logger().Info("Container restore", "restored", restored, "skipped", skipped)
 	}
 }
 
@@ -625,12 +636,12 @@ func (a *Agent) reconnect(ctx context.Context) {
 	backoff := reconnectBackoffInitial
 
 	for {
-		fmt.Printf("[Agent] Waiting for engine at %s...\n", a.opts.EngineEndpoint)
+		a.logger().Info("Waiting for engine", "endpoint", a.opts.EngineEndpoint)
 		if err := a.waitForEngineGRPC(ctx, 30*time.Second); err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			fmt.Printf("[Agent] Engine not ready: %v, retrying in %s...\n", err, backoff)
+			a.logger().Warn("Engine not ready, retrying", "error", err, "backoff", backoff)
 			select {
 			case <-ctx.Done():
 				return
@@ -653,7 +664,7 @@ func (a *Agent) reconnect(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			fmt.Printf("[Agent] Re-registration failed: %v, retrying in %s...\n", err, backoff)
+			a.logger().Warn("Re-registration failed, retrying", "error", err, "backoff", backoff)
 			select {
 			case <-ctx.Done():
 				return
@@ -669,20 +680,20 @@ func (a *Agent) reconnect(ctx context.Context) {
 		// Handle VPC re-initialization if subnet changed
 		if a.vpcEnabled && vpcConfig != nil && vpcConfig.AllocatedSubnet != "" {
 			if a.allocatedSubnet != vpcConfig.AllocatedSubnet {
-				fmt.Printf("[Agent] VPC subnet changed (%s → %s), re-initializing overlay...\n", a.allocatedSubnet, vpcConfig.AllocatedSubnet)
+				a.logger().Info("VPC subnet changed, re-initializing overlay", "old", a.allocatedSubnet, "new", vpcConfig.AllocatedSubnet)
 				if a.overlayDriver != nil {
 					if cleanupErr := a.overlayDriver.Cleanup(ctx); cleanupErr != nil {
-						fmt.Printf("[Agent] WARNING: overlay cleanup failed: %v\n", cleanupErr)
+						a.logger().Warn("Overlay cleanup failed", "error", cleanupErr)
 					}
 				}
 				if a.dnsServer != nil {
 					a.dnsServer.Stop() //nolint:errcheck // best-effort cleanup before re-init
 				}
 				if vpcErr := a.initializeVPCNetworking(ctx, vpcConfig); vpcErr != nil {
-					fmt.Printf("[Agent] WARNING: VPC re-init failed: %v\n", vpcErr)
+					a.logger().Warn("VPC re-init failed", "error", vpcErr)
 				}
 				if dnsErr := a.initializeDNS(ctx, vpcConfig.AllocatedSubnet); dnsErr != nil {
-					fmt.Printf("[Agent] WARNING: DNS re-init failed: %v\n", dnsErr)
+					a.logger().Warn("DNS re-init failed", "error", dnsErr)
 				}
 				a.allocatedSubnet = vpcConfig.AllocatedSubnet
 				dnsGatewayIPAddr = a.gatewayIP
@@ -692,7 +703,7 @@ func (a *Agent) reconnect(ctx context.Context) {
 		// Restore proxy rules for containers that survived the disconnect
 		a.restoreActiveContainers(ctx, activeContainers)
 
-		fmt.Println("[Agent] Reconnected and re-registered successfully")
+		a.logger().Info("Reconnected and re-registered successfully")
 		return
 	}
 }
@@ -723,7 +734,7 @@ func (a *Agent) reconcileRemoteBackends(backends []ServiceBackend) {
 		b, ok := current[name]
 		if !ok || tracked.ContainerIP != b.ContainerIP {
 			if err := a.proxy.RemoveBackend(name); err != nil {
-				fmt.Printf("[Agent] WARNING: failed to remove remote backend %s: %v\n", name, err)
+				a.logger().Warn("Failed to remove remote backend", "backend", name, "error", err)
 			}
 			delete(a.remoteBackends, name)
 		}
@@ -737,11 +748,11 @@ func (a *Agent) reconcileRemoteBackends(backends []ServiceBackend) {
 		for _, portStr := range b.Ports {
 			hostPort, containerPort, parseErr := proxy.ParsePort(portStr)
 			if parseErr != nil {
-				fmt.Printf("[Agent] WARNING: failed to parse port %s for remote backend %s: %v\n", portStr, name, parseErr)
+				a.logger().Warn("Failed to parse port for remote backend", "port", portStr, "backend", name, "error", parseErr)
 				continue
 			}
 			if addErr := a.proxy.AddBackend(hostPort, containerPort, b.ContainerName, b.ContainerIP); addErr != nil {
-				fmt.Printf("[Agent] WARNING: failed to add remote backend %s: %v\n", name, addErr)
+				a.logger().Warn("Failed to add remote backend", "backend", name, "error", addErr)
 			}
 		}
 		a.remoteBackends[name] = b

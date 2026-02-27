@@ -19,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/agent"
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
@@ -287,8 +288,9 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 }
 
 func runAgentStart(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Agent")
-	fmt.Println("========================================")
+	logging.Setup(nil)
+	log := logging.New("agent")
+	log.Info("Banyan Agent starting")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -297,14 +299,14 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
 	go func() {
 		<-sigCh
-		fmt.Println("\nShutting down...")
+		log.Info("Shutting down")
 		cancel()
 	}()
 
 	// Load config
 	cfg, cfgErr := types.LoadConfig(configPath)
 	if cfgErr != nil {
-		fmt.Printf("Warning: Failed to load config: %v\n", cfgErr)
+		log.Warn("Failed to load config", "error", cfgErr)
 	}
 
 	// Get node name: flag > config > hostname
@@ -319,7 +321,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		}
 		nodeName = hostname
 	}
-	fmt.Printf("Node name: %s\n", nodeName)
+	log.Info("Node name resolved", "name", nodeName)
 
 	// Resolve engine endpoint: explicit flag > config file > error
 	if !cmd.Flags().Changed("engine") {
@@ -338,10 +340,9 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 
 	// Check for nerdctl
 	if nerdctlPath, lookErr := exec.LookPath("nerdctl"); lookErr != nil {
-		fmt.Println("Warning: nerdctl not found. Container operations will fail.")
-		fmt.Println("Install from: https://github.com/containerd/nerdctl")
+		log.Warn("nerdctl not found, container operations will fail")
 	} else {
-		fmt.Printf("Container runtime: nerdctl (%s)\n", nerdctlPath)
+		log.Info("Container runtime found", "path", nerdctlPath)
 	}
 
 	// Write PID file
@@ -365,7 +366,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 	if cfg.Agent.EngineWGPublicKey != "" && agentWGPrivateKey != "" {
 		myTunnelIP := types.TunnelIPFromPublicKey(cfg.Agent.WGPublicKey)
-		fmt.Printf("Setting up WireGuard control tunnel (%s)...\n", myTunnelIP)
+		log.Info("Setting up WireGuard control tunnel", "tunnel_ip", myTunnelIP)
 		engineEndpointWG := cfg.Agent.EngineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
 		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceAgent, agentWGPrivateKey, myTunnelIP, 0); tunnelErr != nil {
 			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
@@ -382,7 +383,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 			enginePort = "50051"
 		}
 		agentEngineEndpoint = types.ControlTunnelEngineIP + ":" + enginePort
-		fmt.Printf("Control tunnel ready, gRPC via %s\n", agentEngineEndpoint)
+		log.Info("Control tunnel ready", "grpc_endpoint", agentEngineEndpoint)
 	}
 
 	// Determine API address — use tunnel IP if control tunnel is active
@@ -407,10 +408,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	fmt.Println("========================================")
-	fmt.Println("Agent is running. Watching for tasks...")
-	fmt.Println("")
-	fmt.Println("Press Ctrl+C to stop")
+	log.Info("Agent is running, watching for tasks")
 
 	runErr := a.Run(ctx)
 

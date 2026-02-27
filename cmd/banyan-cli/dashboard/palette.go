@@ -25,6 +25,7 @@ var allPaletteActions = []paletteAction{
 	{name: "Deployments", desc: "List all deployments", view: ViewDeploys},
 	{name: "Containers", desc: "List all containers", view: ViewContainers},
 	{name: "Engine", desc: "Engine detail & metrics", view: ViewEngine},
+	{name: "Events", desc: "Recent event log", view: ViewEvents},
 	{name: "Refresh", desc: "Refresh dashboard data", view: viewActionRefresh},
 	{name: "Quit", desc: "Exit dashboard", view: viewActionQuit},
 }

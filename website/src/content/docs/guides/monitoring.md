@@ -38,6 +38,7 @@ Switch views by pressing the corresponding number key:
 | `3` | Deploys | Deployments grouped by name, with health status and version history |
 | `4` | Containers | Every container across the cluster — status, image, agent, and replica info |
 | `5` | Engine | Detailed engine metrics with CPU, memory, and disk progress bars |
+| `6` | Events | Full event log — every cluster event from newest to oldest, with scrolling |
 
 ### Navigation
 

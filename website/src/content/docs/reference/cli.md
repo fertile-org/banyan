@@ -343,7 +343,7 @@ Open a live terminal dashboard showing real-time cluster status.
 banyan-cli dashboard
 ```
 
-The dashboard auto-refreshes and provides five views you can switch between with number keys:
+The dashboard auto-refreshes and provides six views you can switch between with number keys:
 
 | View | Key | Shows |
 |------|-----|-------|
@@ -352,6 +352,7 @@ The dashboard auto-refreshes and provides five views you can switch between with
 | Deploys | `3` | All deployments grouped by name, with health status and version history |
 | Containers | `4` | Flat list of all containers across the cluster |
 | Engine | `5` | Detailed engine metrics — CPU, memory, disk with progress bars |
+| Events | `6` | Full event log — every cluster event from newest to oldest |
 
 Navigate lists with arrow keys or `j`/`k`, press `Enter` to drill into agent or deployment details, and `Esc` to go back. Press `p` to open the command palette for quick view switching, or `?` for keyboard shortcuts.
 

@@ -33,7 +33,7 @@ func renderHelpBox(width int) string {
 		line(""),
 		// Navigation section
 		line(stSection.Render("Navigation")),
-		line(stKey.Render(padRight("1-5", 12)) + "Switch views"),
+		line(stKey.Render(padRight("1-6", 12)) + "Switch views"),
 		line(stKey.Render(padRight("p", 12)) + "Command palette"),
 		line(stKey.Render(padRight("Esc", 12)) + "Back / Close overlay"),
 		line(""),

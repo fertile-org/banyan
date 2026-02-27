@@ -21,6 +21,7 @@ const (
 	ViewDeploys               // Deployment list (selectable)
 	ViewContainers            // Flat container list
 	ViewEngine                // Engine detail & metrics
+	ViewEvents                // Event log (newest first)
 	ViewAgentDetail           // Single agent detail
 	ViewDeploymentDetail      // Single deployment detail
 )
@@ -122,7 +123,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 			m.activeView = ViewAgents
 		case ViewDeploymentDetail:
 			m.activeView = ViewDeploys
-		case ViewAgents, ViewDeploys, ViewContainers, ViewEngine:
+		case ViewAgents, ViewDeploys, ViewContainers, ViewEngine, ViewEvents:
 			m.activeView = ViewOverview
 		}
 		return m, nil
@@ -142,6 +143,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 		m.listOffset = 0
 	case "5":
 		m.activeView = ViewEngine
+	case "6":
+		m.activeView = ViewEvents
+		m.listCursor = 0
+		m.listOffset = 0
 	case "r":
 		return m, fetchDataCmd(m.client)
 	case "up", "k":
@@ -262,6 +267,8 @@ func (m Model) maxListIndex() int { //nolint:gocritic // bubbletea value-receive
 		return max(len(groups)-1, 0)
 	case ViewContainers:
 		return max(len(m.data.Containers)-1, 0)
+	case ViewEvents:
+		return max(len(m.data.Events)-1, 0)
 	}
 	return 0
 }
@@ -269,7 +276,7 @@ func (m Model) maxListIndex() int { //nolint:gocritic // bubbletea value-receive
 // isListView returns true if the current view is a scrollable list.
 func (m Model) isListView() bool { //nolint:gocritic // bubbletea value-receiver pattern
 	switch m.activeView {
-	case ViewAgents, ViewDeploys, ViewContainers:
+	case ViewAgents, ViewDeploys, ViewContainers, ViewEvents:
 		return true
 	}
 	return false
@@ -307,7 +314,7 @@ func (m Model) cursorContentLine() int { //nolint:gocritic // bubbletea value-re
 	switch m.activeView {
 	case ViewAgents:
 		return m.listCursor
-	case ViewContainers:
+	case ViewContainers, ViewEvents:
 		return m.listCursor
 	case ViewDeploys:
 		groups := groupDeployments(m.data.Deployments)
@@ -379,6 +386,8 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 		content = renderContainerList(m.data, m.width, m.listCursor)
 	case ViewEngine:
 		content = renderEngineDetail(m.data, m.width)
+	case ViewEvents:
+		content = renderEventList(m.data, m.width, m.listCursor)
 	case ViewAgentDetail:
 		content = renderAgentDetail(m.data, m.selectedAgent, m.width)
 	case ViewDeploymentDetail:
@@ -453,6 +462,7 @@ func renderFooter(width int, active View) string {
 			{"2", "Agents", ViewAgents},
 			{"3", "Deploys", ViewDeploys},
 			{"4", "Containers", ViewContainers},
+			{"6", "Events", ViewEvents},
 		}
 
 		var parts []string
@@ -469,7 +479,7 @@ func renderFooter(width int, active View) string {
 	case ViewAgents, ViewDeploys:
 		left = " " + styleDim.Render("↑↓ Navigate  ↵ Detail  Esc Back")
 
-	case ViewContainers:
+	case ViewContainers, ViewEvents:
 		left = " " + styleDim.Render("↑↓ Navigate  Esc Back")
 
 	case ViewAgentDetail, ViewDeploymentDetail, ViewEngine:

@@ -171,6 +171,7 @@ func TestView_ListViews(t *testing.T) {
 		{"Deployments", ViewDeploys},
 		{"Containers", ViewContainers},
 		{"Engine", ViewEngine},
+		{"Events", ViewEvents},
 	}
 
 	for _, tt := range tests {
@@ -272,7 +273,7 @@ func TestEscBack_DeployDetailToList(t *testing.T) {
 }
 
 func TestEscBack_ListToOverview(t *testing.T) {
-	for _, view := range []View{ViewAgents, ViewDeploys, ViewContainers, ViewEngine} {
+	for _, view := range []View{ViewAgents, ViewDeploys, ViewContainers, ViewEngine, ViewEvents} {
 		m := New(nil, 5*time.Second)
 		m.activeView = view
 
@@ -401,12 +402,37 @@ func TestRenderFooter_ContainerList(t *testing.T) {
 	}
 }
 
+func TestRenderFooter_EventList(t *testing.T) {
+	got := renderFooter(120, ViewEvents)
+	if !strings.Contains(got, "Navigate") {
+		t.Error("event list footer missing Navigate hint")
+	}
+	if strings.Contains(got, "Detail") {
+		t.Error("event list footer should not show Detail hint")
+	}
+}
+
 func TestKey5_Engine(t *testing.T) {
 	m := New(nil, 5*time.Second)
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("5")})
 	model := updated.(Model)
 	if model.activeView != ViewEngine {
 		t.Errorf("key 5: view = %d, want ViewEngine", model.activeView)
+	}
+}
+
+func TestKey6_Events(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("6")})
+	model := updated.(Model)
+	if model.activeView != ViewEvents {
+		t.Errorf("key 6: view = %d, want ViewEvents", model.activeView)
+	}
+	if model.listCursor != 0 {
+		t.Errorf("key 6: listCursor = %d, want 0", model.listCursor)
+	}
+	if model.listOffset != 0 {
+		t.Errorf("key 6: listOffset = %d, want 0", model.listOffset)
 	}
 }
 
@@ -418,6 +444,7 @@ func TestIsListView(t *testing.T) {
 		{ViewAgents, true},
 		{ViewDeploys, true},
 		{ViewContainers, true},
+		{ViewEvents, true},
 		{ViewOverview, false},
 		{ViewEngine, false},
 		{ViewAgentDetail, false},

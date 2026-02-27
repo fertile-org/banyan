@@ -42,6 +42,8 @@ func renderHelpBox(width int) string {
 		line(stKey.Render(padRight("↑ / k", 12)) + "Move up"),
 		line(stKey.Render(padRight("↓ / j", 12)) + "Move down"),
 		line(stKey.Render(padRight("Enter", 12)) + "Drill into detail"),
+		line(stKey.Render(padRight("/", 12)) + "Filter list"),
+		line(stKey.Render(padRight("e", 12)) + "Export to CSV"),
 		line(""),
 		// General section
 		line(stSection.Render("General")),

@@ -354,7 +354,7 @@ The dashboard auto-refreshes and provides six views you can switch between with 
 | Engine | `5` | Detailed engine metrics — CPU, memory, disk with progress bars |
 | Events | `6` | Full event log — every cluster event from newest to oldest |
 
-Navigate lists with arrow keys or `j`/`k`, press `Enter` to drill into agent or deployment details, and `Esc` to go back. Press `p` to open the command palette for quick view switching, or `?` for keyboard shortcuts.
+Navigate lists with arrow keys or `j`/`k`, press `Enter` to drill into agent or deployment details, and `Esc` to go back. Press `/` to filter any list view, `e` to export the current list to CSV, and `p` to open the command palette. The palette groups actions into sections — page-specific actions (Filter, Export) appear only on list views, alongside navigation and global commands. Press `?` for keyboard shortcuts.
 
 | Flag | Default | Description |
 |------|---------|-------------|

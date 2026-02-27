@@ -47,13 +47,33 @@ Switch views by pressing the corresponding number key:
 | `↑` / `k` | Move up |
 | `↓` / `j` | Move down |
 | `Enter` | Drill into agent or deployment details |
-| `Esc` | Go back |
+| `Esc` | Go back (clears filter first if active) |
 | `p` | Open command palette |
+| `/` | Filter current list |
+| `e` | Export current list to CSV |
 | `r` | Refresh data |
 | `?` | Show keyboard shortcuts |
 | `q` | Quit |
 
 Lists scroll automatically when they're longer than the screen — navigate to the bottom and the view follows, like htop.
+
+### Filtering
+
+Press `/` on any list view (Agents, Deploys, Containers, Events) to start typing a filter. The list narrows in real time as you type — matching against names, statuses, tags, and other visible fields. Press `Enter` to lock the filter, or `Esc` to cancel. Press `Esc` again to clear an applied filter.
+
+Filtering is case-insensitive. For example, typing `worker` on the Agents view shows only agents with "worker" in their name.
+
+### Export to CSV
+
+Press `e` on any list view to export the current data to a CSV file in the working directory. If a filter is active, only the filtered rows are exported. The filename includes the view name and timestamp — `banyan-agents-2026-02-27-143022.csv`.
+
+### Command palette
+
+Press `p` to open the command palette. Type to search across all available actions. The palette is organized into sections:
+
+- **Actions** — page-specific actions like Filter and Export CSV. These only appear when you're on a list view.
+- **Navigate** — switch between views (Overview, Agents, Deploys, Containers, Engine, Events).
+- **Commands** — global actions like Refresh and Quit.
 
 ### Refresh interval
 

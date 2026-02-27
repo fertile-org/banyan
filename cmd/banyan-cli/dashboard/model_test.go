@@ -591,3 +591,313 @@ func TestViewSwitchResetsOffset(t *testing.T) {
 		t.Errorf("switching view should reset listOffset, got %d", model.listOffset)
 	}
 }
+
+// --- Filter tests ---
+
+func TestSlashActivatesFilter(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.width = 120
+	m.height = 40
+	m.data = &DashboardData{Events: make([]EventData, 5)}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	model := updated.(Model)
+
+	if !model.filterEditing {
+		t.Error("/ should activate filter editing")
+	}
+	if model.listCursor != 0 {
+		t.Error("/ should reset cursor")
+	}
+}
+
+func TestSlashOnlyWorksInListViews(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewOverview
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")})
+	model := updated.(Model)
+
+	if model.filterEditing {
+		t.Error("/ should not activate filter on Overview")
+	}
+}
+
+func TestFilterTyping(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterEditing = true
+	m.data = &DashboardData{Events: make([]EventData, 5)}
+
+	// Type "err"
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	model := updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	model = updated.(Model)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	model = updated.(Model)
+
+	if model.filterText != "err" {
+		t.Errorf("filterText = %q, want 'err'", model.filterText)
+	}
+
+	// Backspace
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model = updated.(Model)
+	if model.filterText != "er" {
+		t.Errorf("after backspace: filterText = %q, want 'er'", model.filterText)
+	}
+}
+
+func TestFilterEnterExitsEditing(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterEditing = true
+	m.filterText = "error"
+	m.data = &DashboardData{Events: make([]EventData, 5)}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model := updated.(Model)
+
+	if model.filterEditing {
+		t.Error("Enter should exit filter editing")
+	}
+	if model.filterText != "error" {
+		t.Error("Enter should keep filter text")
+	}
+}
+
+func TestFilterEscExitsEditing(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterEditing = true
+	m.filterText = "error"
+	m.data = &DashboardData{Events: make([]EventData, 5)}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model := updated.(Model)
+
+	if model.filterEditing {
+		t.Error("Esc should exit filter editing")
+	}
+	// Filter text is kept — Esc in normal mode clears it
+	if model.filterText != "error" {
+		t.Error("Esc in editing should keep filter text applied")
+	}
+}
+
+func TestEscClearsFilterBeforeNavigatingBack(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterText = "error"
+	m.data = &DashboardData{Events: make([]EventData, 5)}
+
+	// First Esc: clears filter
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model := updated.(Model)
+	if model.filterText != "" {
+		t.Error("first Esc should clear filter text")
+	}
+	if model.activeView != ViewEvents {
+		t.Error("first Esc should stay on current view")
+	}
+
+	// Second Esc: goes back to overview
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model = updated.(Model)
+	if model.activeView != ViewOverview {
+		t.Errorf("second Esc: view = %d, want ViewOverview", model.activeView)
+	}
+}
+
+func TestViewSwitchClearsFilter(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterText = "error"
+	// filterEditing is false — filter is applied but not being edited
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	model := updated.(Model)
+
+	if model.filterText != "" {
+		t.Error("view switch should clear filter text")
+	}
+	if model.activeView != ViewAgents {
+		t.Errorf("view = %d, want ViewAgents", model.activeView)
+	}
+}
+
+func TestFilterNavigationWhileEditing(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterEditing = true
+	m.data = &DashboardData{
+		Events: []EventData{
+			{Type: "a", Message: "first"},
+			{Type: "b", Message: "second"},
+			{Type: "c", Message: "third"},
+		},
+	}
+
+	// Down
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model := updated.(Model)
+	if model.listCursor != 1 {
+		t.Errorf("down in filter: cursor = %d, want 1", model.listCursor)
+	}
+
+	// Up
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model = updated.(Model)
+	if model.listCursor != 0 {
+		t.Errorf("up in filter: cursor = %d, want 0", model.listCursor)
+	}
+}
+
+func TestMaxListIndex_UsesFilteredData(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterText = "error"
+	m.data = &DashboardData{
+		Events: []EventData{
+			{Type: "info", Message: "hello", Severity: "info"},
+			{Type: "error", Message: "bad", Severity: "error"},
+		},
+	}
+
+	// Only 1 event matches "error", so maxListIndex should be 0
+	if got := m.maxListIndex(); got != 0 {
+		t.Errorf("maxListIndex with filter = %d, want 0", got)
+	}
+}
+
+func TestDataRefreshClampsCursor(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.listCursor = 5
+	m.data = &DashboardData{Events: make([]EventData, 10)}
+
+	// Refresh with fewer events
+	updated, _ := m.Update(dataMsg{data: DashboardData{
+		Events: []EventData{{Type: "a"}},
+	}})
+	model := updated.(Model)
+
+	if model.listCursor > 0 {
+		t.Errorf("cursor should be clamped to 0, got %d", model.listCursor)
+	}
+}
+
+func TestDataRefreshClearsExportStatus(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.exportStatus = "banyan-events.csv"
+
+	updated, _ := m.Update(dataMsg{data: DashboardData{}})
+	model := updated.(Model)
+
+	if model.exportStatus != "" {
+		t.Error("data refresh should clear export status")
+	}
+}
+
+// --- Export tests ---
+
+func TestExportKey(t *testing.T) {
+	original := exportViewCSV
+	defer func() { exportViewCSV = original }()
+
+	var exportedView View
+	exportViewCSV = func(data *DashboardData, view View) (string, error) {
+		exportedView = view
+		return "test-export.csv", nil
+	}
+
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.data = &DashboardData{Events: make([]EventData, 3)}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	model := updated.(Model)
+
+	if exportedView != ViewEvents {
+		t.Errorf("export view = %d, want ViewEvents", exportedView)
+	}
+	if model.exportStatus != "test-export.csv" {
+		t.Errorf("exportStatus = %q, want 'test-export.csv'", model.exportStatus)
+	}
+}
+
+func TestExportKeyIgnoredOnNonListView(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewOverview
+	m.data = &DashboardData{}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	model := updated.(Model)
+
+	if model.exportStatus != "" {
+		t.Error("export should not trigger on Overview")
+	}
+}
+
+func TestExportWithFilter(t *testing.T) {
+	original := exportViewCSV
+	defer func() { exportViewCSV = original }()
+
+	var exportedData *DashboardData
+	exportViewCSV = func(data *DashboardData, view View) (string, error) {
+		exportedData = data
+		return "filtered.csv", nil
+	}
+
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewEvents
+	m.filterText = "error"
+	m.data = &DashboardData{
+		Events: []EventData{
+			{Type: "info", Message: "hello", Severity: "info"},
+			{Type: "fail", Message: "bad", Severity: "error"},
+		},
+	}
+
+	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+
+	if exportedData == nil {
+		t.Fatal("export should have been called")
+	}
+	if len(exportedData.Events) != 1 {
+		t.Errorf("export should use filtered data: got %d events, want 1", len(exportedData.Events))
+	}
+}
+
+func TestViewShowsFilterBar(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.width = 120
+	m.height = 40
+	m.activeView = ViewEvents
+	m.filterEditing = true
+	m.filterText = "error"
+	m.data = &DashboardData{
+		Events: []EventData{{Type: "test", Message: "error happened", Severity: "error"}},
+	}
+
+	got := m.View()
+	if !strings.Contains(got, "error") {
+		t.Error("view should show filter bar with filter text")
+	}
+}
+
+func TestViewShowsExportStatus(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.width = 120
+	m.height = 40
+	m.activeView = ViewEvents
+	m.exportStatus = "banyan-events-2026-02-27.csv"
+	m.data = &DashboardData{}
+
+	got := m.View()
+	if !strings.Contains(got, "banyan-events-2026-02-27.csv") {
+		t.Error("view should show export status")
+	}
+}

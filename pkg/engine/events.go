@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/fertile-org/banyan/pkg/logging"
 )
 
 // DefaultMaxEvents is the default number of events to retain in the WAL.
@@ -188,7 +189,7 @@ func (s *EventStore) compact() {
 
 	f, err := os.Create(s.path)
 	if err != nil {
-		log.Printf("WARNING: failed to compact event WAL: %v", err)
+		logging.Warn("Failed to compact event WAL", "error", err)
 		// Reopen in append mode to continue writing
 		s.file, _ = os.OpenFile(s.path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		return

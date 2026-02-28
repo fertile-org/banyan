@@ -1,9 +1,10 @@
 module github.com/fertile-org/banyan/pkg/vpc
 
-go 1.24.0
+go 1.24.3
 
 require (
 	github.com/coreos/go-iptables v0.8.0
+	github.com/fertile-org/banyan/pkg/logging v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/google/uuid v1.6.0
 	github.com/miekg/dns v1.1.69
@@ -33,4 +34,7 @@ require (
 	google.golang.org/protobuf v1.36.7 // indirect
 )
 
-replace github.com/fertile-org/banyan/pkg/storage => ../storage
+replace (
+	github.com/fertile-org/banyan/pkg/logging => ../logging
+	github.com/fertile-org/banyan/pkg/storage => ../storage
+)

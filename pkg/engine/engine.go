@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/registry"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -46,6 +47,7 @@ type Engine struct {
 	metricsCollector *metrics.SystemCollector
 	events          EventLog
 	startedAt       time.Time
+	log             *logging.Logger
 }
 
 // New creates a new Engine. It opens the store and sets up authentication.
@@ -83,6 +85,7 @@ func New(opts *Options) (*Engine, error) {
 		metricsCollector: metrics.NewSystemCollector(),
 		events:           eventLog,
 		startedAt:        time.Now(),
+		log:              logging.New("engine"),
 	}
 	// Seed the CPU sample so the first metrics read gets a real value
 	e.metricsCollector.Collect()
@@ -90,13 +93,21 @@ func New(opts *Options) (*Engine, error) {
 	return e, nil
 }
 
+// logger returns the engine's logger, initializing it if nil (for test convenience).
+func (e *Engine) logger() *logging.Logger {
+	if e.log == nil {
+		e.log = logging.New("engine")
+	}
+	return e.log
+}
+
 // Run starts the engine: VPC init, registry, gRPC server, and orchestration loop.
 // It blocks until ctx is cancelled.
 func (e *Engine) Run(ctx context.Context) error {
 	if len(e.opts.WhitelistedKeys) > 0 {
-		fmt.Printf("Public key authentication enabled (%d whitelisted keys)\n", len(e.opts.WhitelistedKeys))
+		e.logger().Info("Public key authentication enabled", "whitelisted_keys", len(e.opts.WhitelistedKeys))
 	} else {
-		fmt.Println("WARNING: No authentication configured (no whitelisted keys)")
+		e.logger().Warn("No authentication configured (no whitelisted keys)")
 	}
 
 	// Initialize VPC overlay networking (subnet allocation + peer tracking)
@@ -112,16 +123,16 @@ func (e *Engine) Run(ctx context.Context) error {
 			return fmt.Errorf("failed to create subnet allocator: %w", allocErr)
 		}
 		peerTracker = overlay.NewPeerTracker()
-		fmt.Printf("VPC overlay networking enabled (CIDR: %s)\n", e.opts.VPCCIDR)
+		e.logger().Info("VPC overlay networking enabled", "cidr", e.opts.VPCCIDR)
 	}
 
 	// Start embedded OCI registry
-	fmt.Printf("Starting OCI registry on port %s...\n", e.opts.RegistryPort)
+	e.logger().Info("Starting OCI registry", "port", e.opts.RegistryPort)
 	registryListener, err := startRegistry(ctx, e.opts.RegistryPort)
 	if err != nil {
 		return fmt.Errorf("failed to start registry: %w", err)
 	}
-	fmt.Printf("OCI registry listening on :%s\n", e.opts.RegistryPort)
+	e.logger().Info("OCI registry listening", "port", e.opts.RegistryPort)
 
 	// Determine engine IP and store registry URL
 	engineIP, err := DetermineEngineIP()
@@ -132,11 +143,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	if saveErr := e.store.Save(ctx, types.KeyRegistry, e.registryURL); saveErr != nil {
 		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
-	fmt.Printf("Registry URL: %s (saved to store)\n", e.registryURL)
+	e.logger().Info("Registry URL saved to store", "url", e.registryURL)
 	_ = registryListener
 
 	// Start Engine gRPC server
-	fmt.Printf("Starting Engine gRPC server on port %s...\n", e.opts.GRPCPort)
+	e.logger().Info("Starting gRPC server", "port", e.opts.GRPCPort)
 	grpcSrv, err := startEngineGRPC(ctx, &grpcServerOptions{
 		Store:           e.store,
 		Port:            e.opts.GRPCPort,
@@ -154,7 +165,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
 	e.grpcServer = grpcSrv
-	fmt.Printf("Engine gRPC server listening on :%s\n", e.opts.GRPCPort)
+	e.logger().Info("gRPC server listening", "port", e.opts.GRPCPort)
 
 	// Start Prometheus metrics HTTP server
 	metricsPort := e.opts.MetricsPort
@@ -164,7 +175,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	if startErr := e.startMetricsHTTP(ctx, metricsPort); startErr != nil {
 		return fmt.Errorf("failed to start metrics server: %w", startErr)
 	}
-	fmt.Printf("Prometheus metrics available at :%s/metrics\n", metricsPort)
+	e.logger().Info("Prometheus metrics available", "port", metricsPort)
 
 	// Start the orchestration loop
 	go e.engineLoop(ctx)
@@ -211,7 +222,7 @@ func (e *Engine) startMetricsHTTP(ctx context.Context, port string) error {
 	server := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := server.Serve(lis); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("Metrics server error: %v\n", err)
+			e.logger().Error("Metrics server error", "error", err)
 		}
 	}()
 	go func() {
@@ -427,12 +438,11 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 		return
 	}
 
-	fmt.Printf("[Engine] Scheduling deployment '%s' (%d services, %d agents)\n",
-		deployment.Name, len(deployment.Services), len(agents))
+	e.logger().Info("Scheduling deployment", "name", deployment.Name, "services", len(deployment.Services), "agents", len(agents))
 
 	tasks, err := types.BuildTasksForDeployment(deployment, agents)
 	if err != nil {
-		fmt.Printf("[Engine] Failed to schedule deployment '%s': %v\n", deployment.Name, err)
+		e.logger().Error("Failed to schedule deployment", "name", deployment.Name, "error", err)
 		deployment.Status = types.StatusFailed
 		deployment.Error = err.Error()
 		deployment.UpdatedAt = time.Now()
@@ -444,21 +454,21 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 	for _, task := range tasks {
 		taskKey := types.KeyTasks + task.AgentID + "/" + task.ID
 		if err := e.store.Save(ctx, taskKey, task); err != nil {
-			fmt.Printf("[Engine] Failed to create task %s: %v\n", task.ID, err)
+			e.logger().Error("Failed to create task", "task_id", task.ID, "error", err)
 			continue
 		}
 
-		fmt.Printf("[Engine]   Task %s → agent %s (container: %s)\n", task.ID, task.AgentID, task.ContainerName)
+		e.logger().Info("Task dispatched", "task_id", task.ID, "agent", task.AgentID, "container", task.ContainerName)
 		taskCount++
 	}
 
 	deployment.Status = types.StatusDeploying
 	deployment.UpdatedAt = time.Now()
 	if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err != nil {
-		fmt.Printf("[Engine] Failed to update deployment status: %v\n", err)
+		e.logger().Error("Failed to update deployment status", "error", err)
 	}
 
-	fmt.Printf("[Engine] Dispatched %d tasks for deployment '%s'\n", taskCount, deployment.Name)
+	e.logger().Info("Dispatched tasks for deployment", "tasks", taskCount, "name", deployment.Name)
 }
 
 // checkDeployingDeployment checks if all tasks for a deployment have completed.
@@ -524,13 +534,13 @@ func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types
 	deployment.UpdatedAt = time.Now()
 	if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err == nil {
 		if newStatus == types.StatusFailed {
-			fmt.Printf("[Engine] Deployment '%s' FAILED: %s\n", deployment.Name, errMsg)
+			e.logger().Error("Deployment failed", "name", deployment.Name, "error", errMsg)
 			e.emitEvent("deployment.failed", fmt.Sprintf("Deployment %s failed: %s", deployment.Name, errMsg), "error")
 			if deployment.ReplacesID != "" {
-				fmt.Printf("[Engine] Blue-green: keeping old deployment '%s' running (new deployment failed)\n", deployment.ReplacesID)
+				e.logger().Info("Blue-green: keeping old deployment running", "old_id", deployment.ReplacesID)
 			}
 		} else {
-			fmt.Printf("[Engine] Deployment '%s' is RUNNING (%d containers)\n", deployment.Name, completedTasks)
+			e.logger().Info("Deployment is running", "name", deployment.Name, "containers", completedTasks)
 			e.emitEvent("deployment.running", fmt.Sprintf("Deployment %s is running (%d containers)", deployment.Name, completedTasks), "info")
 			if deployment.UpdateStrategy != types.UpdateStrategyRecreate {
 				e.blueGreenTeardownOld(ctx, deployment)
@@ -579,7 +589,7 @@ func (e *Engine) blueGreenTeardownOld(ctx context.Context, deployment *types.Dep
 	oldKey := types.KeyDeployments + deployment.ReplacesID
 	var oldDeployment types.DeploymentRecord
 	if err := e.store.Get(ctx, oldKey, &oldDeployment); err != nil {
-		fmt.Printf("[Engine] Blue-green: old deployment '%s' not found, skipping teardown\n", deployment.ReplacesID)
+		e.logger().Warn("Blue-green: old deployment not found, skipping teardown", "old_id", deployment.ReplacesID)
 		return
 	}
 
@@ -589,10 +599,10 @@ func (e *Engine) blueGreenTeardownOld(ctx context.Context, deployment *types.Dep
 
 	count, err := teardownDeployment(ctx, e.store, &oldDeployment, oldKey)
 	if err != nil {
-		fmt.Printf("[Engine] Blue-green: failed to teardown old deployment '%s': %v\n", oldDeployment.ID, err)
+		e.logger().Error("Blue-green: failed to teardown old deployment", "old_id", oldDeployment.ID, "error", err)
 		return
 	}
-	fmt.Printf("[Engine] Blue-green: tearing down old deployment '%s' (%d stop tasks created)\n", oldDeployment.ID, count)
+	e.logger().Info("Blue-green: tearing down old deployment", "old_id", oldDeployment.ID, "stop_tasks", count)
 }
 
 // adoptUnreplacedServices moves tasks and service definitions for services
@@ -631,17 +641,17 @@ func (e *Engine) adoptUnreplacedServices(ctx context.Context, newDeploy, oldDepl
 		oldTasks[i].DeploymentID = newDeploy.ID
 		taskKey := types.KeyTasks + oldTasks[i].AgentID + "/" + oldTasks[i].ID
 		if err := e.store.Save(ctx, taskKey, &oldTasks[i]); err != nil {
-			fmt.Printf("[Engine] Blue-green: failed to adopt task %s: %v\n", oldTasks[i].ID, err)
+			e.logger().Error("Blue-green: failed to adopt task", "task_id", oldTasks[i].ID, "error", err)
 		}
 	}
 
 	// Save updated new deployment with adopted services
 	newDeployKey := types.KeyDeployments + newDeploy.ID
 	if err := e.store.Save(ctx, newDeployKey, newDeploy); err != nil {
-		fmt.Printf("[Engine] Blue-green: failed to save adopted services: %v\n", err)
+		e.logger().Error("Blue-green: failed to save adopted services", "error", err)
 	}
 
-	fmt.Printf("[Engine] Blue-green: adopted %d service(s) from old deployment: %v\n", len(adoptNames), adoptNames)
+	e.logger().Info("Blue-green: adopted services from old deployment", "count", len(adoptNames), "services", adoptNames)
 }
 
 // checkStoppingDeployment checks if all stop_and_remove tasks have completed.
@@ -678,7 +688,7 @@ func (e *Engine) checkStoppingDeployment(ctx context.Context, deployment *types.
 		deployment.Error = fmt.Sprintf("%d/%d stop tasks failed: %s", failedTasks, totalTasks, firstError)
 		deployment.UpdatedAt = time.Now()
 		if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err == nil {
-			fmt.Printf("[Engine] Deployment '%s' stop FAILED: %s\n", deployment.Name, deployment.Error)
+			e.logger().Error("Deployment stop failed", "name", deployment.Name, "error", deployment.Error)
 		}
 		return
 	}
@@ -688,7 +698,7 @@ func (e *Engine) checkStoppingDeployment(ctx context.Context, deployment *types.
 		deployment.Error = ""
 		deployment.UpdatedAt = time.Now()
 		if err := e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment); err == nil {
-			fmt.Printf("[Engine] Deployment '%s' is STOPPED (%d containers removed)\n", deployment.Name, completedTasks)
+			e.logger().Info("Deployment stopped", "name", deployment.Name, "containers_removed", completedTasks)
 		}
 	}
 }
@@ -716,7 +726,8 @@ func ListAvailableAgents(ctx context.Context, store storage.StateStore, deployme
 // --- Registry helpers ---
 
 func startRegistry(ctx context.Context, port string) (net.Listener, error) {
-	handler := registry.New()
+	regLog := logging.New("engine.registry")
+	handler := registry.New(registry.Logger(regLog.StdLogger()))
 
 	listener, err := net.Listen("tcp", ":"+port)
 	if err != nil {
@@ -726,7 +737,7 @@ func startRegistry(ctx context.Context, port string) (net.Listener, error) {
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			fmt.Printf("Registry server error: %v\n", err)
+			logging.Error("Registry server error", "error", err)
 		}
 	}()
 

@@ -34,6 +34,8 @@ type Model struct {
 	paletteFilter   string
 	selectedAgent   string
 	selectedDeploy  string
+	filterText      string
+	exportStatus    string
 	refreshInterval time.Duration
 	width           int
 	height          int
@@ -43,6 +45,7 @@ type Model struct {
 	listOffset      int
 	paletteOpen     bool
 	helpOpen        bool
+	filterEditing   bool
 }
 
 // New creates a new dashboard model.
@@ -83,6 +86,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 		if m.paletteOpen {
 			return m.handlePaletteKey(msg)
 		}
+		if m.filterEditing {
+			return m.handleFilterKey(msg)
+		}
 		return m.handleKey(msg)
 
 	case tickMsg:
@@ -94,6 +100,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 	case dataMsg:
 		m.data = &msg.data
 		m.err = nil
+		m.exportStatus = ""
+		// Clamp cursor to current data bounds after refresh
+		if m.isListView() {
+			maxIdx := m.maxListIndex()
+			if m.listCursor > maxIdx {
+				m.listCursor = maxIdx
+			}
+		}
 		return m, nil
 
 	case errMsg:
@@ -104,7 +118,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 	return m, nil
 }
 
-// handleKey processes key events in normal (non-palette) mode.
+// handleKey processes key events in normal (non-palette, non-filter) mode.
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -116,8 +130,16 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 		m.paletteOpen = true
 		m.paletteFilter = ""
 		m.paletteCursor = 0
+		m.filterEditing = false
 		return m, nil
 	case "esc":
+		// First Esc clears filter; second Esc navigates back
+		if m.filterText != "" {
+			m.filterText = ""
+			m.listCursor = 0
+			m.listOffset = 0
+			return m, nil
+		}
 		switch m.activeView {
 		case ViewAgentDetail:
 			m.activeView = ViewAgents
@@ -127,26 +149,54 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 			m.activeView = ViewOverview
 		}
 		return m, nil
+	case "/":
+		if m.isListView() {
+			m.filterEditing = true
+			m.listCursor = 0
+			m.listOffset = 0
+		}
+	case "e":
+		if m.isListView() && m.data != nil {
+			fd := filteredData(m.data, m.activeView, m.filterText)
+			filename, err := exportViewCSV(fd, m.activeView)
+			if err != nil {
+				m.exportStatus = fmt.Sprintf("Export failed: %v", err)
+			} else {
+				m.exportStatus = filename
+			}
+		}
 	case "1":
 		m.activeView = ViewOverview
+		m.filterText = ""
+		m.filterEditing = false
 	case "2":
 		m.activeView = ViewAgents
 		m.listCursor = 0
 		m.listOffset = 0
+		m.filterText = ""
+		m.filterEditing = false
 	case "3":
 		m.activeView = ViewDeploys
 		m.listCursor = 0
 		m.listOffset = 0
+		m.filterText = ""
+		m.filterEditing = false
 	case "4":
 		m.activeView = ViewContainers
 		m.listCursor = 0
 		m.listOffset = 0
+		m.filterText = ""
+		m.filterEditing = false
 	case "5":
 		m.activeView = ViewEngine
+		m.filterText = ""
+		m.filterEditing = false
 	case "6":
 		m.activeView = ViewEvents
 		m.listCursor = 0
 		m.listOffset = 0
+		m.filterText = ""
+		m.filterEditing = false
 	case "r":
 		return m, fetchDataCmd(m.client)
 	case "up", "k":
@@ -159,6 +209,42 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 		return m.handleEnter()
 	}
 	return m, nil
+}
+
+// handleFilterKey processes key events when the filter input is active.
+func (m Model) handleFilterKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	switch msg.String() {
+	case "esc":
+		m.filterEditing = false
+		return m, nil
+	case "enter":
+		m.filterEditing = false
+		return m, nil
+	case "up", "k":
+		m.listCursor = max(m.listCursor-1, 0)
+		m.adjustListScroll()
+		return m, nil
+	case "down", "j":
+		m.listCursor = m.clampCursor(m.listCursor + 1)
+		m.adjustListScroll()
+		return m, nil
+	case "backspace":
+		if m.filterText != "" {
+			m.filterText = m.filterText[:len(m.filterText)-1]
+			m.listCursor = 0
+			m.listOffset = 0
+		}
+		return m, nil
+	case "ctrl+c":
+		return m, tea.Quit
+	default:
+		if msg.Type == tea.KeyRunes {
+			m.filterText += string(msg.Runes)
+			m.listCursor = 0
+			m.listOffset = 0
+		}
+		return m, nil
+	}
 }
 
 // handleHelpKey processes key events when the help overlay is open.
@@ -177,7 +263,7 @@ func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:
 		m.paletteOpen = false
 		return m, nil
 	case "enter":
-		actions := filterPaletteActions(m.paletteFilter)
+		actions := filterPaletteActions(m.paletteFilter, m.activeView)
 		if len(actions) == 0 {
 			return m, nil
 		}
@@ -187,7 +273,7 @@ func (m Model) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:
 		m.paletteCursor = max(m.paletteCursor-1, 0)
 		return m, nil
 	case "down":
-		actions := filterPaletteActions(m.paletteFilter)
+		actions := filterPaletteActions(m.paletteFilter, m.activeView)
 		m.paletteCursor = min(m.paletteCursor+1, max(len(actions)-1, 0))
 		return m, nil
 	case "backspace":
@@ -216,7 +302,26 @@ func (m Model) executePaletteAction(action paletteAction) (tea.Model, tea.Cmd) {
 		return m, fetchDataCmd(m.client)
 	case viewActionQuit:
 		return m, tea.Quit
+	case viewActionFilter:
+		m.filterEditing = true
+		m.listCursor = 0
+		m.listOffset = 0
+		return m, nil
+	case viewActionExport:
+		if m.data != nil {
+			fd := filteredData(m.data, m.activeView, m.filterText)
+			filename, err := exportViewCSV(fd, m.activeView)
+			if err != nil {
+				m.exportStatus = fmt.Sprintf("Export failed: %v", err)
+			} else {
+				m.exportStatus = filename
+			}
+		}
+		return m, nil
 	default:
+		// View switch — clear filter state
+		m.filterText = ""
+		m.filterEditing = false
 		m.activeView = action.view
 		m.listCursor = 0
 		m.listOffset = 0
@@ -226,17 +331,18 @@ func (m Model) executePaletteAction(action paletteAction) (tea.Model, tea.Cmd) {
 
 // handleEnter processes Enter key in list views to drill into detail.
 func (m Model) handleEnter() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
-	if m.data == nil {
+	fd := filteredData(m.data, m.activeView, m.filterText)
+	if fd == nil {
 		return m, nil
 	}
 	switch m.activeView {
 	case ViewAgents:
-		if m.listCursor < len(m.data.Agents) {
-			m.selectedAgent = m.data.Agents[m.listCursor].Name
+		if m.listCursor < len(fd.Agents) {
+			m.selectedAgent = fd.Agents[m.listCursor].Name
 			m.activeView = ViewAgentDetail
 		}
 	case ViewDeploys:
-		groups := groupDeployments(m.data.Deployments)
+		groups := groupDeployments(fd.Deployments)
 		if m.listCursor < len(groups) {
 			m.selectedDeploy = groups[m.listCursor].Latest.ID
 			m.activeView = ViewDeploymentDetail
@@ -256,19 +362,20 @@ func (m Model) clampCursor(cursor int) int { //nolint:gocritic // bubbletea valu
 
 // maxListIndex returns the maximum valid cursor index for the current list view.
 func (m Model) maxListIndex() int { //nolint:gocritic // bubbletea value-receiver pattern
-	if m.data == nil {
+	fd := filteredData(m.data, m.activeView, m.filterText)
+	if fd == nil {
 		return 0
 	}
 	switch m.activeView {
 	case ViewAgents:
-		return max(len(m.data.Agents)-1, 0)
+		return max(len(fd.Agents)-1, 0)
 	case ViewDeploys:
-		groups := groupDeployments(m.data.Deployments)
+		groups := groupDeployments(fd.Deployments)
 		return max(len(groups)-1, 0)
 	case ViewContainers:
-		return max(len(m.data.Containers)-1, 0)
+		return max(len(fd.Containers)-1, 0)
 	case ViewEvents:
-		return max(len(m.data.Events)-1, 0)
+		return max(len(fd.Events)-1, 0)
 	}
 	return 0
 }
@@ -308,7 +415,8 @@ func (m *Model) adjustListScroll() {
 // can span multiple lines (e.g. deployments with summary rows), this
 // counts actual rendered lines up to the cursor position.
 func (m Model) cursorContentLine() int { //nolint:gocritic // bubbletea value-receiver pattern
-	if m.data == nil {
+	fd := filteredData(m.data, m.activeView, m.filterText)
+	if fd == nil {
 		return 0
 	}
 	switch m.activeView {
@@ -317,7 +425,7 @@ func (m Model) cursorContentLine() int { //nolint:gocritic // bubbletea value-re
 	case ViewContainers, ViewEvents:
 		return m.listCursor
 	case ViewDeploys:
-		groups := groupDeployments(m.data.Deployments)
+		groups := groupDeployments(fd.Deployments)
 		line := 0
 		for i := 0; i < m.listCursor && i < len(groups); i++ {
 			line++ // data row
@@ -374,20 +482,32 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 
 	header := renderHeader(m.width, m.refreshInterval)
 
+	// Show export status below header (clears on next data refresh)
+	if m.exportStatus != "" {
+		statusLine := lipgloss.NewStyle().Foreground(colorGreen).Render("  ✓ Exported to " + m.exportStatus)
+		header = header + "\n" + statusLine
+	}
+
+	// Compute filtered data for list views
+	fd := m.data
+	if m.filterText != "" && m.data != nil {
+		fd = filteredData(m.data, m.activeView, m.filterText)
+	}
+
 	var content string
 	switch m.activeView {
 	case ViewOverview:
 		content = renderOverview(m.data, m.width)
 	case ViewAgents:
-		content = renderAgentList(m.data, m.width, m.listCursor)
+		content = renderAgentList(fd, m.width, m.listCursor)
 	case ViewDeploys:
-		content = renderDeploymentList(m.data, m.width, m.listCursor)
+		content = renderDeploymentList(fd, m.width, m.listCursor)
 	case ViewContainers:
-		content = renderContainerList(m.data, m.width, m.listCursor)
+		content = renderContainerList(fd, m.width, m.listCursor)
 	case ViewEngine:
 		content = renderEngineDetail(m.data, m.width)
 	case ViewEvents:
-		content = renderEventList(m.data, m.width, m.listCursor)
+		content = renderEventList(fd, m.width, m.listCursor)
 	case ViewAgentDetail:
 		content = renderAgentDetail(m.data, m.selectedAgent, m.width)
 	case ViewDeploymentDetail:
@@ -403,10 +523,19 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 
 	footer := renderFooter(m.width, m.activeView)
 
+	// Filter bar (shown when editing or when a filter is applied)
+	var filterBar string
+	if m.filterEditing || m.filterText != "" {
+		filterBar = renderFilterBar(m.filterText, m.filterEditing, m.width)
+	}
+
 	// Calculate available height for content
 	headerHeight := lipgloss.Height(header)
 	footerHeight := lipgloss.Height(footer)
 	availHeight := m.height - headerHeight - footerHeight - 2 // 2 for spacing
+	if filterBar != "" {
+		availHeight--
+	}
 
 	// Scroll or truncate content to fit available height
 	contentLines := lipgloss.Height(content)
@@ -422,7 +551,14 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 		}
 	}
 
-	view := lipgloss.JoinVertical(lipgloss.Left, header, "", content, "", footer)
+	// Build final view layout
+	var sections []string
+	sections = append(sections, header, "")
+	if filterBar != "" {
+		sections = append(sections, filterBar)
+	}
+	sections = append(sections, content, "", footer)
+	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
 	// Composite overlays on top of the rendered dashboard
 	if m.helpOpen {
@@ -431,7 +567,7 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 	}
 	if m.paletteOpen {
 		boxWidth := max(min(56, m.width-4), 30)
-		return applyOverlay(view, renderPaletteBox(m.paletteFilter, m.paletteCursor, boxWidth), m.width, m.height)
+		return applyOverlay(view, renderPaletteBox(m.paletteFilter, m.paletteCursor, boxWidth, m.activeView), m.width, m.height)
 	}
 
 	return view

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/storage"
 )
@@ -98,7 +99,7 @@ func (m *Manager) AllocateHostSubnet(ctx context.Context, hostID string) (*net.I
 		// Renew existing lease
 		if err := m.renewLeaseInternal(ctx, hostID); err != nil {
 			// Log error but return existing subnet
-			fmt.Printf("Warning: failed to renew lease: %v\n", err)
+			logging.Warn("Failed to renew lease", "error", err)
 		}
 		return lease.Subnet, nil // Already allocated
 	}
@@ -303,7 +304,7 @@ func (m *Manager) StartLeaseRenewal(ctx context.Context, hostID string) error {
 				return
 			case <-ticker.C:
 				if err := m.RenewLease(renewalCtx, hostID); err != nil {
-					fmt.Printf("Warning: failed to renew subnet lease for %s: %v\n", hostID, err)
+					logging.Warn("Failed to renew subnet lease", "host_id", hostID, "error", err)
 				}
 			}
 		}

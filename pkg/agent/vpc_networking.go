@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
@@ -66,7 +67,7 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 
 	// 4. Enable IP forwarding (required for routing between bridge and VXLAN)
 	if writeErr := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0o644); writeErr != nil {
-		fmt.Printf("  WARNING: failed to enable IP forwarding: %v\n", writeErr)
+		a.logger().Warn("Failed to enable IP forwarding", "error", writeErr)
 	}
 
 	// 5. Create overlay driver and call Init()
@@ -82,7 +83,7 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 
 	// Store driver on Agent for later use
 	a.overlayDriver = driver
-	fmt.Printf("  Overlay networking initialized (subnet: %s, host: %s)\n", subnet.String(), hostIP.String())
+	a.logger().Info("Overlay networking initialized", "subnet", subnet.String(), "host", hostIP.String())
 
 	return nil
 }
@@ -104,7 +105,7 @@ func (a *Agent) reconcileVPCPeers(ctx context.Context, peers []VPCPeer) error {
 			peer, err = overlay.PeerFromSubnetAndHost(p.Subnet, p.HostIP, p.VTEPMAC)
 		}
 		if err != nil {
-			fmt.Printf("[Agent] WARNING: skipping invalid peer: %v\n", err)
+			a.logger().Warn("Skipping invalid peer", "error", err)
 			continue
 		}
 		overlayPeers = append(overlayPeers, peer)
@@ -163,7 +164,7 @@ func defaultReclaimDNSPort(ip string, port int) error {
 		return fmt.Errorf("refusing to kill PID %d", pid)
 	}
 
-	fmt.Printf("  Killing stale process (PID %d) holding %s:%d...\n", pid, ip, port)
+	logging.Info("Killing stale process holding port", "pid", pid, "ip", ip, "port", port)
 	if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
 		return fmt.Errorf("kill PID %d: %w", pid, killErr)
 	}
@@ -256,9 +257,9 @@ func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error
 	if startErr := server.Start(); startErr != nil {
 		// If a stale agent process is holding the port, reclaim and retry
 		if strings.Contains(startErr.Error(), "address already in use") {
-			fmt.Printf("  DNS port %s in use by stale process, reclaiming...\n", bindAddr)
+			a.logger().Info("DNS port in use by stale process, reclaiming", "bind", bindAddr)
 			if reclaimErr := reclaimDNSPort(gatewayIP.String(), 53); reclaimErr != nil {
-				fmt.Printf("  WARNING: Could not reclaim port: %v\n", reclaimErr)
+				a.logger().Warn("Could not reclaim DNS port", "error", reclaimErr)
 			}
 			// Create fresh server and retry
 			server = dnsServerFactory(manager, dns.ServerConfig{
@@ -277,7 +278,7 @@ func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error
 	a.dnsManager = manager
 	a.dnsServer = server
 	a.gatewayIP = gatewayIP.String()
-	fmt.Printf("  DNS server started (bind: %s)\n", bindAddr)
+	a.logger().Info("DNS server started", "bind", bindAddr)
 
 	return nil
 }

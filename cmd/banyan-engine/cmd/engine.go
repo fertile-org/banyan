@@ -18,6 +18,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/engine"
+	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
@@ -373,8 +374,9 @@ func resolveStoreConfig(cmd *cobra.Command) (backend, address string) {
 }
 
 func runEngineStart(cmd *cobra.Command, args []string) error {
-	fmt.Println("Banyan Engine")
-	fmt.Println("========================================")
+	logging.Setup(nil)
+	log := logging.New("engine")
+	log.Info("Banyan Engine starting")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -383,14 +385,14 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		fmt.Println("\nShutting down...")
+		log.Info("Shutting down")
 		cancel()
 	}()
 
 	// Load config
 	cfg, err := types.LoadConfig(configPath)
 	if err != nil {
-		fmt.Printf("Warning: Failed to load config: %v\n", err)
+		log.Warn("Failed to load config", "error", err)
 	}
 
 	// Read gRPC port from config if not overridden by flags
@@ -400,19 +402,19 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 
 	// Determine store backend and address
 	storeBackend, storeAddress := resolveStoreConfig(cmd)
-	fmt.Printf("Store backend: %s\n", storeBackend)
+	log.Info("Store backend configured", "backend", storeBackend)
 
 	// Handle managed etcd
 	if cfg.Engine.ManagedEtcd {
 		etcdDataDir := filepath.Join(engineDataDir, "etcd")
-		fmt.Printf("Starting managed etcd (data: %s)...\n", etcdDataDir)
+		log.Info("Starting managed etcd", "data_dir", etcdDataDir)
 		etcdCmd, etcdErr := startManagedEtcd(etcdDataDir)
 		if etcdErr != nil {
 			return fmt.Errorf("failed to start managed etcd: %w", etcdErr)
 		}
 		defer stopManagedEtcd(etcdCmd)
 		storeAddress = managedEtcdClientURL
-		fmt.Printf("Managed etcd started: %s\n", storeAddress)
+		log.Info("Managed etcd started", "address", storeAddress)
 	} else {
 		// Resolve default address for external etcd
 		storeAddress = resolveDefaultStoreAddress(storeBackend, storeAddress)
@@ -423,7 +425,7 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unsupported store backend: %s (only etcd is supported)", storeBackend)
 	}
 
-	fmt.Printf("Connecting to %s at %s...\n", storeBackend, storeAddress)
+	log.Info("Connecting to store", "backend", storeBackend, "address", storeAddress)
 
 	// Load whitelisted agent public keys
 	whitelistedKeysDir := cfg.Engine.WhitelistedKeysDir
@@ -432,10 +434,10 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	}
 	whitelistedKeys, wkErr := types.LoadWhitelistedKeys(whitelistedKeysDir)
 	if wkErr != nil {
-		fmt.Printf("Warning: Failed to load whitelisted keys: %v\n", wkErr)
+		log.Warn("Failed to load whitelisted keys", "error", wkErr)
 	}
 	if len(whitelistedKeys) > 0 {
-		fmt.Printf("Loaded %d whitelisted agent key(s) from %s\n", len(whitelistedKeys), whitelistedKeysDir)
+		log.Info("Loaded whitelisted agent keys", "count", len(whitelistedKeys), "dir", whitelistedKeysDir)
 	}
 
 	// Set up WireGuard control tunnel (required when keys are configured)
@@ -444,21 +446,21 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		if readErr != nil {
 			return fmt.Errorf("failed to load WireGuard private key: %w", readErr)
 		}
-		fmt.Println("Setting up WireGuard control tunnel...")
+		log.Info("Setting up WireGuard control tunnel")
 		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
 		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, wgPrivateKey, engineIP, types.ControlTunnelPort); tunnelErr != nil {
 			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
 		}
 		defer overlay.CleanupControlTunnelExec(types.ControlIfaceEngine) //nolint:errcheck // best-effort cleanup on exit
-		fmt.Printf("Control tunnel ready on %s (port %d)\n", types.ControlTunnelEngineIP, types.ControlTunnelPort)
+		log.Info("Control tunnel ready", "ip", types.ControlTunnelEngineIP, "port", types.ControlTunnelPort)
 
 		// Add whitelisted keys as control tunnel peers
 		for pubKey, name := range whitelistedKeys {
 			tunnelIP := types.TunnelIPFromPublicKey(pubKey)
 			if peerErr := overlay.AddControlPeerExec(types.ControlIfaceEngine, pubKey, "", tunnelIP); peerErr != nil {
-				fmt.Printf("Warning: Failed to add control peer %s: %v\n", name, peerErr)
+				log.Warn("Failed to add control peer", "name", name, "error", peerErr)
 			} else {
-				fmt.Printf("  Control peer: %s → %s\n", name, tunnelIP)
+				log.Info("Control peer added", "name", name, "tunnel_ip", tunnelIP)
 			}
 		}
 	}
@@ -496,22 +498,14 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	}
 	defer eng.Close()
 
-	fmt.Printf("Connected to %s\n", storeBackend)
-
-	fmt.Println("========================================")
-	fmt.Println("Engine is running. Watching for deployments...")
-	fmt.Println("")
-	fmt.Println("Usage:")
-	fmt.Printf("  Deploy:      banyan-cli deploy --file banyan.yaml\n")
-	fmt.Println("  Agent start: banyan-agent start --node-name <name>")
-	fmt.Println("")
-	fmt.Println("Press Ctrl+C to stop")
+	log.Info("Connected to store", "backend", storeBackend)
+	log.Info("Engine is running, watching for deployments")
 
 	if runErr := eng.Run(ctx); runErr != nil {
 		return runErr
 	}
 
-	fmt.Println("Engine stopped")
+	log.Info("Engine stopped")
 	return nil
 }
 
@@ -603,7 +597,7 @@ func stopManagedEtcd(cmd *exec.Cmd) {
 		_ = cmd.Process.Kill()
 		<-done
 	}
-	fmt.Println("Managed etcd stopped")
+	logging.Info("Managed etcd stopped")
 }
 
 func runEngineStop(cmd *cobra.Command, args []string) error {

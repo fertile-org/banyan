@@ -64,8 +64,87 @@ func (s *cliTestServer) GetLogs(req *banyanpb.GetLogsRequest, stream grpc.Server
 	return nil
 }
 
+func (s *cliTestServer) GetDashboardData(_ context.Context, _ *banyanpb.GetDashboardDataRequest) (*banyanpb.GetDashboardDataResponse, error) {
+	now := time.Now().Unix()
+	return &banyanpb.GetDashboardDataResponse{
+		Engine: &banyanpb.EngineStatus{
+			Status:        "running",
+			StartedAtUnix: now - 3600,
+			SystemMetrics: &banyanpb.SystemMetrics{
+				CpuUsageRatio:    0.25,
+				MemoryUsedBytes:  1073741824,
+				MemoryTotalBytes: 4294967296,
+				DiskUsedBytes:    10737418240,
+				DiskTotalBytes:   53687091200,
+				CpuCores:         4,
+			},
+		},
+		Agents: []*banyanpb.AgentDetail{
+			{
+				Name: "worker-1", Status: "connected", ApiAddress: "10.0.1.10:50052",
+				LastSeenUnix: now - 5, CreatedAtUnix: now - 7200,
+				Tags: []string{"zone:us-east"}, VpcSubnet: "10.0.1.0/24", ContainerCount: 3,
+				SystemMetrics: &banyanpb.SystemMetrics{
+					CpuUsageRatio: 0.45, MemoryUsedBytes: 2147483648, MemoryTotalBytes: 8589934592,
+					DiskUsedBytes: 21474836480, DiskTotalBytes: 107374182400, CpuCores: 8,
+				},
+			},
+			{
+				Name: "worker-2", Status: "connected", ApiAddress: "10.0.2.10:50052",
+				LastSeenUnix: now - 10, CreatedAtUnix: now - 3600,
+				Tags: []string{"zone:us-west"}, VpcSubnet: "10.0.2.0/24", ContainerCount: 2,
+				SystemMetrics: &banyanpb.SystemMetrics{
+					CpuUsageRatio: 0.30, MemoryUsedBytes: 1073741824, MemoryTotalBytes: 4294967296,
+					DiskUsedBytes: 10737418240, DiskTotalBytes: 53687091200, CpuCores: 4,
+				},
+			},
+		},
+		Deployments: []*banyanpb.DeploymentInfo{
+			{
+				Id: "dep-001", Name: "my-app", Status: types.StatusRunning, Healthy: 2, Total: 3,
+				Tags: []string{"env:prod"}, CreatedAtUnix: now - 1800, UpdatedAtUnix: now - 60,
+				Services: map[string]*banyanpb.ServiceInfo{
+					"web": {Image: "nginx:alpine", Replicas: 2, Ports: []string{"80:80"}},
+					"api": {Image: "myapp/api:v1", Replicas: 1, Ports: []string{"8080:8080"}},
+				},
+				Tasks: []*banyanpb.TaskInfo{
+					{
+						ServiceName: "web", ContainerName: "my-app-web-0", AgentId: "worker-1",
+						Type: types.TaskTypeCreateAndStart, Status: "completed", ContainerStatus: types.StatusRunning,
+						Image: "nginx:alpine", Ports: []string{"80:80"}, ReplicaIndex: 0,
+						CreatedAtUnix: now - 1800, UpdatedAtUnix: now - 1700,
+					},
+					{
+						ServiceName: "web", ContainerName: "my-app-web-1", AgentId: "worker-2",
+						Type: types.TaskTypeCreateAndStart, Status: "completed", ContainerStatus: types.StatusRunning,
+						Image: "nginx:alpine", Ports: []string{"80:80"}, ReplicaIndex: 1,
+						CreatedAtUnix: now - 1800, UpdatedAtUnix: now - 1690,
+					},
+					{
+						ServiceName: "api", ContainerName: "my-app-api-0", AgentId: "worker-1",
+						Type: types.TaskTypeCreateAndStart, Status: "completed", ContainerStatus: "stopped",
+						Image: "myapp/api:v1", Ports: []string{"8080:8080"}, ReplicaIndex: 0,
+						CreatedAtUnix: now - 1800, UpdatedAtUnix: now - 300,
+					},
+				},
+			},
+		},
+		Summary: &banyanpb.ClusterSummary{
+			TotalAgents: 2, ConnectedAgents: 2,
+			TotalDeployments: 1, RunningDeployments: 1,
+			TotalContainers: 3, HealthyContainers: 2,
+			TasksByStatus: map[string]int32{"completed": 3, "failed": 0},
+		},
+		RecentEvents: []*banyanpb.ClusterEvent{
+			{TimestampUnix: now - 60, Type: "deployment.updated", Message: "Deployment my-app updated", Severity: "info"},
+			{TimestampUnix: now - 120, Type: "container.started", Message: "Container my-app-web-0 started on worker-1", Severity: "info"},
+			{TimestampUnix: now - 300, Type: "container.stopped", Message: "Container my-app-api-0 stopped on worker-1", Severity: "warning"},
+		},
+	}, nil
+}
+
 // setupCLITestTCPServer starts a gRPC server on a real TCP port for testing
-// command runners (runStatus, runDown, etc.) that create their own EngineClient.
+// command runners (runEngine, runDown, etc.) that create their own EngineClient.
 // It returns the server address and a cleanup function.
 func setupCLITestTCPServer(t *testing.T) (addr string, cleanup func()) {
 	t.Helper()

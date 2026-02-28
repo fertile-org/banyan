@@ -7,6 +7,8 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+
+	"github.com/fertile-org/banyan/pkg/logging"
 )
 
 const (
@@ -212,7 +214,7 @@ func (d *VXLANDriver) WriteCNIConfig(subnet net.IPNet) error {
 		return fmt.Errorf("write CNI config to %s: %w", configPath, writeErr)
 	}
 
-	fmt.Printf("  CNI config written to %s\n", configPath)
+	logging.Info("CNI config written", "path", configPath)
 	return nil
 }
 

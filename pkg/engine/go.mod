@@ -3,6 +3,7 @@ module github.com/fertile-org/banyan/pkg/engine
 go 1.24.3
 
 require (
+	github.com/fertile-org/banyan/pkg/logging v0.0.0
 	github.com/fertile-org/banyan/pkg/metrics v0.0.0
 	github.com/fertile-org/banyan/pkg/rpc v0.0.0
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
@@ -42,6 +43,7 @@ require (
 )
 
 replace (
+	github.com/fertile-org/banyan/pkg/logging => ../logging
 	github.com/fertile-org/banyan/pkg/metrics => ../metrics
 	github.com/fertile-org/banyan/pkg/rpc => ../rpc
 	github.com/fertile-org/banyan/pkg/storage => ../storage

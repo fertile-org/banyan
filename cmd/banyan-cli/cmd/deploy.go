@@ -197,7 +197,7 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	log.Info("Deployment created", "name", manifest.Name, "id", resp.DeploymentId)
 
 	if deployNoWait {
-		log.Info("Use 'banyan-cli status' to check deployment status")
+		log.Info("Use 'banyan-cli deployment' to check deployment status")
 		return nil
 	}
 

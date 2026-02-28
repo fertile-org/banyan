@@ -27,7 +27,9 @@ banyan-cli deploy -f banyan.yaml
 banyan-cli down --name my-app
 
 # Check cluster status
-banyan-cli status
+banyan-cli engine
+banyan-cli agent
+banyan-cli deployment
 
 # Stream container logs
 banyan-cli logs my-app-web-0 -f

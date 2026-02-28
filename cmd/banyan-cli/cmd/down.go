@@ -105,7 +105,7 @@ func runDown(cmd *cobra.Command, args []string) error {
 	log.Info("Created stop tasks", "count", resp.TaskCount, "app", appName)
 
 	if downNoWait {
-		log.Info("Use 'banyan-cli status' to check progress")
+		log.Info("Use 'banyan-cli deployment' to check progress")
 		return nil
 	}
 

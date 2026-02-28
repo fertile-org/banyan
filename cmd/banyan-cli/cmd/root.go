@@ -17,11 +17,15 @@ var rootCmd = &cobra.Command{
 	Long: `banyan-cli is the command-line client for Banyan container orchestration.
 
 Commands:
-  init      Initialize CLI configuration (engine host, port, password)
-  up        Deploy applications from banyan.yaml (alias: deploy)
-  down      Stop and remove deployed services
-  status    Show cluster status
-  logs      Stream container logs
+  init         Initialize CLI configuration (engine host, port, password)
+  up           Deploy applications from banyan.yaml (alias: deploy)
+  down         Stop and remove deployed services
+  engine       Show engine status and cluster summary
+  agent        List agents or show agent detail
+  deployment   List deployments or show deployment detail
+  container    List containers or show container detail
+  events       List recent cluster events
+  logs         Stream container logs
 
 Quick Start:
   # Initialize CLI config (run once)
@@ -30,8 +34,10 @@ Quick Start:
   # Deploy an application
   banyan-cli up --file banyan.yaml
 
-  # Check status
-  banyan-cli status
+  # Check cluster status
+  banyan-cli engine
+  banyan-cli agent
+  banyan-cli deployment
 
   # View logs
   banyan-cli logs my-app-web-0`,

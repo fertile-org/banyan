@@ -1,12 +1,20 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func TestValidateManifest(t *testing.T) {
@@ -425,5 +433,331 @@ func TestPushServiceImages_PushFails(t *testing.T) {
 	}
 	if got := err.Error(); got != `failed to push image for service "web": push failed` {
 		t.Errorf("unexpected error message: %s", got)
+	}
+}
+
+// writeTestManifest creates a temp manifest YAML and returns its path.
+func writeTestManifest(t *testing.T, content string) string {
+	t.Helper()
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "banyan.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+	return path
+}
+
+// saveDeployFlags saves current deploy flag values and restores them on cleanup.
+func saveDeployFlags(t *testing.T) {
+	t.Helper()
+	origFile := deployFile
+	origDryRun := deployDryRun
+	origNoWait := deployNoWait
+	origTags := deployTags
+	t.Cleanup(func() {
+		deployFile = origFile
+		deployDryRun = origDryRun
+		deployNoWait = origNoWait
+		deployTags = origTags
+	})
+}
+
+func TestRunDeploy_DryRun(t *testing.T) {
+	saveDeployFlags(t)
+
+	manifest := `name: my-app
+services:
+  web:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+  api:
+    image: node:18
+    deploy:
+      replicas: 2
+`
+	deployFile = writeTestManifest(t, manifest)
+	deployDryRun = true
+	deployNoWait = false
+	deployTags = nil
+
+	err := runDeploy(deployCmd, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestRunDeploy_DryRun_InvalidManifest(t *testing.T) {
+	saveDeployFlags(t)
+
+	deployFile = writeTestManifest(t, "services:\n  web:\n    image: nginx\n")
+	deployDryRun = true
+
+	err := runDeploy(deployCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for manifest without name")
+	}
+}
+
+func TestRunDeploy_NonexistentFile(t *testing.T) {
+	saveDeployFlags(t)
+
+	deployFile = "/nonexistent/banyan.yaml"
+	deployDryRun = true
+
+	err := runDeploy(deployCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for nonexistent file")
+	}
+	if !strings.Contains(err.Error(), "failed to read manifest") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDeploy_InvalidServiceArgs(t *testing.T) {
+	saveDeployFlags(t)
+
+	deployFile = writeTestManifest(t, "name: my-app\nservices:\n  web:\n    image: nginx\n")
+	deployDryRun = true
+
+	err := runDeploy(deployCmd, []string{"nonexistent"})
+	if err == nil {
+		t.Fatal("expected error for unknown service name")
+	}
+	if !strings.Contains(err.Error(), "not found in manifest") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDeploy_NoWait(t *testing.T) {
+	addr, cleanup := setupCLITestTCPServer(t)
+	defer cleanup()
+	setupCLITestConfig(t, addr)
+	saveDeployFlags(t)
+
+	deployFile = writeTestManifest(t, "name: my-app\nservices:\n  web:\n    image: nginx:alpine\n")
+	deployDryRun = false
+	deployNoWait = true
+	deployTags = nil
+
+	err := runDeploy(deployCmd, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestRunDeploy_WithWait(t *testing.T) {
+	// The default cliTestServer returns StatusRunning for "my-app",
+	// so waitForDeployment should find it and return immediately.
+	addr, cleanup := setupCLITestTCPServer(t)
+	defer cleanup()
+	setupCLITestConfig(t, addr)
+	saveDeployFlags(t)
+
+	deployFile = writeTestManifest(t, "name: my-app\nservices:\n  web:\n    image: nginx:alpine\n")
+	deployDryRun = false
+	deployNoWait = false
+	deployTags = nil
+
+	err := runDeploy(deployCmd, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+// setupBufconnClientWithStatus creates a bufconn gRPC client backed by a server
+// that returns the given deployment status for app "my-app".
+func setupBufconnClientWithStatus(t *testing.T, status string) *EngineClient {
+	t.Helper()
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(srv, &deploymentStatusServer{status: status})
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+	t.Cleanup(func() { srv.Stop() })
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	return &EngineClient{
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}
+}
+
+// deploymentStatusServer returns a configurable deployment status.
+type deploymentStatusServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	status string
+}
+
+func (s *deploymentStatusServer) GetStatus(_ context.Context, _ *banyanpb.GetStatusRequest) (*banyanpb.GetStatusResponse, error) {
+	return &banyanpb.GetStatusResponse{
+		Deployments: []*banyanpb.DeploymentInfo{
+			{Name: "my-app", Status: s.status, CreatedAtUnix: time.Now().Unix()},
+		},
+	}, nil
+}
+
+func TestWaitForDeployment_Running(t *testing.T) {
+	origTags := deployTags
+	t.Cleanup(func() { deployTags = origTags })
+	deployTags = nil
+
+	client := setupBufconnClientWithStatus(t, types.StatusRunning)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := waitForDeployment(ctx, client, "my-app")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestWaitForDeployment_Failed(t *testing.T) {
+	origTags := deployTags
+	t.Cleanup(func() { deployTags = origTags })
+	deployTags = nil
+
+	client := setupBufconnClientWithStatus(t, types.StatusFailed)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := waitForDeployment(ctx, client, "my-app")
+	if err == nil {
+		t.Fatal("expected error for failed deployment")
+	}
+	if !strings.Contains(err.Error(), "deployment failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitForDeployment_Timeout(t *testing.T) {
+	origTags := deployTags
+	t.Cleanup(func() { deployTags = origTags })
+	deployTags = nil
+
+	// Use StatusPending so it never resolves
+	client := setupBufconnClientWithStatus(t, types.StatusPending)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := waitForDeployment(ctx, client, "my-app")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitForDeployment_Deploying(t *testing.T) {
+	origTags := deployTags
+	t.Cleanup(func() { deployTags = origTags })
+	deployTags = nil
+
+	// StatusDeploying should be logged but not returned — will eventually timeout
+	client := setupBufconnClientWithStatus(t, types.StatusDeploying)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := waitForDeployment(ctx, client, "my-app")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+}
+
+func TestRunDeploy_InvalidYAML(t *testing.T) {
+	saveDeployFlags(t)
+
+	deployFile = writeTestManifest(t, ": [invalid yaml")
+	deployDryRun = true
+
+	err := runDeploy(deployCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+	if !strings.Contains(err.Error(), "failed to parse manifest") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDeploy_NoEngineConfig(t *testing.T) {
+	origConfig := configPath
+	t.Cleanup(func() { configPath = origConfig })
+	saveDeployFlags(t)
+
+	configPath = "/tmp/nonexistent-deploy-config.yaml"
+	deployFile = writeTestManifest(t, "name: my-app\nservices:\n  web:\n    image: nginx\n")
+	deployDryRun = false
+	deployNoWait = false
+
+	err := runDeploy(deployCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when no engine config")
+	}
+	if !strings.Contains(err.Error(), "engine endpoint not configured") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDeploy_ClientConnectFails(t *testing.T) {
+	origConfig := configPath
+	t.Cleanup(func() { configPath = origConfig })
+	saveDeployFlags(t)
+
+	// Config with engine endpoint but no EngineWGPublicKey
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+	cfg := types.BanyanConfig{
+		CLI: types.CLIConfig{
+			EngineHost:  "127.0.0.1",
+			EnginePort:  "50051",
+			WGPublicKey: "test-pubkey",
+		},
+	}
+	if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	configPath = cfgPath
+
+	deployFile = writeTestManifest(t, "name: my-app\nservices:\n  web:\n    image: nginx\n")
+	deployDryRun = false
+	deployNoWait = false
+
+	err := runDeploy(deployCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when client connect fails")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to engine") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestRunDeploy_WithServiceArgs(t *testing.T) {
+	addr, cleanup := setupCLITestTCPServer(t)
+	defer cleanup()
+	setupCLITestConfig(t, addr)
+	saveDeployFlags(t)
+
+	deployFile = writeTestManifest(t, "name: my-app\nservices:\n  web:\n    image: nginx:alpine\n  api:\n    image: node:18\n")
+	deployDryRun = false
+	deployNoWait = true
+	deployTags = nil
+
+	err := runDeploy(deployCmd, []string{"web"})
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
 	}
 }

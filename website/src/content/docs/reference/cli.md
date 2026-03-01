@@ -101,7 +101,7 @@ The wizard generates a WireGuard keypair and asks:
 1. **Engine host** — hostname or IP of the Banyan engine (e.g., `192.168.1.10`).
 2. **Engine gRPC port** — default `50051`.
 3. **Node name** — unique name for this worker (default: hostname).
-4. **Engine WireGuard public key** — displayed during `banyan-engine init` (optional, enables encrypted tunnel).
+4. **Engine WireGuard public key** — required, displayed during `banyan-engine init`.
 5. **Tags** — comma-separated tags for environment isolation (optional).
 
 After init, the agent's public key is displayed. Copy it to the engine's whitelisted keys directory. See [Authentication](/guides/authentication/) for details.
@@ -182,7 +182,7 @@ The wizard generates a WireGuard keypair and asks:
 1. **Engine host** — hostname or IP of the Banyan engine.
 2. **Engine gRPC port** — default `50051`.
 3. **CLI name** — unique name for this CLI client (default: `cli-<hostname>`).
-4. **Engine WireGuard public key** — displayed during `banyan-engine init` (optional, enables encrypted tunnel).
+4. **Engine WireGuard public key** — required, displayed during `banyan-engine init`.
 
 After init, the CLI's public key is displayed. Copy it to the engine's whitelisted keys directory. See [Authentication](/guides/authentication/) for details.
 

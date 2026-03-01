@@ -4,10 +4,16 @@ import (
 	"context"
 	"net"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
+	"github.com/fertile-org/banyan/pkg/types"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/test/bufconn"
 )
 
 func TestRunDown_NoConfig(t *testing.T) {
@@ -237,5 +243,185 @@ func TestFindLatestDeployment_WithTags(t *testing.T) {
 			t.Errorf("expected staging deployment d1, got %s", d.Id)
 		}
 	})
+}
+
+// downStatusServer returns a configurable deployment status for waitForDown tests.
+type downStatusServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	status string
+}
+
+func (s *downStatusServer) GetStatus(_ context.Context, _ *banyanpb.GetStatusRequest) (*banyanpb.GetStatusResponse, error) {
+	return &banyanpb.GetStatusResponse{
+		Deployments: []*banyanpb.DeploymentInfo{
+			{Name: "my-app", Status: s.status, CreatedAtUnix: time.Now().Unix()},
+		},
+	}, nil
+}
+
+func setupDownBufconnClient(t *testing.T, status string) *EngineClient {
+	t.Helper()
+	lis := bufconn.Listen(1024 * 1024)
+	srv := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(srv, &downStatusServer{status: status})
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+	t.Cleanup(func() { srv.Stop() })
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	return &EngineClient{
+		conn:   conn,
+		client: banyanpb.NewEngineServiceClient(conn),
+	}
+}
+
+func TestWaitForDown_Stopped(t *testing.T) {
+	origTags := downTags
+	t.Cleanup(func() { downTags = origTags })
+	downTags = nil
+
+	client := setupDownBufconnClient(t, types.StatusStopped)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := waitForDown(ctx, client, "my-app")
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestWaitForDown_Failed(t *testing.T) {
+	origTags := downTags
+	t.Cleanup(func() { downTags = origTags })
+	downTags = nil
+
+	client := setupDownBufconnClient(t, types.StatusFailed)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	err := waitForDown(ctx, client, "my-app")
+	if err == nil {
+		t.Fatal("expected error for failed down")
+	}
+	if !strings.Contains(err.Error(), "down failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestWaitForDown_Timeout(t *testing.T) {
+	origTags := downTags
+	t.Cleanup(func() { downTags = origTags })
+	downTags = nil
+
+	// Use StatusRunning so it never reaches stopped
+	client := setupDownBufconnClient(t, types.StatusRunning)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	err := waitForDown(ctx, client, "my-app")
+	if err == nil {
+		t.Fatal("expected timeout error")
+	}
+	if !strings.Contains(err.Error(), "timed out") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// stoppedDownTCPServer returns StatusStopped so runDown's wait path completes.
+type stoppedDownTCPServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+}
+
+func (s *stoppedDownTCPServer) Down(_ context.Context, _ *banyanpb.DownRPCRequest) (*banyanpb.DownRPCResponse, error) {
+	return &banyanpb.DownRPCResponse{TaskCount: 2}, nil
+}
+
+func (s *stoppedDownTCPServer) GetStatus(_ context.Context, _ *banyanpb.GetStatusRequest) (*banyanpb.GetStatusResponse, error) {
+	return &banyanpb.GetStatusResponse{
+		Deployments: []*banyanpb.DeploymentInfo{
+			{Name: "my-app", Status: types.StatusStopped, CreatedAtUnix: time.Now().Unix()},
+		},
+	}, nil
+}
+
+func (s *stoppedDownTCPServer) Health(_ context.Context, _ *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
+func TestRunDown_WaitComplete(t *testing.T) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	srv := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(srv, &stoppedDownTCPServer{})
+	go srv.Serve(lis)
+	t.Cleanup(func() { srv.Stop() })
+
+	setupCLITestConfig(t, lis.Addr().String())
+
+	origName := downName
+	origNoWait := downNoWait
+	origTags := downTags
+	t.Cleanup(func() {
+		downName = origName
+		downNoWait = origNoWait
+		downTags = origTags
+	})
+
+	downName = "my-app"
+	downNoWait = false // exercise the wait path
+	downTags = nil
+
+	err = runDown(downCmd, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestRunDown_ClientConnectFails(t *testing.T) {
+	origConfig := configPath
+	t.Cleanup(func() { configPath = origConfig })
+
+	// Config with engine endpoint but no EngineWGPublicKey
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+	cfg := types.BanyanConfig{
+		CLI: types.CLIConfig{
+			EngineHost:  "127.0.0.1",
+			EnginePort:  "50051",
+			WGPublicKey: "test-pubkey",
+			// No EngineWGPublicKey → NewAutoEngineClient fails
+		},
+	}
+	if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	configPath = cfgPath
+
+	origName := downName
+	t.Cleanup(func() { downName = origName })
+	downName = "my-app"
+
+	err := runDown(downCmd, nil)
+	if err == nil {
+		t.Fatal("expected error when client connect fails")
+	}
+	if !strings.Contains(err.Error(), "failed to connect to engine") {
+		t.Errorf("unexpected error: %v", err)
+	}
 }
 

@@ -18,9 +18,15 @@ import (
 var (
 	styleTitle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))
 	styleOK    = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	styleWarn  = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
 	styleInfo  = lipgloss.NewStyle().Foreground(lipgloss.Color("39"))
 	styleDim   = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+)
+
+// Function variables for tunnel operations, enabling test mocking.
+var (
+	setupControlTunnelFn   = overlay.SetupControlTunnelExec
+	addControlPeerFn       = overlay.AddControlPeerExec
+	cleanupControlTunnelFn = overlay.CleanupControlTunnelExec
 )
 
 var initCmd = &cobra.Command{
@@ -35,7 +41,7 @@ Configuration is written to /etc/banyan/banyan.yaml.
 After running init, whitelist the CLI public key on the engine.
 
 Run this once on any machine where you want to use banyan-cli commands
-(up, down, status, logs).
+(up, down, logs, dashboard, engine, agent, deployment, container, events).
 
 Example:
   sudo banyan-cli init`,
@@ -44,6 +50,17 @@ Example:
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+}
+
+// cliInitInputs holds the inputs collected from the init wizard.
+type cliInitInputs struct {
+	EngineHost     string
+	EnginePort     string
+	CLIName        string
+	EngineWGPubKey string
+	PrivKey        string
+	PubKey         string
+	KeysDir        string
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -116,7 +133,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 				Value(&cliName),
 			huh.NewInput().
 				Title("Engine WireGuard public key").
-				Description("Displayed during 'banyan-engine init' (optional, enables encrypted tunnel)").
+				Description("Required — displayed during 'banyan-engine init'").
 				Value(&engineWGPubKey),
 		),
 	)
@@ -128,8 +145,25 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cli config input: %w", err)
 	}
 
+	return applyCLIInit(&cliInitInputs{
+		EngineHost:     engineHost,
+		EnginePort:     enginePort,
+		CLIName:        cliName,
+		EngineWGPubKey: engineWGPubKey,
+		PrivKey:        privKey,
+		PubKey:         pubKey,
+		KeysDir:        types.DefaultKeysDir,
+	})
+}
+
+// applyCLIInit validates inputs, writes keys and config, and sets up the WireGuard tunnel.
+func applyCLIInit(inputs *cliInitInputs) error {
+	if inputs.EngineWGPubKey == "" {
+		return fmt.Errorf("engine WireGuard public key is required. Get it from the engine operator (displayed during 'banyan-engine init')")
+	}
+
 	// Write private key to file
-	keyPath, writeErr := types.WritePrivateKeyFile(types.DefaultKeysDir, "cli", privKey)
+	keyPath, writeErr := types.WritePrivateKeyFile(inputs.KeysDir, "cli", inputs.PrivKey)
 	if writeErr != nil {
 		return fmt.Errorf("failed to write private key: %w", writeErr)
 	}
@@ -138,45 +172,50 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Load existing config to preserve other sections (agent, engine)
 	cfg, _ := types.LoadConfig(configPath)
 	cfg.CLI = types.CLIConfig{
-		EngineHost:        engineHost,
-		EnginePort:        enginePort,
-		Name:              cliName,
+		EngineHost:        inputs.EngineHost,
+		EnginePort:        inputs.EnginePort,
+		Name:              inputs.CLIName,
 		WGPrivateKeyFile:  keyPath,
-		WGPublicKey:       pubKey,
-		EngineWGPublicKey: engineWGPubKey,
+		WGPublicKey:       inputs.PubKey,
+		EngineWGPublicKey: inputs.EngineWGPubKey,
 	}
 
 	if err := types.SaveConfig(configPath, &cfg); err != nil {
-		fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
-	} else {
-		fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
+		return fmt.Errorf("failed to save config: %w", err)
 	}
+	fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
 
-	// Set up WireGuard control tunnel (if engine public key provided)
-	if engineWGPubKey != "" {
-		myTunnelIP := types.TunnelIPFromPublicKey(pubKey)
-		fmt.Printf("\n  %s Setting up WireGuard control tunnel (%s)...\n", styleInfo.Render("[..]"), myTunnelIP)
-		engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
-		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceCLI, privKey, myTunnelIP, 0); tunnelErr != nil {
-			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure this runs with sudo and wireguard kernel module is loaded)", tunnelErr)
-		}
-		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
-		if peerErr := overlay.AddControlPeerExec(types.ControlIfaceCLI, engineWGPubKey, engineEndpointWG, engineIP); peerErr != nil {
-			_ = overlay.CleanupControlTunnelExec(types.ControlIfaceCLI)
-			return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
-		}
-		fmt.Printf("  %s Control tunnel ready (persists as kernel interface)\n", styleOK.Render("[OK]"))
+	// Set up WireGuard control tunnel
+	if err := setupCLITunnel(inputs); err != nil {
+		return err
 	}
 
 	// Display next steps for public key auth
 	fmt.Println()
 	fmt.Println(styleInfo.Render("To whitelist this CLI on the engine:"))
-	fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n", pubKey, cliName)
+	fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n", inputs.PubKey, inputs.CLIName)
 
 	fmt.Println()
 	fmt.Println(styleDim.Render("========================================"))
 	fmt.Println(styleOK.Render("Initialization complete!"))
 	fmt.Println()
 	fmt.Println(styleInfo.Render("You can now use: banyan-cli up, status, down, logs"))
+	return nil
+}
+
+// setupCLITunnel creates the WireGuard control tunnel to the engine.
+func setupCLITunnel(inputs *cliInitInputs) error {
+	myTunnelIP := types.TunnelIPFromPublicKey(inputs.PubKey)
+	fmt.Printf("\n  %s Setting up WireGuard control tunnel (%s)...\n", styleInfo.Render("[..]"), myTunnelIP)
+	engineEndpointWG := inputs.EngineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+	if tunnelErr := setupControlTunnelFn(types.ControlIfaceCLI, inputs.PrivKey, myTunnelIP, 0); tunnelErr != nil {
+		return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure this runs with sudo and wireguard kernel module is loaded)", tunnelErr)
+	}
+	engineIP := net.ParseIP(types.ControlTunnelEngineIP)
+	if peerErr := addControlPeerFn(types.ControlIfaceCLI, inputs.EngineWGPubKey, engineEndpointWG, engineIP); peerErr != nil {
+		_ = cleanupControlTunnelFn(types.ControlIfaceCLI)
+		return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
+	}
+	fmt.Printf("  %s Control tunnel ready (persists as kernel interface)\n", styleOK.Render("[OK]"))
 	return nil
 }

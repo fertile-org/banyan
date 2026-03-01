@@ -37,31 +37,37 @@ func NewEngineClient(engineAddr, publicKey string) (*EngineClient, error) {
 	}, nil
 }
 
-// NewAutoEngineClient creates a gRPC client using the best available auth method.
-// If a WireGuard control tunnel is active and engine WG public key is configured,
-// connects through the tunnel. Otherwise uses direct connection.
+// controlTunnelExistsFn is the function used to check if the WireGuard control tunnel
+// kernel interface exists. Extracted as a package-level variable for test mocking.
+var controlTunnelExistsFn = overlay.ControlTunnelExists
+
+// controlTunnelEngineIP is the engine IP used when connecting through the control tunnel.
+// Extracted as a package-level variable for test mocking.
+var controlTunnelEngineIP = types.ControlTunnelEngineIP
+
+// NewAutoEngineClient creates a gRPC client that connects through the WireGuard control tunnel.
+// Requires both a WireGuard keypair and the engine's WG public key to be configured.
 func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
 	cfg, _ := types.LoadConfig(configPath)
 
 	if cfg.CLI.WGPublicKey == "" {
-		return nil, fmt.Errorf("no authentication configured. Run 'banyan-cli init'")
+		return nil, fmt.Errorf("no authentication configured. Run 'sudo banyan-cli init'")
 	}
 
-	// If engine WG public key is configured, require the control tunnel to be active
-	if cfg.CLI.EngineWGPublicKey != "" {
-		if !overlay.ControlTunnelExists(types.ControlIfaceCLI) {
-			return nil, fmt.Errorf("WireGuard control tunnel (wg-control) is not active. Run 'sudo banyan-cli init' to set it up")
-		}
-		port := "50051"
-		if cfg.CLI.EnginePort != "" {
-			port = cfg.CLI.EnginePort
-		}
-		tunnelAddr := types.ControlTunnelEngineIP + ":" + port
-		return NewEngineClient(tunnelAddr, cfg.CLI.WGPublicKey)
+	if cfg.CLI.EngineWGPublicKey == "" {
+		return nil, fmt.Errorf("engine WireGuard public key not configured. Run 'sudo banyan-cli init' and provide the engine's public key")
 	}
 
-	// No engine WG public key — direct connection with public key metadata auth
-	return NewEngineClient(engineAddr, cfg.CLI.WGPublicKey)
+	if !controlTunnelExistsFn(types.ControlIfaceCLI) {
+		return nil, fmt.Errorf("WireGuard control tunnel (wg-control) is not active. Run 'sudo banyan-cli init' to set it up")
+	}
+
+	port := "50051"
+	if cfg.CLI.EnginePort != "" {
+		port = cfg.CLI.EnginePort
+	}
+	tunnelAddr := controlTunnelEngineIP + ":" + port
+	return NewEngineClient(tunnelAddr, cfg.CLI.WGPublicKey)
 }
 
 // Close closes the gRPC connection.

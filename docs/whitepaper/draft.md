@@ -37,18 +37,18 @@ This paper looks honestly at the container orchestration landscape — where Kub
    - [Open Source, Fully and Forever](#9-open-source-fully-and-forever)
 3. [The Architecture: How Complexity Disappears](#part-iii-what--technical-architecture)
    - [The Engine-Agent Model](#10-the-engine-agent-model)
-   - [Overlay Networking](#11-overlay-networking--encryption-by-default)
-   - [Service Discovery](#12-service-discovery--dns-without-configuration)
+   - [Overlay Networking](#11-overlay-networking--encrypted-by-default)
+   - [Service Discovery](#12-service-discovery--dns-not-a-service-mesh)
    - [Cross-Host Load Balancing](#13-cross-host-load-balancing)
    - [Zero-Downtime Deployment](#14-zero-downtime-deployment)
-   - [Security](#15-security-model)
+   - [Security](#15-security)
    - [Observability](#16-observability)
 4. [Honest Assessment](#part-iv-honest-assessment)
    - [When to Use Banyan](#17-when-to-use-banyan)
    - [When NOT to Use Banyan](#18-when-not-to-use-banyan)
    - [Current Limitations](#19-current-limitations)
    - [Roadmap](#20-roadmap)
-5. [Getting Started](#part-v-getting-started)
+5. [Try Banyan](#try-banyan)
 6. [References](#references)
 
 ---
@@ -372,194 +372,53 @@ This isn't charity — it's a deliberate choice. The people Banyan is built for 
 
 ## Part III: WHAT — Technical Architecture
 
-This section covers how Banyan actually works — the design decisions and their rationale. The focus is on architecture, not code.
+This section covers how Banyan works at a high level — the key design decisions and why they were made.
 
 ### 10. The Engine-Agent Model
 
-#### Engine (Control Plane)
+The engine is a single process that bundles four things you'd normally set up separately: a state store (etcd, embedded — you never touch it), a container registry (for `build:` directives — no Docker Hub needed), a gRPC server, and an orchestration loop that runs every 3 seconds.
 
-The engine is a single process with four components:
+Each server runs one agent. Agents are **pull-based** — they poll the engine for tasks every 2 seconds, send heartbeats every 15 seconds, and check container health every 10 seconds. If the network drops, agents just keep polling until it's back. No message queue, no callback infrastructure.
 
-1. **Embedded state store** — etcd under the hood. You don't install, configure, or manage it. The engine handles everything internally.
-2. **Embedded container registry** — receives images built by agents (from `build:` directives) and serves them to all agents. No Docker Hub account needed, no private registry to set up.
-3. **gRPC server** — handles communication with agents and the CLI.
-4. **Orchestration loop** — runs every 3 seconds, processing deployments through a state machine: `pending` → `deploying` → `running` (or `failed`), and `stopping` → `stopped`.
+Containers run through containerd (via nerdctl), not the Docker daemon. If the agent crashes and restarts, running containers are unaffected — they're independent processes.
 
-State is stored under a simple key schema:
-- `/banyan/deployments/<id>` — deployment records
-- `/banyan/nodes/<name>` — agent records
-- `/banyan/tasks/<agent-name>/<task-id>` — container tasks
+### 11. Overlay Networking — Encrypted by Default
 
-Each agent's tasks live under its own prefix. When an agent polls, it reads only its own slice — so polling scales cleanly regardless of cluster size.
+Containers on different hosts need to talk to each other. Banyan creates a virtual overlay network with zero configuration.
 
-#### Agent (Data Plane)
+The engine allocates each agent a /24 subnet. The overlay uses **WireGuard** — encrypted at the kernel level with roughly 4% overhead. Compare that to Docker Swarm's IPsec, which adds 10%+ overhead (and [much worse in practice](https://github.com/moby/moby/issues/33133)).
 
-Each server runs one agent. It connects to the engine and starts three concurrent loops:
+Peer discovery piggybacks on the heartbeat that already exists — no gossip protocol, no Consul. A new agent becomes reachable within about 15 seconds.
 
-- **Task polling** (every 2 seconds) — pulls pending tasks and executes them (start container, stop container)
-- **Heartbeat** (every 15 seconds) — sends system metrics (CPU, memory, disk), gets back peer lists and service backends
-- **Health monitoring** (every 10 seconds) — checks container status, reports to engine, updates local DNS
+You don't choose a CNI, configure subnets, or manage peers. Containers across hosts just talk to each other.
 
-The agent runs containers through `nerdctl`, the containerd CLI. No Docker daemon dependency. Containers run as containerd processes, independent of the agent — if the agent crashes and restarts, running containers keep going.
+### 12. Service Discovery — DNS, Not a Service Mesh
 
-#### Communication
+Each agent runs its own DNS server. The engine distributes all running service backends to every agent through the heartbeat, so each agent has a complete, cluster-wide view. When a container queries `db`, its local agent's DNS resolves it to the actual container IP — which might be on a completely different host. The overlay network (WireGuard) carries the traffic there directly. Only healthy containers appear in DNS responses.
 
-Five agent-facing RPCs handle all engine communication:
-
-| RPC | Purpose |
-|-----|---------|
-| `Register` | Agent joins cluster; gets registry URL, subnet, list of existing containers |
-| `Heartbeat` | Agent sends metrics; gets VPC peers and service backends |
-| `PollTasks` | Agent pulls its pending tasks |
-| `ReportTaskResult` | Agent reports task success or failure |
-| `ReportContainerHealth` | Agent reports container status and IPs |
-
-Three CLI-facing RPCs handle user operations:
-
-| RPC | Purpose |
-|-----|---------|
-| `Deploy` | Submit a manifest, get a deployment ID |
-| `Down` | Stop a deployment |
-| `GetDashboardData` | Full cluster snapshot for the terminal dashboard |
-
-The key design choice: agents are **pull-based**. They poll the engine for work rather than receiving push commands. If the network blips, agents just keep polling until it's back. No message queue, no callback registry, no webhook infrastructure. Simple and resilient.
-
-### 11. Overlay Networking — Encryption by Default
-
-When containers run on different hosts, they need to talk to each other as if they're on the same network. That requires an overlay — a virtual network spanning physical hosts.
-
-Banyan sets this up with zero user configuration.
-
-#### How It Works
-
-The engine has a `SubnetAllocator` that carves /24 subnets from a VPC CIDR (e.g., `10.0.0.0/16`). Each agent gets its own /24 (e.g., `10.0.45.0/24`), giving 254 container IPs per agent. Allocation is idempotent — re-registering gets the same subnet.
-
-Two overlay drivers:
-
-**WireGuard (default):** Creates a `banyan-wg` interface using kernel WireGuard. Each agent has a keypair. Traffic is encrypted with minimal overhead — WireGuard's kernel-space implementation adds roughly 4% overhead, compared to IPsec's 10%+ in theory (and often much worse in practice, as Swarm users have found).
-
-**VXLAN (fallback):** Standard Linux kernel VXLAN with deterministic MAC addresses calculated from subnet IPs. No MAC exchange needed between agents.
-
-Both use a shared bridge (`banyan0`). Containers connect through standard CNI bridge plugin with host-local IPAM.
-
-#### Peer Discovery
-
-Instead of running a gossip protocol or a separate service mesh for peer discovery, Banyan piggybacks peer information on the heartbeat RPC that already exists. The engine tracks each agent's subnet, host IP, and WireGuard public key. Every heartbeat response includes all peers (except the requesting agent). The agent updates its routing tables accordingly.
-
-New peer convergence: about **15 seconds** (one heartbeat cycle). All operations are idempotent — safe to repeat every heartbeat.
-
-#### What You Experience
-
-Nothing. You don't choose a CNI, configure an overlay, allocate subnets, or manage peers. Containers across hosts talk to each other. Traffic is encrypted. That's it.
-
-Compare this to Kubernetes, where the CNI decision alone means evaluating Calico (BGP knowledge helpful), Cilium (eBPF debugging skills helpful), or Flannel (simple but no network policies). Banyan makes the choice — WireGuard, VXLAN fallback — and handles it.
-
-### 12. Service Discovery — DNS Without Configuration
-
-#### How It Works
-
-Each agent runs a small DNS server on its bridge gateway IP (e.g., `10.0.45.1:53`). When a container starts, it's configured to use that DNS server and to search the `.internal` domain.
-
-Two kinds of queries:
-
-1. **Internal** (`.internal` domain): Resolved from an in-memory map of service names → container IPs
-2. **External**: Forwarded to upstream DNS
-
-#### Registration
-
-DNS entries come from two sources:
-
-1. **Local, immediate**: When a container starts on an agent, that agent registers `<service-name>.internal` → `<container-IP>` right away. Local containers resolve instantly.
-2. **Cluster-wide, via heartbeat**: The engine collects all running backends. Every heartbeat response includes all of them. Each agent rebuilds its DNS entries — adding new ones, removing stale ones.
-
-TTL is 60 seconds. Only healthy containers appear in DNS responses.
-
-#### What You Experience
-
-You write `db` in your app's database connection string. It resolves. No Consul, no CoreDNS to configure, no service mesh, no `my-service.my-namespace.svc.cluster.local`. Just the service name.
+No Consul, no CoreDNS configuration, no `my-service.my-namespace.svc.cluster.local`. Just the service name.
 
 ### 13. Cross-Host Load Balancing
 
-When a service has replicas on different hosts, traffic should spread across all of them. Banyan does this using the same approach as Kubernetes' kube-proxy: iptables DNAT rules with probability-based distribution.
+DNS handles container-to-container traffic within the overlay. But for **published ports** (external traffic hitting a host), Banyan writes iptables DNAT rules on every agent — the same probability-based approach Kubernetes' kube-proxy uses. The Linux kernel handles all packet forwarding; no userspace proxy in the path.
 
-#### The Flow
-
-1. Agent starts a container, gets its IP
-2. Agent reports the IP to the engine in its health check
-3. Engine collects all backends for each service
-4. Engine sends all backends back in every heartbeat
-5. Each agent writes iptables DNAT rules for both local and remote backends
-
-For N backends, probability-based rules achieve uniform random distribution. The Linux kernel handles all packet forwarding — no userspace proxy sitting in the path.
-
-**Convergence:** Local is immediate. Remote takes about **25 seconds** (health check + heartbeat).
-
-#### What You Experience
-
-You set `replicas: 3` and traffic spreads across all three, no matter which servers they're on.
+You set `replicas: 3` and traffic spreads across all three, regardless of which servers they're on.
 
 ### 14. Zero-Downtime Deployment
 
-Banyan defaults to **blue-green** deployment. You just run `banyan up` again.
+Banyan defaults to **blue-green** deployment. Run `banyan up` again and new containers start alongside old ones (no port conflicts — iptables handles the mapping). Once the new deployment is healthy, the old one is torn down. If the new deployment fails, the old one stays running.
 
-#### The Flow
+No strategy flags, no rollout configuration. You run the same command; blue-green happens internally.
 
-1. You run `banyan up` with an updated manifest
-2. Engine sees there's already a running deployment with the same name
-3. New containers start alongside old ones — no port conflicts because the iptables proxy handles mapping at the kernel level
-4. Engine waits until all new containers are healthy
-5. Old containers get stop signals
-6. If the new deployment fails, the old one stays running
+### 15. Security
 
-That last point is deliberate. A half-broken automatic rollback is worse than a known-good old deployment plus a known-bad new one you can look at and fix.
-
-When you deploy a subset of services (say, updating the API but not the database), services not in the new manifest are "adopted" — their records transfer to the new deployment so they keep running untouched.
-
-#### What You Experience
-
-You run the same command again. No strategy flags, no rollout objects, no configuration. Blue-green happens internally.
-
-### 15. Security Model
-
-#### Control Plane Encryption
-
-A separate WireGuard interface (`wg-control`, port 51821) encrypts all gRPC traffic between engine, agents, and CLI. This is distinct from the data plane overlay.
-
-The engine gets a fixed IP (`10.200.0.1`). Agents and CLI get deterministic IPs derived from their WireGuard public key.
-
-#### Authentication
-
-Two layers:
-
-1. **Public key auth**: Agents and CLI attach their WireGuard public key as gRPC metadata. The engine checks it against a whitelist set up during init.
-2. **Session tokens**: For engine-to-agent calls (like log streaming). Agents generate a random 32-byte token at startup and pass it to the engine during registration.
-
-#### What You Experience
-
-You paste a public key during `banyan init`. Everything is encrypted and authenticated from there. No certificates to manage, no CA to run, no TLS termination to configure.
+All gRPC traffic (engine ↔ agents ↔ CLI) is encrypted through a dedicated WireGuard control tunnel, separate from the data plane overlay. Authentication uses a public key whitelist — you paste a key during `banyan init`, and everything is encrypted and authenticated from there. No certificates to manage, no CA to operate.
 
 ### 16. Observability
 
-#### Terminal Dashboard
+A live terminal dashboard (`banyan-cli dashboard`) shows your cluster across six views: overview, agents, deployments, containers, engine metrics, and events. Updates every 5 seconds. No Grafana, no browser, no config files.
 
-A live terminal UI (built with Bubbletea) with six views:
-
-- **Overview** — cluster summary at a glance
-- **Agents** — server status, CPU, memory, disk
-- **Deploys** — deployment status and history
-- **Containers** — running containers across all agents
-- **Engine** — engine process metrics
-- **Events** — lifecycle events (deploys, registrations, failures)
-
-Updates every 5 seconds. Vim-style keyboard navigation, filtering, CSV export.
-
-No browser needed. No Grafana. Run `banyan-cli dashboard` and see your cluster.
-
-#### Prometheus Metrics
-
-The engine exposes a Prometheus-compatible endpoint on port 9090. Metrics cover engine uptime, RPC counts, agent health, container status, deployment replicas — all prefixed with `banyan_`.
-
-If you already run Prometheus and Grafana, Banyan plugs in. If you don't, the terminal dashboard gives you observability out of the box.
+The engine also exposes a Prometheus-compatible metrics endpoint, so if you already run Prometheus, Banyan plugs right in.
 
 ---
 
@@ -600,8 +459,8 @@ We'd rather be upfront about what Banyan can't do yet than have you find out the
 - **No volume support yet.** Persistent storage isn't implemented. For now, stateful services like databases can use placement constraints to pin to a specific agent, or use external managed databases. Distributed volume support is on the roadmap.
 - **No autoscaling.** Replica counts are manual. Metric-based scaling is on the roadmap.
 - **Single engine = single point of failure.** If the engine goes down, running containers keep going (they're independent containerd processes), but no new deploys or rescheduling happen until it's back. Multi-engine HA is planned.
-- **No RBAC/ABAC.** Access control is public key whitelisting only. Role-based access is coming.
-- **No secrets management yet.** Environment variables are in plaintext in the manifest. Encrypted secrets are in active development.
+- **No access control beyond key whitelisting.** ABAC (attribute-based access control) is coming.
+- **No secrets management yet.** Environment variables work the same way as Docker Compose (in the manifest YAML, or via `env_file`), but there's no encrypted secrets store like Docker Swarm secrets or Vault. Built-in secrets management is on the roadmap.
 - **L4 proxy only.** iptables handles TCP/UDP forwarding. Path-based routing, TLS termination, header routing need an external reverse proxy (Nginx, Traefik).
 - **No session affinity.** Traffic distributes randomly. Sticky sessions are planned.
 - **No network policies.** All containers in the overlay can reach all others. Segmentation is planned.
@@ -627,30 +486,9 @@ We'd rather be upfront about what Banyan can't do yet than have you find out the
 
 ---
 
-## Part V: Getting Started
+## Try Banyan
 
-Three commands to a running cluster:
-
-**1. Start the engine** (control plane server):
-```bash
-curl -fsSL https://get.getbanyan.dev | sh
-banyan-engine init
-banyan-engine start
-```
-
-**2. Start an agent** (each worker server):
-```bash
-curl -fsSL https://get.getbanyan.dev | sh
-banyan-agent init
-banyan-agent start
-```
-
-**3. Deploy** (from any machine with the CLI):
-```bash
-banyan-cli up -f docker-compose.yml
-```
-
-Your Docker Compose file — or something very close to it. Distributed across your servers.
+If you'd like to try Banyan, head to [getbanyan.dev](https://getbanyan.dev) — installation, quickstart, and documentation are all there.
 
 ---
 

@@ -132,6 +132,17 @@ Run Banyan without root. Today every component needs `sudo` — the engine to ma
 
 ---
 
+## Milestone 5.1 — Environment File Support
+
+Support `env_file` directive in the manifest, matching Docker Compose behavior.
+
+- **`env_file` directive**: Reference `.env` files in the manifest (e.g., `env_file: .env` or `env_file: [.env, .env.local]`)
+- **Variable loading**: Read key-value pairs from `.env` files and inject as container environment variables
+- **File distribution**: Bundle referenced `.env` files with the manifest so agents can resolve them
+- **Compose parity**: Support both string and list forms, matching Docker Compose syntax
+
+---
+
 ## Milestone 6 — Health-Based Scheduling and Resource Requests
 
 Smarter task distribution based on node resources instead of simple round-robin.

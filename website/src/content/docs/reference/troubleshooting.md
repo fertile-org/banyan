@@ -116,13 +116,13 @@ If this fails, the worker may not have internet access or the image registry may
 
 The Engine is waiting for Agents to complete their tasks. Check:
 
-1. Are agents connected? Run `banyan-cli status`.
+1. Are agents connected? Run `banyan-cli agent`.
 2. Check agent logs for errors in the terminal where `agent start` is running.
 3. Verify agents can pull the images specified in your manifest.
 
 ### Deployment fails immediately
 
-Check the error message in `banyan-cli status`. Common causes:
+Check the error message in `banyan-cli deployment`. Common causes:
 
 - **Image not found**: The image name in `banyan.yaml` is wrong or the registry is unreachable from workers.
 - **Port conflict**: Another container is already using the same host port.
@@ -134,7 +134,7 @@ The `up` command waits up to 2 minutes by default. If your images are large, the
 ```bash
 banyan-cli up -f banyan.yaml --no-wait
 # Check later:
-banyan-cli status
+banyan-cli deployment
 ```
 
 ### Redeployment doesn't replace old containers
@@ -142,14 +142,14 @@ banyan-cli status
 When you run `banyan-cli up` again, Banyan should automatically replace old containers using a blue-green strategy. If old containers aren't being replaced:
 
 1. Check that the application name in `banyan.yaml` matches the running deployment. The name must be identical for Banyan to recognize it as a redeployment.
-2. If the old deployment is in `stopping` or `deploying` state, the Engine waits for it to finish before scheduling the new one. Check `banyan-cli status` and wait a few seconds.
+2. If the old deployment is in `stopping` or `deploying` state, the Engine waits for it to finish before scheduling the new one. Check `banyan-cli deployment` and wait a few seconds.
 3. If a previous redeployment failed, the old containers stay running. Fix the issue and run `banyan-cli up` again — it will retry the replacement.
 
 ### Old containers still running after redeployment
 
 During blue-green redeployment, old containers run alongside new ones until the new deployment is confirmed healthy. This overlap is expected and usually lasts a few seconds. If old containers persist:
 
-1. The new deployment may have failed. Check `banyan-cli status` for the deployment status and error message.
+1. The new deployment may have failed. Check `banyan-cli deployment` for the deployment status and error message.
 2. If the new deployment failed, old containers are intentionally kept running to avoid downtime. Fix the issue and redeploy.
 
 See [Redeployment](/guides/redeployment/) for details on how blue-green and per-service deploys work.
@@ -181,7 +181,7 @@ sudo banyan-engine start
 sudo banyan-agent start --node-name <name>
 ```
 
-The `banyan-cli up` and `banyan-cli status` commands do not require root (but `banyan-cli init` does, to write `/etc/banyan/banyan.yaml`).
+The `banyan-cli up` and resource commands (`engine`, `agent`, `deployment`, `container`, `events`) do not require root (but `banyan-cli init` does, to write `/etc/banyan/banyan.yaml`).
 
 ### Checking logs
 

@@ -5,6 +5,8 @@ date: 2025-02-28
 author: "Banyan Team"
 ---
 
+> **Note:** This white paper is based on publicly available research, documentation, and the authors' opinions as of March 2026. It may contain inaccuracies or become outdated as the tools and projects discussed continue to evolve. We welcome corrections — please [open an issue](https://github.com/fertile-org/banyan/issues) if you spot something wrong.
+
 ## Abstract
 
 Most teams today use containers. And for most of them, Docker Compose is where it starts — a YAML file, a few services, `docker compose up`, done. It works great on one machine.

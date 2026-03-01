@@ -174,18 +174,28 @@ Banyan deploys containers but does not manage application-level networking betwe
 
 ### Permission errors
 
-Engine and Agent commands need root access because they manage system services (data store, containerd):
+The engine and agent require `sudo` for all commands — they manage network interfaces, iptables rules, and containers:
 
 ```bash
-sudo banyan-engine start
-sudo banyan-agent start --node-name <name>
+sudo banyan-engine init
+sudo systemctl enable --now banyan-engine
+
+sudo banyan-agent init
+sudo systemctl enable --now banyan-agent
 ```
 
-The `banyan-cli up` and resource commands (`engine`, `agent`, `deployment`, `container`, `events`) do not require root (but `banyan-cli init` does, to write `/etc/banyan/banyan.yaml`).
+The CLI only needs `sudo` for `init` (to create the WireGuard control tunnel). All other CLI commands (`up`, `down`, `engine`, `agent`, `deployment`, `container`, `events`, `logs`, `dashboard`) run as your normal user.
 
 ### Checking logs
 
-Engine and Agent run in the foreground and print logs to stdout. Check the terminal where they are running.
+When running as a systemd service, use `journalctl`:
+
+```bash
+sudo journalctl -u banyan-engine -f   # engine logs
+sudo journalctl -u banyan-agent -f    # agent logs
+```
+
+When running in the foreground (`sudo banyan-engine start`), logs print to stdout.
 
 Etcd logs:
 - Managed etcd: Logs are printed to stdout alongside the engine output.

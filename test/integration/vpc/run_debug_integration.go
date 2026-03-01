@@ -395,8 +395,8 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 	// Step 7: Test multi-hop trace scenarios
 	p.Step("Testing complex trace scenarios")
 
-	// Test cross-subnet connection (should have gateway + VXLAN hops)
-	p.Info("Testing cross-subnet connection (gateway + VXLAN)")
+	// Test cross-subnet connection (should have gateway + WireGuard hops)
+	p.Info("Testing cross-subnet connection (gateway + WireGuard)")
 	multiHopResult, multiHopErr := manager.TraceConnection(ctx,
 		net.ParseIP("10.0.1.5"),
 		net.ParseIP("10.0.3.10"),
@@ -412,18 +412,18 @@ func runTest(ctx context.Context, p *helpers.Printer) int {
 		return 1
 	}
 
-	hasVXLAN := false
+	hasWireGuard := false
 	for _, hop := range multiHopResult.Hops {
-		if hop.Type == "vxlan" {
-			hasVXLAN = true
+		if hop.Type == "wireguard" {
+			hasWireGuard = true
 			break
 		}
 	}
-	if !hasVXLAN {
-		p.Error("Expected VXLAN hop for cross-subnet connection")
+	if !hasWireGuard {
+		p.Error("Expected WireGuard hop for cross-subnet connection")
 		return 1
 	}
-	p.Success(fmt.Sprintf("Cross-subnet trace: %d hops including VXLAN tunnel", len(multiHopResult.Hops)))
+	p.Success(fmt.Sprintf("Cross-subnet trace: %d hops including WireGuard tunnel", len(multiHopResult.Hops)))
 
 	// Step 8: Test input validation
 	p.Step("Testing input validation")

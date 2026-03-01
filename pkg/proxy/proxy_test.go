@@ -8,7 +8,9 @@ import (
 )
 
 func init() {
-	// Override sysctl writer in tests to avoid requiring /proc/sys access
+	// Override sysctl reader/writer in tests to avoid requiring /proc/sys access.
+	// Reader returns "0" so ensureSysctl will attempt to write (testing the write path).
+	sysctlReader = func(path string) (string, error) { return "0", nil }
 	sysctlWriter = func(path, value string) error { return nil }
 }
 
@@ -53,12 +55,18 @@ func TestProxyInit(t *testing.T) {
 
 func TestProxyInit_EnablesSysctls(t *testing.T) {
 	written := make(map[string]string)
+	origReader := sysctlReader
 	origWriter := sysctlWriter
+	// Return "0" so ensureSysctl attempts to write
+	sysctlReader = func(path string) (string, error) { return "0", nil }
 	sysctlWriter = func(path, value string) error {
 		written[path] = value
 		return nil
 	}
-	defer func() { sysctlWriter = origWriter }()
+	defer func() {
+		sysctlReader = origReader
+		sysctlWriter = origWriter
+	}()
 
 	mock := newMockIPTables()
 	p, err := NewWithIPTables(mock)
@@ -75,12 +83,45 @@ func TestProxyInit_EnablesSysctls(t *testing.T) {
 	}
 }
 
-func TestProxyInit_SysctlError(t *testing.T) {
+func TestProxyInit_SysctlAlreadySet(t *testing.T) {
+	origReader := sysctlReader
 	origWriter := sysctlWriter
+	writeCalled := false
+	// Reader returns "1" so ensureSysctl should NOT write
+	sysctlReader = func(path string) (string, error) { return "1", nil }
+	sysctlWriter = func(path, value string) error {
+		writeCalled = true
+		return nil
+	}
+	defer func() {
+		sysctlReader = origReader
+		sysctlWriter = origWriter
+	}()
+
+	mock := newMockIPTables()
+	p, err := NewWithIPTables(mock)
+	if err != nil {
+		t.Fatalf("failed to create proxy: %v", err)
+	}
+	defer p.Close()
+
+	if writeCalled {
+		t.Error("sysctl writer should not be called when values are already correct")
+	}
+}
+
+func TestProxyInit_SysctlError(t *testing.T) {
+	origReader := sysctlReader
+	origWriter := sysctlWriter
+	// Reader returns wrong value so ensureSysctl tries to write, which fails
+	sysctlReader = func(path string) (string, error) { return "0", nil }
 	sysctlWriter = func(path, value string) error {
 		return fmt.Errorf("permission denied")
 	}
-	defer func() { sysctlWriter = origWriter }()
+	defer func() {
+		sysctlReader = origReader
+		sysctlWriter = origWriter
+	}()
 
 	mock := newMockIPTables()
 	_, err := NewWithIPTables(mock)

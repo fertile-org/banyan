@@ -11,34 +11,8 @@ import (
 // ExecLinkOps implements LinkOperations using exec.Command calls to ip/bridge.
 type ExecLinkOps struct{}
 
-func (e *ExecLinkOps) CreateVXLAN(name string, vni int, port int, srcIP net.IP) error {
-	if err := runCmd("ip", "link", "add", name,
-		"type", "vxlan",
-		"id", fmt.Sprintf("%d", vni),
-		"dstport", fmt.Sprintf("%d", port),
-		"local", srcIP.String(),
-		"nolearning",
-	); err != nil {
-		return err
-	}
-
-	// Disable TX checksum offloading to prevent incorrect inner checksums
-	// in VXLAN-encapsulated TCP packets. Without this, the kernel leaves
-	// inner TCP checksums incomplete (expecting NIC hardware offload), but
-	// the VXLAN encapsulation prevents the NIC from computing them. The
-	// receiving side silently drops packets with bad checksums.
-	// See: Flannel #1279, Calico #3145.
-	_ = runCmd("ethtool", "-K", name, "tx-checksum-ip-generic", "off")
-
-	return nil
-}
-
 func (e *ExecLinkOps) CreateBridge(name string) error {
 	return runCmd("ip", "link", "add", name, "type", "bridge")
-}
-
-func (e *ExecLinkOps) SetLinkMaster(slave, master string) error {
-	return runCmd("ip", "link", "set", slave, "master", master)
 }
 
 func (e *ExecLinkOps) SetLinkUp(name string) error {
@@ -59,14 +33,6 @@ func (e *ExecLinkOps) AddRoute(dst net.IPNet, gw net.IP, dev string) error {
 	// the VTEP gateway IP (e.g., 10.0.1.1) is on a different /24 than the
 	// bridge's own subnet (e.g., 10.0.0.0/24).
 	return runCmd("ip", "route", "replace", dst.String(), "via", gw.String(), "dev", dev, "onlink")
-}
-
-func (e *ExecLinkOps) AddFDBEntry(mac net.HardwareAddr, ip net.IP, dev string) error {
-	return runCmd("bridge", "fdb", "append", mac.String(), "dev", dev, "dst", ip.String())
-}
-
-func (e *ExecLinkOps) AddARPEntry(ip net.IP, mac net.HardwareAddr, dev string) error {
-	return runCmd("ip", "neigh", "replace", ip.String(), "lladdr", mac.String(), "dev", dev, "nud", "permanent")
 }
 
 func (e *ExecLinkOps) DeleteLink(name string) error {

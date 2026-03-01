@@ -128,12 +128,14 @@ One-time setup on each machine:
 
 ```bash
 # Control plane
-sudo banyan-engine init && sudo banyan-engine start
+sudo banyan-engine init
+sudo systemctl enable --now banyan-engine
 
 # Each worker
-sudo banyan-agent init && sudo banyan-agent start
+sudo banyan-agent init
+sudo systemctl enable --now banyan-agent
 
-# Your deploy machine
+# Your deploy machine (no sudo after init)
 sudo banyan-cli init
 ```
 

@@ -12,25 +12,29 @@ Haven't installed yet? Start with [Installation](/getting-started/installation/)
 ## 1. Start the Engine
 
 ```bash
-sudo banyan-engine init
+sudo banyan-engine init    # one-time setup + interactive wizard
 sudo banyan-engine start
 ```
+
+`init` runs once. It creates `/etc/banyan/` directories, enables IP forwarding, and walks you through the setup wizard. Both `init` and `start` require `sudo` because the engine manages network interfaces and system services.
 
 The init wizard asks for:
 - **Etcd setup** — pick **Managed** (recommended). Banyan runs the data store for you, nothing to configure.
 
 During init, Banyan generates a WireGuard keypair for the engine and creates the whitelisted keys directory at `/etc/banyan/whitelisted-keys/`. The engine's **public key** is displayed — save it if you plan to enable encrypted control tunnels on agents and CLI (see [Authentication](/guides/authentication/#wireguard-control-tunnel)).
 
-The Engine runs in the foreground. Open a new terminal for the next steps.
+The Engine runs in the foreground so you can see its logs. Open a new terminal for the next steps. In production, use `sudo systemctl enable --now banyan-engine` to run as a background service instead.
 
 ## 2. Start an Agent
 
 In a second terminal:
 
 ```bash
-sudo banyan-agent init
+sudo banyan-agent init     # one-time setup + interactive wizard
 sudo banyan-agent start
 ```
+
+`init` runs once. It creates config directories, enables IP forwarding, and walks you through the setup wizard. Both `init` and `start` require `sudo` because the agent manages network interfaces and containers.
 
 The init wizard asks for:
 - **Engine host** — `localhost` for single-machine setup.
@@ -47,7 +51,7 @@ In a third terminal:
 sudo banyan-cli init
 ```
 
-The wizard asks for engine host and port. It generates a WireGuard keypair and displays whitelisting instructions. After init, verify the cluster:
+The wizard asks for engine host and port. It generates a WireGuard keypair and displays whitelisting instructions. `init` is the only CLI command that needs `sudo` (to create the WireGuard tunnel). After init, all commands run as your normal user:
 
 ```bash
 banyan-cli engine
@@ -210,7 +214,7 @@ sudo banyan-engine stop
 3. The **Agent** pulled images and started containers using containerd.
 4. The CLI waited until all containers reported healthy, then showed success.
 
-Your `banyan.yaml` didn't reference any specific servers. When you add more workers — run `banyan-agent init` on another machine, whitelist its public key on the engine, then `banyan-agent start` — Banyan distributes containers across all of them automatically. **The manifest doesn't change.**
+Your `banyan.yaml` didn't reference any specific servers. When you add more workers — run `sudo banyan-agent init` on another machine, whitelist its public key on the engine, then `sudo banyan-agent start` — Banyan distributes containers across all of them automatically. **The manifest doesn't change.**
 
 ## Next steps
 

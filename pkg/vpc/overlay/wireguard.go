@@ -114,7 +114,7 @@ func (d *WireGuardDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net
 }
 
 // ReconcilePeers configures WireGuard peers and adds routes for their subnets.
-// WireGuard handles encryption at L3 — no FDB or ARP entries needed (unlike VXLAN).
+// WireGuard handles encryption at L3 — no FDB or ARP entries needed.
 func (d *WireGuardDriver) ReconcilePeers(ctx context.Context, peers []Peer) error {
 	for _, peer := range peers {
 		peerKey := peer.Subnet.String()
@@ -141,7 +141,7 @@ func (d *WireGuardDriver) ReconcilePeers(ctx context.Context, peers []Peer) erro
 }
 
 // WriteCNIConfig writes the CNI configuration for nerdctl to use the banyan bridge.
-// Same as VXLAN — containers still connect to the bridge via CNI.
+// Containers connect to the bridge via CNI; WireGuard handles cross-host routing.
 func (d *WireGuardDriver) WriteCNIConfig(subnet net.IPNet) error {
 	config := cniConfigData{
 		CNIVersion:  "0.3.1",

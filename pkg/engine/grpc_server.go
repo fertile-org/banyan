@@ -28,7 +28,6 @@ type engineGRPCServer struct {
 	sessions        sync.Map // map[agentName]sessionToken
 	registryURL     string
 	whitelistedKeys map[string]string        // publicKey → agentName
-	overlayType     string                   // "wireguard" or "vxlan"
 	allocator       *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
 	peerTracker     *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
 	vpcCIDR         string                   // VPC network CIDR (e.g., "10.0.0.0/16")
@@ -47,7 +46,6 @@ type grpcServerOptions struct {
 	PeerTracker     *overlay.PeerTracker
 	VPCCIDR         string
 	WhitelistedKeys map[string]string // publicKey → agentName
-	OverlayType     string            // "wireguard" or "vxlan"
 	MetricsRegistry *metrics.EngineMetricsRegistry
 	Events          EventLog
 	StartedAt       time.Time
@@ -72,7 +70,6 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		store:           opts.Store,
 		registryURL:     opts.RegistryURL,
 		whitelistedKeys: opts.WhitelistedKeys,
-		overlayType:     opts.OverlayType,
 		allocator:       opts.Allocator,
 		peerTracker:     opts.PeerTracker,
 		vpcCIDR:         opts.VPCCIDR,
@@ -147,7 +144,6 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 
 	resp := &banyanpb.RegisterResponse{
 		RegistryUrl: s.registryURL,
-		OverlayType: s.overlayType,
 	}
 
 	// Allocate VPC subnet for this agent
@@ -167,7 +163,6 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 					Subnet:    *subnet,
 					HostIP:    hostIP,
 					VTEPIP:    overlay.VTEPIP(*subnet),
-					MAC:       overlay.DeterministicMAC(*subnet),
 					PublicKey: req.WgPublicKey,
 				}
 				s.peerTracker.Update(req.AgentName, peer)
@@ -295,7 +290,6 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 						Subnet:    *subnet,
 						HostIP:    hostIP,
 						VTEPIP:    overlay.VTEPIP(*subnet),
-						MAC:       overlay.DeterministicMAC(*subnet),
 						PublicKey: existingPubKey,
 					}
 					s.peerTracker.Update(req.AgentName, p)
@@ -308,7 +302,6 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 			resp.VpcPeers = append(resp.VpcPeers, &banyanpb.VPCPeer{
 				Subnet:    p.Subnet.String(),
 				HostIp:    p.HostIP.String(),
-				VtepMac:   p.MAC.String(),
 				PublicKey: p.PublicKey,
 			})
 		}

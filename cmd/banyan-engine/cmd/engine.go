@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -105,7 +106,12 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("========================================"))
 
 	if os.Geteuid() != 0 {
-		fmt.Println(styleWarn.Render("Warning: Not running as root. Some operations may require sudo."))
+		return fmt.Errorf("init must be run as root: sudo banyan-engine init")
+	}
+
+	// --- System setup (config dirs, sysctl) ---
+	if err := runEngineSystemSetup(); err != nil {
+		return err
 	}
 
 	// --- Directory creation ---
@@ -117,7 +123,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		"/var/run",
 	}
 
-	fmt.Println(styleInfo.Render("\nCreating directories..."))
+	fmt.Println(styleInfo.Render("\nCreating data directories..."))
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
@@ -353,7 +359,13 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("========================================"))
 	fmt.Println(styleOK.Render("Initialization complete!"))
 	fmt.Println()
-	fmt.Println(styleInfo.Render("Next step: banyan-engine start"))
+	fmt.Println(styleInfo.Render("Next steps:"))
+	fmt.Println()
+	fmt.Println("  sudo systemctl enable --now banyan-engine  # start + enable on boot")
+	fmt.Println()
+	fmt.Println(styleDim.Render("Or run in foreground (for development):"))
+	fmt.Println()
+	fmt.Println("  sudo banyan-engine start")
 	return nil
 }
 
@@ -374,6 +386,10 @@ func resolveStoreConfig(cmd *cobra.Command) (backend, address string) {
 }
 
 func runEngineStart(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("start must be run as root: sudo banyan-engine start")
+	}
+
 	logging.Setup(nil)
 	log := logging.New("engine")
 	log.Info("Banyan Engine starting")
@@ -465,15 +481,6 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Determine overlay type
-	overlayType := cfg.Engine.OverlayType
-	if overlayType == "" {
-		overlayType = "vxlan" // default for backwards compat; wireguard when whitelisted keys exist
-		if len(whitelistedKeys) > 0 {
-			overlayType = "wireguard"
-		}
-	}
-
 	// Resolve metrics port from config
 	metricsPort := cfg.Engine.MetricsPort
 
@@ -491,7 +498,6 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		EtcdKeyFile:     cfg.Engine.EtcdKeyFile,
 		EtcdCAFile:      cfg.Engine.EtcdCAFile,
 		WhitelistedKeys: whitelistedKeys,
-		OverlayType:     overlayType,
 	})
 	if err != nil {
 		return err
@@ -703,4 +709,57 @@ func runEngineStatus(cmd *cobra.Command, args []string) error {
 
 	fmt.Println("\n========================================")
 	return nil
+}
+
+// runEngineSystemSetup performs one-time system configuration:
+// creates /etc/banyan/ directories and enables IP forwarding.
+func runEngineSystemSetup() error {
+	// Step 1: Create config directories
+	fmt.Print(styleInfo.Render("\nConfiguring system...") + "\n")
+	fmt.Print("  Creating /etc/banyan/ directories... ")
+	configDirs := []string{"/etc/banyan", "/etc/banyan/keys", "/etc/banyan/whitelisted-keys"}
+	for _, dir := range configDirs {
+		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+			fmt.Println("[FAIL]")
+			return fmt.Errorf("create %s: %w", dir, mkErr)
+		}
+	}
+	fmt.Println(styleOK.Render("[OK]"))
+
+	// Step 2: Enable IP forwarding
+	fmt.Print("  Enabling net.ipv4.ip_forward... ")
+	if err := enableSysctlPersistent("net.ipv4.ip_forward"); err != nil {
+		fmt.Println("[FAIL]")
+		return err
+	}
+	fmt.Println(styleOK.Render("[OK]"))
+
+	return nil
+}
+
+// enableSysctlPersistent sets a sysctl value persistently via /etc/sysctl.d/ and applies it.
+func enableSysctlPersistent(key string) error {
+	value := "1"
+	confFile := "/etc/sysctl.d/99-banyan.conf"
+	existing, _ := os.ReadFile(confFile)
+	line := key + " = " + value
+	if !strings.Contains(string(existing), line) {
+		content := string(existing)
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += line + "\n"
+		if err := os.WriteFile(confFile, []byte(content), 0o644); err != nil { //nolint:gosec // sysctl.d config must be world-readable
+			return fmt.Errorf("write sysctl config: %w", err)
+		}
+	}
+	return runInitCmd("sysctl", "-w", key+"="+value)
+}
+
+// runInitCmd runs a command and returns an error if it fails.
+func runInitCmd(name string, args ...string) error {
+	c := exec.Command(name, args...) //nolint:gosec // args are constructed internally
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
 }

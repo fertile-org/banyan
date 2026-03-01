@@ -147,7 +147,7 @@ func TestWireGuardDriver_ReconcilePeers(t *testing.T) {
 		t.Errorf("expected route via 'banyan-wg', got %q", linkOps.calls[0].args[2])
 	}
 
-	// No FDB or ARP entries (WireGuard is L3, unlike VXLAN)
+	// No FDB or ARP entries (WireGuard operates at L3)
 	if linkOps.hasCall("AddFDBEntry") {
 		t.Error("WireGuard should not add FDB entries")
 	}
@@ -247,9 +247,9 @@ func TestNewWireGuardDriver(t *testing.T) {
 	}
 }
 
-func TestPeerFromSubnetAndHostWG(t *testing.T) {
+func TestPeerFromProto(t *testing.T) {
 	t.Run("valid", func(t *testing.T) {
-		peer, err := PeerFromSubnetAndHostWG("10.0.45.0/24", "192.168.1.10", "pubkey-base64")
+		peer, err := PeerFromProto("10.0.45.0/24", "192.168.1.10", "pubkey-base64")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -268,21 +268,21 @@ func TestPeerFromSubnetAndHostWG(t *testing.T) {
 	})
 
 	t.Run("invalid subnet", func(t *testing.T) {
-		_, err := PeerFromSubnetAndHostWG("invalid", "192.168.1.10", "key")
+		_, err := PeerFromProto("invalid", "192.168.1.10", "key")
 		if err == nil {
 			t.Fatal("expected error for invalid subnet")
 		}
 	})
 
 	t.Run("invalid host IP", func(t *testing.T) {
-		_, err := PeerFromSubnetAndHostWG("10.0.45.0/24", "invalid", "key")
+		_, err := PeerFromProto("10.0.45.0/24", "invalid", "key")
 		if err == nil {
 			t.Fatal("expected error for invalid host IP")
 		}
 	})
 
 	t.Run("empty public key", func(t *testing.T) {
-		_, err := PeerFromSubnetAndHostWG("10.0.45.0/24", "192.168.1.10", "")
+		_, err := PeerFromProto("10.0.45.0/24", "192.168.1.10", "")
 		if err == nil {
 			t.Fatal("expected error for empty public key")
 		}

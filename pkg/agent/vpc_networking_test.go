@@ -112,6 +112,120 @@ func TestCheckVPCPrerequisites(t *testing.T) {
 	})
 }
 
+func mockSysctlForTest(t *testing.T) {
+	t.Helper()
+	origReader := readSysctl
+	origWriter := writeSysctl
+	readSysctl = func(path string) (string, error) { return "1", nil }
+	writeSysctl = func(path, value string) error { return nil }
+	t.Cleanup(func() {
+		readSysctl = origReader
+		writeSysctl = origWriter
+	})
+}
+
+func TestEnsureSysctl(t *testing.T) {
+	t.Run("no-op when value already correct", func(t *testing.T) {
+		origReader := readSysctl
+		origWriter := writeSysctl
+		t.Cleanup(func() {
+			readSysctl = origReader
+			writeSysctl = origWriter
+		})
+
+		writeCalled := false
+		readSysctl = func(path string) (string, error) { return "1", nil }
+		writeSysctl = func(path, value string) error {
+			writeCalled = true
+			return nil
+		}
+
+		err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if writeCalled {
+			t.Error("write should not be called when value is already correct")
+		}
+	})
+
+	t.Run("writes when value is wrong", func(t *testing.T) {
+		origReader := readSysctl
+		origWriter := writeSysctl
+		t.Cleanup(func() {
+			readSysctl = origReader
+			writeSysctl = origWriter
+		})
+
+		var writtenPath, writtenValue string
+		readSysctl = func(path string) (string, error) { return "0", nil }
+		writeSysctl = func(path, value string) error {
+			writtenPath = path
+			writtenValue = value
+			return nil
+		}
+
+		err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if writtenPath != "/proc/sys/net/ipv4/ip_forward" {
+			t.Errorf("expected write to ip_forward, got %q", writtenPath)
+		}
+		if writtenValue != "1" {
+			t.Errorf("expected value '1', got %q", writtenValue)
+		}
+	})
+
+	t.Run("writes when read fails", func(t *testing.T) {
+		origReader := readSysctl
+		origWriter := writeSysctl
+		t.Cleanup(func() {
+			readSysctl = origReader
+			writeSysctl = origWriter
+		})
+
+		writeCalled := false
+		readSysctl = func(path string) (string, error) {
+			return "", os.ErrNotExist
+		}
+		writeSysctl = func(path, value string) error {
+			writeCalled = true
+			return nil
+		}
+
+		err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !writeCalled {
+			t.Error("write should be called when read fails")
+		}
+	})
+
+	t.Run("returns error when write fails", func(t *testing.T) {
+		origReader := readSysctl
+		origWriter := writeSysctl
+		t.Cleanup(func() {
+			readSysctl = origReader
+			writeSysctl = origWriter
+		})
+
+		readSysctl = func(path string) (string, error) { return "0", nil }
+		writeSysctl = func(path, value string) error {
+			return os.ErrPermission
+		}
+
+		err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1")
+		if err == nil {
+			t.Fatal("expected error when write fails")
+		}
+		if !strings.Contains(err.Error(), "permission") {
+			t.Errorf("expected permission error, got: %v", err)
+		}
+	})
+}
+
 func TestInitializeVPCNetworking(t *testing.T) {
 	t.Run("runs all steps in sequence", func(t *testing.T) {
 		origChecker := prerequisiteChecker
@@ -122,11 +236,12 @@ func TestInitializeVPCNetworking(t *testing.T) {
 			overlayDriverFactory = origFactory
 			hostIPDetector = origDetector
 		})
+		mockSysctlForTest(t)
 
 		mockDriver := &mockOverlayDriver{}
 
 		prerequisiteChecker = func() error { return nil }
-		overlayDriverFactory = func(_, _, _ string) overlay.OverlayDriver { return mockDriver }
+		overlayDriverFactory = func(_, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
 
 		a := &Agent{}
@@ -200,6 +315,7 @@ func TestInitializeVPCNetworking(t *testing.T) {
 			prerequisiteChecker = origChecker
 			hostIPDetector = origDetector
 		})
+		mockSysctlForTest(t)
 
 		prerequisiteChecker = func() error { return nil }
 		hostIPDetector = func() (net.IP, error) { return nil, os.ErrNotExist }
@@ -226,11 +342,12 @@ func TestInitializeVPCNetworking(t *testing.T) {
 			overlayDriverFactory = origFactory
 			hostIPDetector = origDetector
 		})
+		mockSysctlForTest(t)
 
 		mockDriver := &mockOverlayDriver{initErr: os.ErrPermission}
 
 		prerequisiteChecker = func() error { return nil }
-		overlayDriverFactory = func(_, _, _ string) overlay.OverlayDriver { return mockDriver }
+		overlayDriverFactory = func(_, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
 
 		a := &Agent{}
@@ -255,11 +372,12 @@ func TestInitializeVPCNetworking(t *testing.T) {
 			overlayDriverFactory = origFactory
 			hostIPDetector = origDetector
 		})
+		mockSysctlForTest(t)
 
 		mockDriver := &mockOverlayDriver{writeCNIErr: os.ErrPermission}
 
 		prerequisiteChecker = func() error { return nil }
-		overlayDriverFactory = func(_, _, _ string) overlay.OverlayDriver { return mockDriver }
+		overlayDriverFactory = func(_, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
 
 		a := &Agent{}
@@ -282,7 +400,7 @@ func TestReconcileVPCPeers(t *testing.T) {
 		a := &Agent{overlayDriver: mockDriver}
 
 		peers := []VPCPeer{
-			{Subnet: "10.0.46.0/24", HostIP: "192.168.1.20", VTEPMAC: "02:42:0a:00:2e:01"},
+			{Subnet: "10.0.46.0/24", HostIP: "192.168.1.20", PublicKey: "pubkey-test"},
 		}
 
 		err := a.reconcileVPCPeers(context.Background(), peers)
@@ -306,8 +424,8 @@ func TestReconcileVPCPeers(t *testing.T) {
 		a := &Agent{overlayDriver: mockDriver}
 
 		peers := []VPCPeer{
-			{Subnet: "invalid", HostIP: "192.168.1.20", VTEPMAC: "02:42:0a:00:2e:01"},
-			{Subnet: "10.0.46.0/24", HostIP: "192.168.1.20", VTEPMAC: "02:42:0a:00:2e:01"},
+			{Subnet: "invalid", HostIP: "192.168.1.20", PublicKey: "pubkey-test"},
+			{Subnet: "10.0.46.0/24", HostIP: "192.168.1.20", PublicKey: "pubkey-test"},
 		}
 
 		err := a.reconcileVPCPeers(context.Background(), peers)
@@ -324,7 +442,7 @@ func TestReconcileVPCPeers(t *testing.T) {
 		a := &Agent{overlayDriver: nil}
 
 		err := a.reconcileVPCPeers(context.Background(), []VPCPeer{
-			{Subnet: "10.0.46.0/24", HostIP: "192.168.1.20", VTEPMAC: "02:42:0a:00:2e:01"},
+			{Subnet: "10.0.46.0/24", HostIP: "192.168.1.20", PublicKey: "pubkey-test"},
 		})
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
@@ -336,7 +454,7 @@ func TestReconcileVPCPeers(t *testing.T) {
 		a := &Agent{overlayDriver: mockDriver}
 
 		err := a.reconcileVPCPeers(context.Background(), []VPCPeer{
-			{Subnet: "invalid", HostIP: "invalid", VTEPMAC: "invalid"},
+			{Subnet: "invalid", HostIP: "invalid", PublicKey: "invalid"},
 		})
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)

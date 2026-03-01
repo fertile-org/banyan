@@ -49,7 +49,7 @@ message RegisterResponse {
   repeated string store_endpoints = 2;  // DEPRECATED: was etcd endpoints for Flannel
   string vpc_cidr = 3;                  // VPC network CIDR (e.g., "10.0.0.0/16")
   string allocated_subnet = 4;          // /24 subnet for this agent (e.g., "10.0.45.0/24")
-  string overlay_type = 5;             // "wireguard" or "vxlan"
+  string overlay_type = 5;             // DEPRECATED: WireGuard is now the only overlay
   repeated ActiveContainer active_containers = 6;  // containers this agent should already be running
 }
 
@@ -79,7 +79,7 @@ message HeartbeatResponse {
 message VPCPeer {
   string subnet = 1;                    // peer's allocated subnet
   string host_ip = 2;                   // peer's reachable IP
-  string vtep_mac = 3;                  // deterministic VTEP MAC (VXLAN)
+  string vtep_mac = 3;                  // DEPRECATED: VXLAN removed, WireGuard only
   string public_key = 4;               // WireGuard public key
 }
 

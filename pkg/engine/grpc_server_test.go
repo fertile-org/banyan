@@ -1782,13 +1782,11 @@ func TestHeartbeat_VPCPeers(t *testing.T) {
 			Subnet: *subnet1,
 			HostIP: net.ParseIP("192.168.1.10"),
 			VTEPIP: overlay.VTEPIP(*subnet1),
-			MAC:    overlay.DeterministicMAC(*subnet1),
 		})
 		peerTracker.Update("worker-2", overlay.Peer{
 			Subnet: *subnet2,
 			HostIP: net.ParseIP("192.168.1.20"),
 			VTEPIP: overlay.VTEPIP(*subnet2),
-			MAC:    overlay.DeterministicMAC(*subnet2),
 		})
 
 		// Heartbeat from worker-1 should see worker-2 as a peer

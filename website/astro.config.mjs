@@ -70,6 +70,10 @@ export default defineConfig({
           label: "Roadmap",
           slug: "roadmap",
         },
+        {
+          label: "White Paper",
+          slug: "whitepaper",
+        },
       ],
     }),
   ],

@@ -1,8 +1,11 @@
 package cmd
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/fertile-org/banyan/pkg/types"
 )
 
 func TestHumanDuration(t *testing.T) {
@@ -83,6 +86,22 @@ func TestPadRight(t *testing.T) {
 	}
 }
 
+func TestPrintJSON(t *testing.T) {
+	t.Run("valid value", func(t *testing.T) {
+		err := printJSON(map[string]string{"key": "value"})
+		if err != nil {
+			t.Errorf("expected nil error, got %v", err)
+		}
+	})
+
+	t.Run("unmarshalable value", func(t *testing.T) {
+		err := printJSON(make(chan int))
+		if err == nil {
+			t.Fatal("expected error for unmarshalable value")
+		}
+	})
+}
+
 func TestFetchClusterData_NoConfig(t *testing.T) {
 	origConfig := configPath
 	t.Cleanup(func() { configPath = origConfig })
@@ -92,6 +111,31 @@ func TestFetchClusterData_NoConfig(t *testing.T) {
 	_, err := fetchClusterData()
 	if err == nil {
 		t.Fatal("expected error when no config")
+	}
+}
+
+func TestFetchClusterData_NoEngineWGKey(t *testing.T) {
+	origConfig := configPath
+	t.Cleanup(func() { configPath = origConfig })
+
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+	cfg := types.BanyanConfig{
+		CLI: types.CLIConfig{
+			EngineHost:  "127.0.0.1",
+			EnginePort:  "50051",
+			WGPublicKey: "test-pubkey",
+			// No EngineWGPublicKey — should fail
+		},
+	}
+	if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+	configPath = cfgPath
+
+	_, err := fetchClusterData()
+	if err == nil {
+		t.Fatal("expected error when engine WG key missing")
 	}
 }
 

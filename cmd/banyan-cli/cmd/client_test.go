@@ -176,13 +176,24 @@ func setupCLITestConfig(t *testing.T, engineAddr string) {
 	origConfig := configPath
 	t.Cleanup(func() { configPath = origConfig })
 
+	// Mock control tunnel so tests don't need a real kernel interface
+	origTunnelFn := controlTunnelExistsFn
+	controlTunnelExistsFn = func(string) bool { return true }
+	t.Cleanup(func() { controlTunnelExistsFn = origTunnelFn })
+
+	// Route tunnel traffic to localhost so tests connect to the local test server
+	origTunnelIP := controlTunnelEngineIP
+	controlTunnelEngineIP = "127.0.0.1"
+	t.Cleanup(func() { controlTunnelEngineIP = origTunnelIP })
+
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 	cfg := types.BanyanConfig{
 		CLI: types.CLIConfig{
-			EngineHost:  "127.0.0.1",
-			EnginePort:  "", // will be parsed from addr
-			WGPublicKey: "dGVzdC1wdWJsaWMta2V5", // dummy key for test auth
+			EngineHost:        "127.0.0.1",
+			EnginePort:        "", // will be parsed from addr
+			WGPublicKey:       "dGVzdC1wdWJsaWMta2V5",       // dummy key for test auth
+			EngineWGPublicKey: "dGVzdC1lbmdpbmUtd2cta2V5Cg==", // dummy engine WG key
 		},
 	}
 	// Parse host:port from addr
@@ -319,6 +330,35 @@ func TestManifestToProto(t *testing.T) {
 		}
 	})
 
+	t.Run("with deploy placement", func(t *testing.T) {
+		manifest := types.BanyanManifest{
+			Name: "my-app",
+			Services: map[string]types.ManifestService{
+				"web": {
+					Image: "nginx",
+					Deploy: &types.ManifestDeploy{
+						Replicas: 1,
+						Placement: &types.ManifestPlacement{
+							Node: "worker-1",
+						},
+					},
+				},
+			},
+		}
+
+		proto := manifestToProto(manifest)
+		svc := proto.Services["web"]
+		if svc.Deploy == nil {
+			t.Fatal("expected non-nil Deploy")
+		}
+		if svc.Deploy.Placement == nil {
+			t.Fatal("expected non-nil Placement")
+		}
+		if svc.Deploy.Placement.Node != "worker-1" {
+			t.Errorf("expected node 'worker-1', got %q", svc.Deploy.Placement.Node)
+		}
+	})
+
 	t.Run("nil build and deploy", func(t *testing.T) {
 		manifest := types.BanyanManifest{
 			Name: "my-app",
@@ -392,17 +432,24 @@ func TestGrpcLogStreamReader_Read(t *testing.T) {
 var _ banyanpb.EngineServiceClient = (banyanpb.EngineServiceClient)(nil)
 
 func TestNewAutoEngineClient(t *testing.T) {
-	t.Run("uses public key auth", func(t *testing.T) {
+	t.Run("connects through tunnel", func(t *testing.T) {
 		origConfig := configPath
 		t.Cleanup(func() { configPath = origConfig })
+		origTunnelFn := controlTunnelExistsFn
+		controlTunnelExistsFn = func(string) bool { return true }
+		t.Cleanup(func() { controlTunnelExistsFn = origTunnelFn })
+		origTunnelIP := controlTunnelEngineIP
+		controlTunnelEngineIP = "127.0.0.1"
+		t.Cleanup(func() { controlTunnelEngineIP = origTunnelIP })
 
 		tmpDir := t.TempDir()
 		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 		cfg := types.BanyanConfig{
 			CLI: types.CLIConfig{
-				EngineHost:  "127.0.0.1",
-				EnginePort:  "50051",
-				WGPublicKey: "test-pubkey-base64",
+				EngineHost:        "127.0.0.1",
+				EnginePort:        "50051",
+				WGPublicKey:       "test-pubkey-base64",
+				EngineWGPublicKey: "test-engine-wg-key",
 			},
 		}
 		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
@@ -444,6 +491,64 @@ func TestNewAutoEngineClient(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "no authentication configured") {
 			t.Errorf("expected 'no authentication configured' error, got: %v", err)
+		}
+	})
+
+	t.Run("returns error when engine WG public key missing", func(t *testing.T) {
+		origConfig := configPath
+		t.Cleanup(func() { configPath = origConfig })
+
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := types.BanyanConfig{
+			CLI: types.CLIConfig{
+				EngineHost:  "127.0.0.1",
+				EnginePort:  "50051",
+				WGPublicKey: "test-pubkey-base64",
+			},
+		}
+		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+		configPath = cfgPath
+
+		_, err := NewAutoEngineClient("localhost:50051")
+		if err == nil {
+			t.Fatal("expected error when engine WG public key missing")
+		}
+		if !strings.Contains(err.Error(), "engine WireGuard public key not configured") {
+			t.Errorf("expected 'engine WireGuard public key not configured' error, got: %v", err)
+		}
+	})
+
+	t.Run("returns error when tunnel not active", func(t *testing.T) {
+		origConfig := configPath
+		t.Cleanup(func() { configPath = origConfig })
+		origTunnelFn := controlTunnelExistsFn
+		controlTunnelExistsFn = func(string) bool { return false }
+		t.Cleanup(func() { controlTunnelExistsFn = origTunnelFn })
+
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := types.BanyanConfig{
+			CLI: types.CLIConfig{
+				EngineHost:        "127.0.0.1",
+				EnginePort:        "50051",
+				WGPublicKey:       "test-pubkey-base64",
+				EngineWGPublicKey: "test-engine-wg-key",
+			},
+		}
+		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+		configPath = cfgPath
+
+		_, err := NewAutoEngineClient("localhost:50051")
+		if err == nil {
+			t.Fatal("expected error when tunnel not active")
+		}
+		if !strings.Contains(err.Error(), "not active") {
+			t.Errorf("expected 'not active' error, got: %v", err)
 		}
 	})
 }
@@ -587,4 +692,30 @@ func TestEngineClient_Close(t *testing.T) {
 	client, cleanup := setupCLITestServer(t)
 	defer cleanup()
 	client.Close() // Should not panic
+}
+
+func TestGRPCClient(t *testing.T) {
+	client, cleanup := setupCLITestServer(t)
+	defer cleanup()
+
+	grpcClient := client.GRPCClient()
+	if grpcClient == nil {
+		t.Fatal("expected non-nil gRPC client")
+	}
+}
+
+func TestEngineClient_DashboardData(t *testing.T) {
+	client, cleanup := setupCLITestServer(t)
+	defer cleanup()
+
+	resp, err := client.DashboardData(context.Background())
+	if err != nil {
+		t.Fatalf("DashboardData failed: %v", err)
+	}
+	if resp.Engine == nil {
+		t.Fatal("expected non-nil engine status")
+	}
+	if resp.Engine.Status != "running" {
+		t.Errorf("expected engine status 'running', got %q", resp.Engine.Status)
+	}
 }

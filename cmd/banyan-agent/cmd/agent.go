@@ -237,7 +237,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 				Value(&nodeName),
 			huh.NewInput().
 				Title("Engine WireGuard public key").
-				Description("Displayed during 'banyan-engine init' (optional, enables encrypted tunnel)").
+				Description("Required — displayed during 'banyan-engine init'").
 				Value(&engineWGPubKey),
 			huh.NewInput().
 				Title("Tags").
@@ -251,6 +251,10 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 		return fmt.Errorf("agent config input: %w", err)
+	}
+
+	if engineWGPubKey == "" {
+		return fmt.Errorf("engine WireGuard public key is required. Get it from the engine operator (displayed during 'banyan-engine init')")
 	}
 
 	existingCfg.Agent.EngineHost = engineHost
@@ -336,6 +340,11 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	publicKey := cfg.Agent.WGPublicKey
 	if publicKey == "" {
 		return fmt.Errorf("no authentication configured (missing WireGuard public key). Run 'banyan-agent init' to generate a keypair")
+	}
+
+	// Verify engine WireGuard public key is configured (required for control tunnel)
+	if cfg.Agent.EngineWGPublicKey == "" {
+		return fmt.Errorf("engine WireGuard public key not configured. Run 'banyan-agent init' and provide the engine's public key")
 	}
 
 	// Check for nerdctl

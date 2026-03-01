@@ -1,8 +1,8 @@
 ---
-title: "White Paper: From One Server to Many"
-description: Container orchestration without the complexity tax — why Banyan exists, how it's designed, and what it does differently.
-sidebar:
-  order: 98
+title: "From One Server to Many"
+description: "Container orchestration without the complexity tax — why Banyan exists, how it's designed, and what it does differently."
+date: 2025-02-28
+author: "Banyan Team"
 ---
 
 *Banyan — Container orchestration you already know*

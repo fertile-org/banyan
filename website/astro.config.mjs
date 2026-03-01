@@ -71,8 +71,8 @@ export default defineConfig({
           slug: "roadmap",
         },
         {
-          label: "White Paper",
-          slug: "whitepaper",
+          label: "Blog",
+          link: "/blog/",
         },
       ],
     }),

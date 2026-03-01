@@ -24,7 +24,7 @@ Teams who've outgrown a single server but don't need — or don't want — Kuber
 
 ## Want the full story?
 
-Read the [white paper](/whitepaper/) — it covers the orchestration landscape honestly (where Kubernetes is the right choice, where it isn't), explains Banyan's design principles, and walks through the technical architecture.
+Read the [white paper](/blog/from-one-server-to-many/) — it covers the orchestration landscape honestly (where Kubernetes is the right choice, where it isn't), explains Banyan's design principles, and walks through the technical architecture.
 
 ## Ready to try it?
 

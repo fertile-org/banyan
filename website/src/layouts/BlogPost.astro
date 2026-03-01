@@ -79,7 +79,8 @@ const formattedDate = date.toLocaleDateString("en-US", {
     --text-muted: #8a8478;
     --text-dim: #5c574e;
     --border: #3a3630;
-    --max-width: 720px;
+    --bg-code: #1a1714;
+    --max-width: 900px;
     color-scheme: dark;
   }
 
@@ -93,6 +94,7 @@ const formattedDate = date.toLocaleDateString("en-US", {
       --text-muted: #5c574e;
       --text-dim: #8a8478;
       --border: #ede9e3;
+      --bg-code: #e8e4de;
     }
   }
 
@@ -118,7 +120,7 @@ const formattedDate = date.toLocaleDateString("en-US", {
     background-size: cover;
     background-position: center;
     background-repeat: no-repeat;
-    opacity: 0.4;
+    opacity: 0.15;
     z-index: -1;
   }
 
@@ -284,7 +286,7 @@ const formattedDate = date.toLocaleDateString("en-US", {
   .prose :global(pre) {
     margin: 1.5rem 0;
     padding: 1.25rem;
-    background: var(--bg-surface);
+    background: var(--bg-code);
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow-x: auto;

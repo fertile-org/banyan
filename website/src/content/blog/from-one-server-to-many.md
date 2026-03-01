@@ -5,10 +5,6 @@ date: 2025-02-28
 author: "Banyan Team"
 ---
 
-*Banyan — Container orchestration you already know*
-
----
-
 ## Abstract
 
 Most teams today use containers. And for most of them, Docker Compose is where it starts — a YAML file, a few services, `docker compose up`, done. It works great on one machine.
@@ -17,7 +13,7 @@ And when it's time to go to production, many of us keep using Docker Compose the
 
 Then you need a second server. Maybe traffic grew, or you want high availability, or the database needs its own hardware. And suddenly, `docker compose up` can't help — it deploys to a single host.
 
-Docker did try to solve this with Docker Swarm, which reads the same Compose file format and distributes containers across servers via `docker stack deploy`. The setup is genuinely simple — two commands and you have a cluster. But Swarm has its own problems: overlay encryption [carries a severe performance penalty](https://github.com/moby/moby/issues/33133) (IPsec, with reports of up to 99% throughput loss), there's no built-in observability (you need to deploy a separate monitoring stack), and the project has stagnated — maintained by Mirantis through 2030, but not actively evolving. We cover Swarm in more detail in [Section 3](#docker-swarm--the-road-not-taken).
+Docker did try to solve this with Docker Swarm, which reads the same Compose file format and distributes containers across servers via `docker stack deploy`. The setup is genuinely simple — two commands and you have a cluster. But Swarm has its own problems: overlay encryption [carries a severe performance penalty](https://github.com/moby/moby/issues/33133) (IPsec, with reports of up to 99% throughput loss), there's no built-in observability (you need to deploy a separate monitoring stack), and the project has stagnated — maintained by Mirantis through 2030, but not actively evolving. We cover Swarm in more detail in [Section 1.3](#docker-swarm--the-road-not-taken).
 
 So the usual next step is Kubernetes. But Kubernetes is a platform built for platform teams — and if your team is five engineers shipping a product, spending months learning Deployments, Services, Ingress, Helm charts, CNI plugins, and RBAC is a hard sell.
 
@@ -29,38 +25,38 @@ This paper looks honestly at the container orchestration landscape — where Kub
 
 ## Table of Contents
 
-1. [The Problem: Why Container Orchestration Needs a Third Option](#part-i-why--the-problem)
-   - [The Single-Server Ceiling](#1-the-single-server-ceiling)
-   - [The Kubernetes Cliff](#2-the-kubernetes-cliff)
-   - [The Landscape Today](#3-the-landscape-today)
-   - [What Small Teams Actually Need](#4-what-small-teams-actually-need)
-2. [The Approach: Design Principles Behind Banyan](#part-ii-how--design-principles)
-   - [Three Concepts, Not Thirty](#5-three-concepts-not-thirty)
-   - [Everything Built In](#6-everything-built-in)
-   - [Your Compose File, Not a New Language](#7-your-compose-file-not-a-new-language)
-   - [Convergence Over Coordination](#8-convergence-over-coordination)
-   - [Open Source, Fully and Forever](#9-open-source-fully-and-forever)
-3. [The Architecture: How Complexity Disappears](#part-iii-what--technical-architecture)
-   - [The Engine-Agent Model](#10-the-engine-agent-model)
-   - [Overlay Networking](#11-overlay-networking--encrypted-by-default)
-   - [Service Discovery](#12-service-discovery--dns-not-a-service-mesh)
-   - [Cross-Host Load Balancing](#13-cross-host-load-balancing)
-   - [Zero-Downtime Deployment](#14-zero-downtime-deployment)
-   - [Security](#15-security)
-   - [Observability](#16-observability)
-4. [Honest Assessment](#part-iv-honest-assessment)
-   - [When to Use Banyan](#17-when-to-use-banyan)
-   - [When NOT to Use Banyan](#18-when-not-to-use-banyan)
-   - [Current Limitations](#19-current-limitations)
-   - [Roadmap](#20-roadmap)
+1. [The Problem: Why Container Orchestration Needs a Third Option](#the-problem-why-container-orchestration-needs-a-third-option)
+   - [1.1 The Single-Server Ceiling](#11-the-single-server-ceiling)
+   - [1.2 The Kubernetes Cliff](#12-the-kubernetes-cliff)
+   - [1.3 The Landscape Today](#13-the-landscape-today)
+   - [1.4 What Small Teams Actually Need](#14-what-small-teams-actually-need)
+2. [The Approach: Design Principles Behind Banyan](#the-approach-design-principles-behind-banyan)
+   - [2.1 Three Concepts, Not Thirty](#21-three-concepts-not-thirty)
+   - [2.2 Everything Built In](#22-everything-built-in)
+   - [2.3 Your Compose File, Not a New Language](#23-your-compose-file-not-a-new-language)
+   - [2.4 Convergence Over Coordination](#24-convergence-over-coordination)
+   - [2.5 Open Source, Fully and Forever](#25-open-source-fully-and-forever)
+3. [The Architecture: How Complexity Disappears](#the-architecture-how-complexity-disappears)
+   - [3.1 The Engine-Agent Model](#31-the-engine-agent-model)
+   - [3.2 Overlay Networking](#32-overlay-networking--encrypted-by-default)
+   - [3.3 Service Discovery](#33-service-discovery--dns-not-a-service-mesh)
+   - [3.4 Cross-Host Load Balancing](#34-cross-host-load-balancing)
+   - [3.5 Zero-Downtime Deployment](#35-zero-downtime-deployment)
+   - [3.6 Security](#36-security)
+   - [3.7 Observability](#37-observability)
+4. [Honest Assessment](#honest-assessment)
+   - [4.1 When to Use Banyan](#41-when-to-use-banyan)
+   - [4.2 When NOT to Use Banyan](#42-when-not-to-use-banyan)
+   - [4.3 Current Limitations](#43-current-limitations)
+   - [4.4 Roadmap](#44-roadmap)
 5. [Try Banyan](#try-banyan)
 6. [References](#references)
 
 ---
 
-## Part I: WHY — The Problem
+## The Problem: Why Container Orchestration Needs a Third Option
 
-### 1. The Single-Server Ceiling
+### 1.1 The Single-Server Ceiling
 
 Docker Compose works beautifully on one machine. You write a YAML file describing your services — their images, ports, environment variables, how they connect. Run `docker compose up` and everything is running. The mental model is simple: services are processes, the Compose file is the manifest, your laptop or server is the platform.
 
@@ -79,7 +75,7 @@ Here's the thing: the gap between "one server" and "many servers" isn't a single
 
 You can't just bolt these onto Docker Compose one at a time. You need an orchestration layer. And for a long time, the only serious option has been Kubernetes.
 
-### 2. The Kubernetes Cliff
+### 1.2 The Kubernetes Cliff
 
 Let's be honest about Kubernetes up front: it is the right tool for a lot of situations. The [CNCF 2025 survey](https://www.cncf.io/announcements/2026/01/20/kubernetes-established-as-the-de-facto-operating-system-for-ai-as-production-use-hits-82-in-2025-cncf-annual-survey/) reports production usage at 82%. When you're running dozens of teams, hundreds of microservices, or AI/ML workloads with GPU scheduling — nothing else comes close in maturity and ecosystem.
 
@@ -169,7 +165,7 @@ They help with the infrastructure side — no node management, automatic upgrade
 
 The 2025 CNCF survey shows a revealing shift: complexity dropped to 34% as a cited challenge, but "cultural changes with the development team" rose to 47% as the *top* challenge. Complexity didn't get solved — the teams that couldn't handle it already left or never adopted. The survivors now face organizational friction.
 
-### 3. The Landscape Today
+### 1.3 The Landscape Today
 
 Between Docker Compose and Kubernetes, several tools try to fill the gap. Each makes trade-offs worth looking at honestly.
 
@@ -240,7 +236,7 @@ Worth noting: Sidero Labs' commercial management platform, **Omni**, uses the [B
 
 The gap is real. Teams of 2–30 engineers who need multi-host deployment, service discovery, and zero-downtime deploys — but don't have the budget or expertise for a K8s platform team — don't have great options.
 
-### 4. What Small Teams Actually Need
+### 1.4 What Small Teams Actually Need
 
 For a small team, "production-ready" doesn't mean what it means for an enterprise running hundreds of microservices across multiple clouds. It means:
 
@@ -257,9 +253,9 @@ For many small teams, the answer is no. But until now, the basics haven't been a
 
 ---
 
-## Part II: HOW — Design Principles
+## The Approach: Design Principles Behind Banyan
 
-### 5. Three Concepts, Not Thirty
+### 2.1 Three Concepts, Not Thirty
 
 Banyan's entire architecture rests on three concepts:
 
@@ -273,7 +269,7 @@ Kubernetes has 50+ resource types in its core API: Pod, Deployment, ReplicaSet, 
 
 Banyan has three. Not because the problems are simpler — but because the solutions are built into the system instead of assembled from parts.
 
-### 6. Everything Built In
+### 2.2 Everything Built In
 
 This is the heart of what makes Banyan different: **everything you need for production deployment is already in the box.**
 
@@ -299,7 +295,7 @@ This is an opinionated stance. Banyan picks sensible defaults instead of offerin
 
 Think of how TCP works. TCP hides packet retransmission, congestion control, flow control, and connection management from you. You just connect. The complexity is real — you just don't deal with it. Banyan applies the same idea to container orchestration.
 
-### 7. Your Compose File, Not a New Language
+### 2.3 Your Compose File, Not a New Language
 
 Banyan uses Docker Compose syntax — the same fields, the same structure. If you've written a Compose file before, a Banyan manifest will feel immediately familiar:
 
@@ -337,7 +333,7 @@ Knowledge transfer cost: zero, if your team already knows Docker Compose. No Hel
 
 Docker Swarm also promises Compose compatibility, but it's stuck on the legacy v3 format. Fields like `build`, `depends_on`, `container_name`, and `.env` substitution are [silently ignored](https://docs.docker.com/engine/swarm/stack-deploy/) when you deploy to a Swarm. That gap between "works locally" and "works in production" is exactly the kind of surprise you don't want. Banyan treats the Compose file as the source of truth — what it says is what happens.
 
-### 8. Convergence Over Coordination
+### 2.4 Convergence Over Coordination
 
 Most distributed systems work through synchronous coordination: a control plane pushes commands to workers, waits for acknowledgment, handles failures, rolls back on partial success. Distributed transactions, saga patterns, two-phase commit.
 
@@ -356,7 +352,7 @@ This is the same model that makes DNS reliable — eventual consistency through 
 
 For deploying web apps, APIs, and databases across a handful of servers, seconds of delay is fine. This isn't high-frequency trading. The resilience you get from avoiding synchronous coordination is well worth it.
 
-### 9. Open Source, Fully and Forever
+### 2.5 Open Source, Fully and Forever
 
 Banyan is licensed under **Apache 2.0**. Everything — engine, agent, CLI, overlay networking, service discovery, load balancing, built-in registry, terminal dashboard — is open source. There are no closed-source components, no "enterprise edition" with gated features, no BSL-licensed management layer.
 
@@ -375,11 +371,11 @@ This isn't charity — it's a deliberate choice. The people Banyan is built for 
 
 ---
 
-## Part III: WHAT — Technical Architecture
+## The Architecture: How Complexity Disappears
 
 This section covers how Banyan works at a high level — the key design decisions and why they were made.
 
-### 10. The Engine-Agent Model
+### 3.1 The Engine-Agent Model
 
 The engine is a single process that bundles four things you'd normally set up separately: a state store (etcd, embedded — you never touch it), a container registry (for `build:` directives — no Docker Hub needed), a gRPC server, and an orchestration loop that runs every 3 seconds.
 
@@ -387,7 +383,7 @@ Each server runs one agent. Agents are **pull-based** — they poll the engine f
 
 Containers run through containerd (via nerdctl), not the Docker daemon. If the agent crashes and restarts, running containers are unaffected — they're independent processes.
 
-### 11. Overlay Networking — Encrypted by Default
+### 3.2 Overlay Networking — Encrypted by Default
 
 Containers on different hosts need to talk to each other. Banyan creates a virtual overlay network with zero configuration.
 
@@ -397,29 +393,29 @@ Peer discovery piggybacks on the heartbeat that already exists — no gossip pro
 
 You don't choose a CNI, configure subnets, or manage peers. Containers across hosts just talk to each other.
 
-### 12. Service Discovery — DNS, Not a Service Mesh
+### 3.3 Service Discovery — DNS, Not a Service Mesh
 
 Each agent runs its own DNS server. The engine distributes all running service backends to every agent through the heartbeat, so each agent has a complete, cluster-wide view. When a container queries `db`, its local agent's DNS resolves it to the actual container IP — which might be on a completely different host. The overlay network (WireGuard) carries the traffic there directly. Only healthy containers appear in DNS responses.
 
 No Consul, no CoreDNS configuration, no `my-service.my-namespace.svc.cluster.local`. Just the service name.
 
-### 13. Cross-Host Load Balancing
+### 3.4 Cross-Host Load Balancing
 
 DNS handles container-to-container traffic within the overlay. But for **published ports** (external traffic hitting a host), Banyan writes iptables DNAT rules on every agent — the same probability-based approach Kubernetes' kube-proxy uses. The Linux kernel handles all packet forwarding; no userspace proxy in the path.
 
 You set `replicas: 3` and traffic spreads across all three, regardless of which servers they're on.
 
-### 14. Zero-Downtime Deployment
+### 3.5 Zero-Downtime Deployment
 
 Banyan defaults to **blue-green** deployment. Run `banyan up` again and new containers start alongside old ones (no port conflicts — iptables handles the mapping). Once the new deployment is healthy, the old one is torn down. If the new deployment fails, the old one stays running.
 
 No strategy flags, no rollout configuration. You run the same command; blue-green happens internally.
 
-### 15. Security
+### 3.6 Security
 
 All gRPC traffic (engine ↔ agents ↔ CLI) is encrypted through a dedicated WireGuard control tunnel, separate from the data plane overlay. Authentication uses a public key whitelist — you paste a key during `banyan init`, and everything is encrypted and authenticated from there. No certificates to manage, no CA to operate.
 
-### 16. Observability
+### 3.7 Observability
 
 A live terminal dashboard (`banyan-cli dashboard`) shows your cluster across six views: overview, agents, deployments, containers, engine metrics, and events. Updates every 5 seconds. No Grafana, no browser, no config files.
 
@@ -427,9 +423,9 @@ The engine also exposes a Prometheus-compatible metrics endpoint, so if you alre
 
 ---
 
-## Part IV: Honest Assessment
+## Honest Assessment
 
-### 17. When to Use Banyan
+### 4.1 When to Use Banyan
 
 Banyan is designed for a specific situation:
 
@@ -441,7 +437,7 @@ Banyan is designed for a specific situation:
 
 If that sounds like your team, Banyan cuts out the weeks of learning and infrastructure setup Kubernetes requires, while giving you the things you actually need: multi-host deployment, service discovery, zero-downtime deploys, encrypted networking, and load balancing.
 
-### 18. When NOT to Use Banyan
+### 4.2 When NOT to Use Banyan
 
 Banyan is not the right tool for everything. Honestly:
 
@@ -457,7 +453,7 @@ Banyan is not the right tool for everything. Honestly:
 **Use ECS/Fargate when:**
 - You're all-in on AWS with no plans to leave.
 
-### 19. Current Limitations
+### 4.3 Current Limitations
 
 We'd rather be upfront about what Banyan can't do yet than have you find out the hard way.
 
@@ -471,7 +467,7 @@ We'd rather be upfront about what Banyan can't do yet than have you find out the
 - **No network policies.** All containers in the overlay can reach all others. Segmentation is planned.
 - **Not yet production-ready.** We say this on the website too. Banyan is under active development.
 
-### 20. Roadmap
+### 4.4 Roadmap
 
 **Near term:**
 - Rootless container mode

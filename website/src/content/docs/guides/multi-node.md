@@ -63,20 +63,24 @@ echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
 Verify the connection:
 
 ```bash
-banyan-cli status
+banyan-cli engine
 ```
 
 ```
-Banyan Cluster - Status
-========================================
-Engine: RUNNING
-Connection: 192.168.1.10:50051
+Engine
+==================================================
+  Status:    running
+  Uptime:    2m
+  CPU:       1.5% (4 cores)
+  Memory:    0.2GB / 4.0GB
+  Disk:      8.0GB / 50.0GB
 
-Agents: 0
-
-Deployments: 0
-
-========================================
+Cluster Summary
+--------------------------------------------------
+  Agents:       0/0 connected
+  Deployments:  0/0 running
+  Containers:   0/0 healthy
+  Tasks:        0 completed, 0 failed
 ```
 
 ## 2. Add Workers
@@ -113,22 +117,14 @@ Each Agent connects to the Engine via gRPC, registers, and starts a heartbeat.
 ## 3. Verify the cluster
 
 ```bash
-banyan-cli status
+banyan-cli agent
 ```
 
 ```
-Banyan Cluster - Status
-========================================
-Engine: RUNNING
-Connection: 192.168.1.10:50051
-
-Agents: 2
-  - worker-1 (status: ready, last seen: 2s ago)
-  - worker-2 (status: ready, last seen: 3s ago)
-
-Deployments: 0
-
-========================================
+NAME                 STATUS       CONTAINERS      CPU      MEM TAGS
+---------------------------------------------------------------------------
+worker-1             connected             0     1.2%     5.0%
+worker-2             connected             0     0.8%     4.5%
 ```
 
 ## 4. Deploy
@@ -187,7 +183,7 @@ Banyan distributes 5 containers across 2 workers using round-robin:
 From the CLI:
 
 ```bash
-banyan-cli status
+banyan-cli container
 ```
 
 Or SSH into a worker and list running containers directly:
@@ -219,7 +215,7 @@ banyan-cli up -f banyan.yaml
 3. Copy the agent's public key to the engine: `echo '<pubkey>' > /etc/banyan/whitelisted-keys/<name>.pub`
 4. Run `sudo banyan-agent start`
 
-The new worker appears in `banyan-cli status` within seconds. Future deployments include it automatically.
+The new worker appears in `banyan-cli agent` within seconds. Future deployments include it automatically.
 
 That's the point — **scaling is adding a server, not editing a manifest.**
 

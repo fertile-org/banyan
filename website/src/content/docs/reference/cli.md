@@ -11,7 +11,7 @@ Banyan uses three binaries. Install only what each machine needs.
 |--------|------|------------|
 | `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes |
-| `banyan-cli` | Client (up, status, logs, dashboard, down) | Any machine |
+| `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine |
 
 ---
 
@@ -167,7 +167,7 @@ banyan-agent status
 
 ## banyan-cli
 
-Run on any machine to manage deployments. Run `banyan-cli init` once to configure the engine connection, then use `up`, `status`, `down`, and `logs` freely.
+Run on any machine to manage deployments. Run `banyan-cli init` once to configure the engine connection, then use `up`, `down`, and the resource commands freely.
 
 ### init
 
@@ -275,37 +275,218 @@ banyan-cli down --name my-app web db
 banyan-cli down --name my-app --tags staging
 ```
 
-### status
+### engine
 
-Show cluster status: connected agents, active deployments, and container health.
+Show the engine status, resource usage, and a cluster summary.
 
 ```bash
-banyan-cli status
+banyan-cli engine
 ```
 
 ```
-Banyan Cluster - Status
-========================================
-Engine: RUNNING
-Connection: 192.168.1.10:50051
+Engine
+==================================================
+  Status:    running
+  Uptime:    2h15m
+  CPU:       12.5% (4 cores)
+  Memory:    1.0GB / 4.0GB
+  Disk:      10.0GB / 50.0GB
 
-Agents: 2
-  - worker-1 (status: ready, last seen: 3s ago)
-  - worker-2 (status: ready, last seen: 5s ago)
-
-Deployments: 1
-  - my-app (status: running, containers: 5/5 healthy)
-    web:
-      my-app-web-0 on worker-1: running (checked 8s ago)
-    api:
-      my-app-api-0 on worker-1: running (checked 8s ago)
-      my-app-api-1 on worker-2: running (checked 6s ago)
-      my-app-api-2 on worker-1: running (checked 8s ago)
-    db:
-      my-app-db-0 on worker-2: running (checked 6s ago)
-
-========================================
+Cluster Summary
+--------------------------------------------------
+  Agents:       2/2 connected
+  Deployments:  1/1 running
+  Containers:   5/5 healthy
+  Tasks:        12 completed, 0 failed
 ```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | | Output format (`json` for machine-readable output) |
+
+### agent
+
+List all agents or show detail for a specific agent.
+
+```bash
+# List all agents
+banyan-cli agent
+```
+
+```
+NAME                 STATUS       CONTAINERS      CPU      MEM TAGS
+---------------------------------------------------------------------------
+worker-1             connected             3    45.0%    25.0% zone:us-east
+worker-2             connected             2    30.0%    25.0% zone:us-west
+```
+
+```bash
+# Show detail for a specific agent
+banyan-cli agent worker-1
+```
+
+```
+Agent: worker-1
+==================================================
+  Status:       connected
+  API Address:  10.0.1.10:50052
+  VPC Subnet:   10.0.1.0/24
+  Tags:         zone:us-east
+  Containers:   3
+  Last Seen:    5s ago
+  Created:      2h ago
+
+Resources
+--------------------------------------------------
+  CPU:     45.0% (8 cores)
+  Memory:  2.0GB / 8.0GB
+  Disk:    20.0GB / 100.0GB
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | | Output format (`json` for machine-readable output) |
+
+### deployment
+
+List all deployments or show detail for a specific one. The argument matches against deployment name or ID.
+
+```bash
+# List all deployments
+banyan-cli deployment
+```
+
+```
+NAME                 STATUS        HEALTHY   SERVICES TAGS            AGE
+--------------------------------------------------------------------------------
+my-app               running           5/5          3 env:prod        30m
+```
+
+```bash
+# Show detail for a specific deployment
+banyan-cli deployment my-app
+```
+
+```
+Deployment: my-app
+============================================================
+  ID:       dep-001
+  Status:   running
+  Healthy:  5/5
+  Tags:     env:prod
+  Created:  30m ago
+  Updated:  1m ago
+
+Services
+------------------------------------------------------------
+  web
+    Image:     nginx:alpine
+    Replicas:  2
+    Ports:     80:80
+  api
+    Image:     myapp/api:v1
+    Replicas:  2
+    Ports:     8080:8080
+    Depends:   db
+  db
+    Image:     postgres:16
+    Replicas:  1
+    Ports:     5432:5432
+
+Containers
+------------------------------------------------------------
+  NAME                      STATUS       AGENT           IMAGE
+  my-app-web-0              running      worker-1        nginx:alpine
+  my-app-web-1              running      worker-2        nginx:alpine
+  my-app-api-0              running      worker-1        myapp/api:v1
+  my-app-api-1              running      worker-2        myapp/api:v1
+  my-app-db-0               running      worker-2        postgres:16
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | | Output format (`json` for machine-readable output) |
+
+### container
+
+List all containers or show detail for a specific one.
+
+```bash
+# List all containers
+banyan-cli container
+```
+
+```
+NAME                      SERVICE      AGENT           DEPLOYMENT      STATUS
+--------------------------------------------------------------------------------
+my-app-web-0              web          worker-1        my-app          running
+my-app-web-1              web          worker-2        my-app          running
+my-app-api-0              api          worker-1        my-app          running
+my-app-api-1              api          worker-2        my-app          running
+my-app-db-0               db           worker-2        my-app          running
+```
+
+```bash
+# Show detail for a specific container
+banyan-cli container my-app-web-0
+```
+
+```
+Container: my-app-web-0
+==================================================
+  Status:      running
+  Service:     web
+  Agent:       worker-1
+  Deployment:  my-app
+  Image:       nginx:alpine
+  Ports:       80:80
+  Replica:     0
+  Created:     30m ago
+  Updated:     28m ago
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--output` | `-o` | | Output format (`json` for machine-readable output) |
+
+### events
+
+List recent cluster events.
+
+```bash
+banyan-cli events
+```
+
+```
+TIMESTAMP            SEVERITY   TYPE                      MESSAGE
+------------------------------------------------------------------------------------------
+2026-03-01 14:30:05  info       deployment.updated        Deployment my-app updated
+2026-03-01 14:29:05  info       container.started         Container my-app-web-0 started on worker-1
+2026-03-01 14:25:05  warning    container.stopped         Container my-app-api-0 stopped on worker-1
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--tail` | | `50` | Number of events to show |
+| `--output` | `-o` | | Output format (`json` for machine-readable output) |
+
+Examples:
+
+```bash
+# Show the last 10 events
+banyan-cli events --tail 10
+
+# Get events as JSON (for CI/CD scripts)
+banyan-cli events -o json
+```
+
+:::tip
+All resource commands support `--output json` for scripting and CI/CD pipelines. Combine with tools like `jq` for filtering:
+```bash
+banyan-cli agent -o json | jq '.[].Name'
+banyan-cli deployment -o json | jq '.[] | select(.Status == "running")'
+```
+:::
 
 ### logs
 

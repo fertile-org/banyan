@@ -29,7 +29,7 @@ See what's running, check container health, stream logs, and stop deployments �
 
 - Agent monitors container health after deployment (running, exited, restarting)
 - Agent reports per-container status back to Engine via gRPC
-- `banyan-cli status` shows per-service and per-container status
+- `banyan-cli deployment` and `banyan-cli container` show per-service and per-container status
 - `banyan-cli logs` streams container logs from agents (via engine gRPC proxy)
 - Detect and surface failed containers (e.g., exited immediately after start)
 - `banyan-cli down` command to stop and remove all containers for a deployment
@@ -101,18 +101,6 @@ See [Redeployment](/guides/redeployment/) for details.
 
 ---
 
-## Milestone 4.5 — Rootless Mode
-
-Run Banyan without root. Today every component needs `sudo` — the engine to manage etcd and WireGuard, the agent to run containerd and configure networking, even the CLI to write config during `init`. This milestone removes that requirement so Banyan works on shared servers, locked-down environments, and developer machines without elevated privileges.
-
-- **Rootless containerd support**: Agent detects rootless containerd and adapts nerdctl commands accordingly (user socket, unprivileged namespace)
-- **User-space networking**: Replace kernel WireGuard with wireguard-go and iptables DNAT with a Go TCP proxy — no kernel modules, no sysctl writes, no `/proc` access
-- **User-scoped config and data**: Config in `~/.config/banyan/` and data in `~/.local/share/banyan/` instead of `/etc/banyan/` and `/var/lib/banyan/` — no root needed for `init`
-- **Unprivileged ports only**: All default ports already above 1024 (gRPC 50051, registry 5000); services needing 80/443 can use port mapping from a higher port
-- **Graceful fallback**: When running as root, Banyan uses the faster kernel-mode networking (WireGuard, iptables). Without root, it transparently falls back to user-space equivalents. Same manifest, same commands — just without `sudo`
-
----
-
 ## Milestone 4.6 — Live Terminal Dashboard
 
 Status: **Done**
@@ -132,17 +120,15 @@ See [CLI Reference — dashboard](/reference/cli/#dashboard) for details.
 
 ---
 
-## Milestone 5 — Metrics Collection
+## Milestone 5 — Rootless Mode
 
-Collect and expose resource metrics from every node and container in Prometheus-compatible format.
+Run Banyan without root. Today every component needs `sudo` — the engine to manage etcd and WireGuard, the agent to run containerd and configure networking, even the CLI to write config during `init`. This milestone removes that requirement so Banyan works on shared servers, locked-down environments, and developer machines without elevated privileges.
 
-- **Prometheus-compatible metrics**: Expose `/metrics` endpoint in Prometheus format
-- Agent-side metric collection: CPU, memory, disk usage per container
-- Container-level metrics: per-container CPU%, memory usage, restart count
-- Node-level metrics: total CPU, memory, disk usage per agent
-- Service-level metrics: request throughput, error rate per service
-- Metric storage in etcd for short-term retention
-- Metric retrieval API for other components to consume
+- **Rootless containerd support**: Agent detects rootless containerd and adapts nerdctl commands accordingly (user socket, unprivileged namespace)
+- **User-space networking**: Replace kernel WireGuard with wireguard-go and iptables DNAT with a Go TCP proxy — no kernel modules, no sysctl writes, no `/proc` access
+- **User-scoped config and data**: Config in `~/.config/banyan/` and data in `~/.local/share/banyan/` instead of `/etc/banyan/` and `/var/lib/banyan/` — no root needed for `init`
+- **Unprivileged ports only**: All default ports already above 1024 (gRPC 50051, registry 5000); services needing 80/443 can use port mapping from a higher port
+- **Graceful fallback**: When running as root, Banyan uses the faster kernel-mode networking (WireGuard, iptables). Without root, it transparently falls back to user-space equivalents. Same manifest, same commands — just without `sudo`
 
 ---
 
@@ -200,12 +186,10 @@ The terminal dashboard (`banyan-cli dashboard`) is already available — see [Mi
 
 ## Milestone 10 — Advanced Security
 
-Stronger authentication model for production environments.
+Authorizaton, secrets management, and certificate rotation for secure cluster operations.
 
-- ~~Private key authentication for agent-to-engine connections~~ → **Done**: X25519 public key whitelist authentication
-- ~~Private key authentication for CLI-to-engine and CLI-to-agent~~ → **Done**: CLI uses same public key auth
-- ~~Key generation and distribution tooling~~ → **Done**: `init` commands generate keypairs, admin copies public keys to engine
-- ~~Encrypted control plane~~ → **Done**: WireGuard control tunnel (`wg-control`) encrypts all gRPC traffic between engine, agents, and CLI (port 51821/UDP)
+- attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
+- secrets management: encrypt secrets at rest in etcd, inject into containers as environment variables or files, with CLI commands to create and manage secrets
 - Certificate rotation support
 
 ---
@@ -231,7 +215,4 @@ Service discovery, traffic policies, and encrypted communication across the clus
 - **Health-check-based routing**: Only route to healthy containers — filter backends by `container_status` before including in HeartbeatResponse
 - **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
 - **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
-- ~~**WireGuard overlay driver**: Alternative to VXLAN via the existing `OverlayDriver` interface~~ → **Done**: WireGuard is the default overlay, VXLAN kept as fallback
 - **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
-- **mTLS between services**: Encrypted service-to-service communication — WireGuard approach (transparent at network layer) or sidecar proxy pattern
-- **Multi-tenant network isolation**: Separate VPC CIDRs per deployment or tag group with different VNIs

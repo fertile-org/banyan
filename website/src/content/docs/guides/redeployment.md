@@ -111,7 +111,7 @@ banyan-cli up -f banyan.yaml web api
 
 ```bash
 # Check what went wrong
-banyan-cli status
+banyan-cli deployment my-app
 
 # Look at container logs for the failed deployment
 banyan-cli logs my-app-1708123456-web-0

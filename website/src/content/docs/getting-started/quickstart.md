@@ -50,20 +50,24 @@ sudo banyan-cli init
 The wizard asks for engine host and port. It generates a WireGuard keypair and displays whitelisting instructions. After init, verify the cluster:
 
 ```bash
-banyan-cli status
+banyan-cli engine
 ```
 
 ```
-Banyan Cluster - Status
-========================================
-Engine: RUNNING
-Connection: localhost:50051
+Engine
+==================================================
+  Status:    running
+  Uptime:    5m
+  CPU:       2.1% (4 cores)
+  Memory:    0.3GB / 4.0GB
+  Disk:      8.2GB / 50.0GB
 
-Agents: 1
-  - local-worker (status: ready, last seen: 2s ago)
-
-Deployments: 0
-========================================
+Cluster Summary
+--------------------------------------------------
+  Agents:       1/1 connected
+  Deployments:  0/0 running
+  Containers:   0/0 healthy
+  Tasks:        0 completed, 0 failed
 ```
 
 One engine, one agent, ready to deploy.
@@ -124,27 +128,34 @@ Run `banyan-cli up` again after changing your manifest or images — Banyan repl
 ## 6. Verify
 
 ```bash
-banyan-cli status
+banyan-cli deployment my-app
 ```
 
 ```
-Banyan Cluster - Status
-========================================
-Engine: RUNNING
-Connection: localhost:50051
+Deployment: my-app
+============================================================
+  ID:       dep-abc123
+  Status:   running
+  Healthy:  3/3
+  Created:  1m ago
+  Updated:  30s ago
 
-Agents: 1
-  - local-worker (status: ready, last seen: 3s ago)
+Services
+------------------------------------------------------------
+  web
+    Image:     nginx:alpine
+    Replicas:  2
+    Ports:     80:80
+  redis
+    Image:     redis:7-alpine
+    Replicas:  1
 
-Deployments: 1
-  - my-app (status: running, containers: 3/3 healthy)
-    web:
-      my-app-web-0 on local-worker: running (checked 8s ago)
-      my-app-web-1 on local-worker: running (checked 8s ago)
-    redis:
-      my-app-redis-0 on local-worker: running (checked 8s ago)
-
-========================================
+Containers
+------------------------------------------------------------
+  NAME                      STATUS       AGENT           IMAGE
+  my-app-web-0              running      local-worker    nginx:alpine
+  my-app-web-1              running      local-worker    nginx:alpine
+  my-app-redis-0            running      local-worker    redis:7-alpine
 ```
 
 Three containers running. On a single machine this looks like overkill — the value shows up when you add more servers.

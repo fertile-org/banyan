@@ -42,6 +42,7 @@ message RegisterRequest {
   string session_token = 3;
   repeated string tags = 4;
   string wg_public_key = 5;       // agent's WireGuard public key
+  string host_ip = 6;             // agent's data-plane host IP (for overlay peer endpoint)
 }
 
 message RegisterResponse {

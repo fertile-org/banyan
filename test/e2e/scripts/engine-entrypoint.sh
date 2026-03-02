@@ -32,6 +32,11 @@ CLI_PRIV_KEY=$(wg genkey)
 CLI_PUB_KEY=$(echo "$CLI_PRIV_KEY" | wg pubkey)
 echo "CLI public key: $CLI_PUB_KEY"
 
+# Write CLI private key to file
+mkdir -p /etc/banyan/keys
+echo "$CLI_PRIV_KEY" > /etc/banyan/keys/cli.key
+chmod 600 /etc/banyan/keys/cli.key
+
 # Write CLI config section into the existing config
 # We need to merge it with the engine config, so use a temp approach
 python3 -c "
@@ -42,8 +47,9 @@ cfg['cli'] = {
     'engine_host': '127.0.0.1',
     'engine_port': '50051',
     'name': 'cli-engine',
-    'wg_private_key': '$CLI_PRIV_KEY',
+    'wg_private_key_file': '/etc/banyan/keys/cli.key',
     'wg_public_key': '$CLI_PUB_KEY',
+    'engine_wg_public_key': '$ENGINE_PUB_KEY',
 }
 with open('/etc/banyan/banyan.yaml', 'w') as f:
     yaml.dump(cfg, f, default_flow_style=False)
@@ -54,8 +60,9 @@ cli:
     engine_host: 127.0.0.1
     engine_port: "50051"
     name: cli-engine
-    wg_private_key: $CLI_PRIV_KEY
+    wg_private_key_file: /etc/banyan/keys/cli.key
     wg_public_key: $CLI_PUB_KEY
+    engine_wg_public_key: $ENGINE_PUB_KEY
 EOF2
 }
 
@@ -88,6 +95,29 @@ until nc -z 127.0.0.1 50051 2>/dev/null; do
 done
 touch /tmp/keys-exchange/engine-ready
 echo "Engine is ready."
+
+# 8b. Set up CLI WireGuard control tunnel (banyan-cli commands need this)
+echo "Setting up CLI control tunnel..."
+# Compute CLI tunnel IP from public key (SHA-256 hash → first 2 bytes → 10.200.x.y)
+# This replicates types.TunnelIPFromPublicKey() in Go
+CLI_HASH=$(echo -n "$CLI_PUB_KEY" | sha256sum | head -c 4)
+CLI_O3=$((16#${CLI_HASH:0:2}))
+CLI_O4=$((16#${CLI_HASH:2:2}))
+if [ "$CLI_O3" -eq 0 ] && [ "$CLI_O4" -le 1 ]; then
+    CLI_O4=$((CLI_O4 + 2))
+fi
+CLI_TUNNEL_IP="10.200.${CLI_O3}.${CLI_O4}"
+echo "CLI tunnel IP: $CLI_TUNNEL_IP"
+
+# Create wg-ctl-cli interface with CLI private key
+ip link add wg-ctl-cli type wireguard
+wg set wg-ctl-cli private-key /etc/banyan/keys/cli.key
+ip addr add "${CLI_TUNNEL_IP}/16" dev wg-ctl-cli
+ip link set wg-ctl-cli up
+
+# Add engine as peer (engine listens on 127.0.0.1:51821 inside same container)
+wg set wg-ctl-cli peer "$ENGINE_PUB_KEY" allowed-ips 10.200.0.1/32 endpoint 127.0.0.1:51821
+echo "CLI control tunnel ready."
 
 # Wait for the engine process (keeps the container running)
 wait $ENGINE_PID

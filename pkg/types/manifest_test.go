@@ -105,6 +105,50 @@ services:
 		}
 	})
 
+	t.Run("env_file string form in manifest", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    env_file: .env
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		web := manifest.Services["web"]
+		if len(web.EnvFile) != 1 || web.EnvFile[0] != ".env" {
+			t.Errorf("expected ['.env'], got %v", web.EnvFile)
+		}
+	})
+
+	t.Run("env_file list form in manifest", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    env_file:
+      - .env
+      - .env.local
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		web := manifest.Services["web"]
+		if len(web.EnvFile) != 2 {
+			t.Fatalf("expected 2 env_file entries, got %d", len(web.EnvFile))
+		}
+		if web.EnvFile[0] != ".env" {
+			t.Errorf("expected '.env', got %q", web.EnvFile[0])
+		}
+		if web.EnvFile[1] != ".env.local" {
+			t.Errorf("expected '.env.local', got %q", web.EnvFile[1])
+		}
+	})
+
 	t.Run("no placement is nil", func(t *testing.T) {
 		input := `
 name: my-app

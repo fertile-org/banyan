@@ -27,11 +27,11 @@ services:
       - engine-data:/var/lib/banyan
       - ./examples:/examples:ro
     healthcheck:
-      test: ["CMD", "banyan-cli", "status"]
+      test: ["CMD", "banyan-cli", "engine"]
       interval: 5s
       timeout: 5s
-      retries: 10
-      start_period: 30s
+      retries: 15
+      start_period: 45s
 
   worker-1:
     build:

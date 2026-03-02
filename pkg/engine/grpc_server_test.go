@@ -1836,6 +1836,31 @@ func TestExtractPeerIP(t *testing.T) {
 	})
 }
 
+func TestAgentHostIP(t *testing.T) {
+	ctx := context.Background() // no peer info
+
+	t.Run("prefers reported IP", func(t *testing.T) {
+		ip := agentHostIP("192.168.1.10", ctx)
+		if ip == nil || ip.String() != "192.168.1.10" {
+			t.Errorf("expected 192.168.1.10, got %v", ip)
+		}
+	})
+
+	t.Run("falls back to extractPeerIP when reported is empty", func(t *testing.T) {
+		ip := agentHostIP("", ctx)
+		if ip != nil {
+			t.Errorf("expected nil (no peer in context), got %v", ip)
+		}
+	})
+
+	t.Run("falls back when reported is invalid", func(t *testing.T) {
+		ip := agentHostIP("not-an-ip", ctx)
+		if ip != nil {
+			t.Errorf("expected nil for invalid IP, got %v", ip)
+		}
+	})
+}
+
 func TestHeartbeat_SaveError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
 	store := &errorStore{MemoryStore: memStore, saveErr: true}

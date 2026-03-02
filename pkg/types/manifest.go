@@ -17,6 +17,7 @@ type ManifestService struct {
 	Deploy      *ManifestDeploy `yaml:"deploy,omitempty"`
 	Ports       []string        `yaml:"ports,omitempty"`
 	Environment []string        `yaml:"environment,omitempty"`
+	EnvFile     EnvFile         `yaml:"env_file,omitempty"`
 	Command     []string        `yaml:"command,omitempty"`
 	DependsOn   []string        `yaml:"depends_on,omitempty"`
 }

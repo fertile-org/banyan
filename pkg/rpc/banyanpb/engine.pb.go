@@ -112,6 +112,7 @@ type RegisterRequest struct {
 	SessionToken  string                 `protobuf:"bytes,3,opt,name=session_token,json=sessionToken,proto3" json:"session_token,omitempty"`
 	Tags          []string               `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty"`
 	WgPublicKey   string                 `protobuf:"bytes,5,opt,name=wg_public_key,json=wgPublicKey,proto3" json:"wg_public_key,omitempty"` // agent's WireGuard public key
+	HostIp        string                 `protobuf:"bytes,6,opt,name=host_ip,json=hostIp,proto3" json:"host_ip,omitempty"`                  // agent's data-plane host IP (for overlay peer endpoint)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -181,13 +182,20 @@ func (x *RegisterRequest) GetWgPublicKey() string {
 	return ""
 }
 
+func (x *RegisterRequest) GetHostIp() string {
+	if x != nil {
+		return x.HostIp
+	}
+	return ""
+}
+
 type RegisterResponse struct {
 	state            protoimpl.MessageState `protogen:"open.v1"`
 	RegistryUrl      string                 `protobuf:"bytes,1,opt,name=registry_url,json=registryUrl,proto3" json:"registry_url,omitempty"`
 	StoreEndpoints   []string               `protobuf:"bytes,2,rep,name=store_endpoints,json=storeEndpoints,proto3" json:"store_endpoints,omitempty"`       // DEPRECATED: was etcd endpoints for Flannel
 	VpcCidr          string                 `protobuf:"bytes,3,opt,name=vpc_cidr,json=vpcCidr,proto3" json:"vpc_cidr,omitempty"`                            // VPC network CIDR (e.g., "10.0.0.0/16")
 	AllocatedSubnet  string                 `protobuf:"bytes,4,opt,name=allocated_subnet,json=allocatedSubnet,proto3" json:"allocated_subnet,omitempty"`    // /24 subnet for this agent (e.g., "10.0.45.0/24")
-	OverlayType      string                 `protobuf:"bytes,5,opt,name=overlay_type,json=overlayType,proto3" json:"overlay_type,omitempty"`                // "wireguard" or "vxlan"
+	OverlayType      string                 `protobuf:"bytes,5,opt,name=overlay_type,json=overlayType,proto3" json:"overlay_type,omitempty"`                // DEPRECATED: WireGuard is now the only overlay
 	ActiveContainers []*ActiveContainer     `protobuf:"bytes,6,rep,name=active_containers,json=activeContainers,proto3" json:"active_containers,omitempty"` // containers this agent should already be running
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
@@ -475,7 +483,7 @@ type VPCPeer struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Subnet        string                 `protobuf:"bytes,1,opt,name=subnet,proto3" json:"subnet,omitempty"`                        // peer's allocated subnet
 	HostIp        string                 `protobuf:"bytes,2,opt,name=host_ip,json=hostIp,proto3" json:"host_ip,omitempty"`          // peer's reachable IP
-	VtepMac       string                 `protobuf:"bytes,3,opt,name=vtep_mac,json=vtepMac,proto3" json:"vtep_mac,omitempty"`       // deterministic VTEP MAC (VXLAN)
+	VtepMac       string                 `protobuf:"bytes,3,opt,name=vtep_mac,json=vtepMac,proto3" json:"vtep_mac,omitempty"`       // DEPRECATED: VXLAN removed, WireGuard only
 	PublicKey     string                 `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // WireGuard public key
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -2930,7 +2938,7 @@ const file_engine_proto_rawDesc = "" +
 	"\x12memory_total_bytes\x18\x03 \x01(\x04R\x10memoryTotalBytes\x12&\n" +
 	"\x0fdisk_used_bytes\x18\x04 \x01(\x04R\rdiskUsedBytes\x12(\n" +
 	"\x10disk_total_bytes\x18\x05 \x01(\x04R\x0ediskTotalBytes\x12\x1b\n" +
-	"\tcpu_cores\x18\x06 \x01(\rR\bcpuCores\"\xae\x01\n" +
+	"\tcpu_cores\x18\x06 \x01(\rR\bcpuCores\"\xc7\x01\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x1f\n" +
@@ -2938,7 +2946,8 @@ const file_engine_proto_rawDesc = "" +
 	"apiAddress\x12#\n" +
 	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\x12\x12\n" +
 	"\x04tags\x18\x04 \x03(\tR\x04tags\x12\"\n" +
-	"\rwg_public_key\x18\x05 \x01(\tR\vwgPublicKey\"\x90\x02\n" +
+	"\rwg_public_key\x18\x05 \x01(\tR\vwgPublicKey\x12\x17\n" +
+	"\ahost_ip\x18\x06 \x01(\tR\x06hostIp\"\x90\x02\n" +
 	"\x10RegisterResponse\x12!\n" +
 	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\x12'\n" +
 	"\x0fstore_endpoints\x18\x02 \x03(\tR\x0estoreEndpoints\x12\x19\n" +

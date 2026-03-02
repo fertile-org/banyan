@@ -10,44 +10,61 @@ NODE_NAME=${NODE_NAME:-$(hostname)}
 ENGINE_HOST=${ENGINE_HOST:-engine}
 ENGINE_GRPC_PORT=${ENGINE_GRPC_PORT:-50051}
 
-# 1. Write base config (engine host + port, so init sees it as "already configured")
+# 1. System setup (replicates banyan-agent init without interactive prompts)
+echo "Setting up system..."
+mkdir -p /etc/banyan/keys /var/lib/banyan/containers /etc/cni/net.d /opt/cni/bin /var/run
+sysctl -w net.ipv4.ip_forward=1
+
+# 2. Generate WireGuard keypair
+echo "Generating WireGuard keypair..."
+AGENT_PRIV_KEY=$(wg genkey)
+AGENT_PUB_KEY=$(echo "$AGENT_PRIV_KEY" | wg pubkey)
+echo "$AGENT_PRIV_KEY" > /etc/banyan/keys/agent.key
+chmod 600 /etc/banyan/keys/agent.key
+echo "Agent public key ($NODE_NAME): $AGENT_PUB_KEY"
+
+# 3. Export agent public key for engine to whitelist
+echo "$AGENT_PUB_KEY" > /tmp/keys-exchange/${NODE_NAME}.pub
+
+# 4. Wait for engine public key (engine writes this before waiting for worker keys)
+echo "Waiting for engine public key..."
+while [ ! -f /tmp/keys-exchange/engine.pub ]; do
+    sleep 1
+done
+ENGINE_WG_PUB_KEY=$(cat /tmp/keys-exchange/engine.pub)
+echo "Engine WG public key: $ENGINE_WG_PUB_KEY"
+
+# 5. Write complete config
 echo "Writing config..."
-mkdir -p /etc/banyan
 cat > /etc/banyan/banyan.yaml <<EOF
 agent:
     engine_host: ${ENGINE_HOST}
     engine_port: "${ENGINE_GRPC_PORT}"
     node_name: ${NODE_NAME}
+    wg_private_key_file: /etc/banyan/keys/agent.key
+    wg_public_key: ${AGENT_PUB_KEY}
+    engine_wg_public_key: ${ENGINE_WG_PUB_KEY}
 EOF
 chmod 600 /etc/banyan/banyan.yaml
 
-# 2. Init agent (generates WireGuard keypair, no --password)
-echo "Initializing agent..."
-banyan-agent init
-
-# 3. Export agent public key for engine to whitelist
-AGENT_PUB_KEY=$(grep 'wg_public_key' /etc/banyan/banyan.yaml | head -1 | awk '{print $2}')
-echo "$AGENT_PUB_KEY" > /tmp/keys-exchange/${NODE_NAME}.pub
-echo "Agent public key ($NODE_NAME): $AGENT_PUB_KEY"
-
-# 4. Wait for engine to be ready (engine writes this file after gRPC is listening)
+# 6. Wait for engine to be ready (engine writes this file after gRPC is listening)
 echo "Waiting for engine to be ready..."
 while [ ! -f /tmp/keys-exchange/engine-ready ]; do
     sleep 1
 done
 
-# 5. Wait for engine gRPC to be reachable from this container
+# 7. Wait for engine gRPC to be reachable from this container
 echo "Waiting for engine gRPC at ${ENGINE_HOST}:${ENGINE_GRPC_PORT}..."
 until nc -z "${ENGINE_HOST}" "${ENGINE_GRPC_PORT}" 2>/dev/null; do
     sleep 1
 done
 echo "Engine is ready!"
 
-# 6. Start containerd in background
+# 8. Start containerd in background
 echo "Starting containerd..."
 containerd &
 sleep 2
 
-# 7. Start agent
+# 9. Start agent
 echo "Starting agent..."
 exec banyan-agent start --node-name "$NODE_NAME"

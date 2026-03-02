@@ -142,6 +142,11 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return buildErr
 	}
 
+	// Resolve env_file references
+	if resolveErr := types.ResolveEnvFiles(manifestDir, manifest.Services); resolveErr != nil {
+		return fmt.Errorf("failed to resolve env_file: %w", resolveErr)
+	}
+
 	if deployDryRun {
 		services := types.BuildServiceRecords(manifest.Services)
 		fmt.Printf("Application: %s\n", manifest.Name)

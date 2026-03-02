@@ -57,13 +57,14 @@ type ActiveContainer struct {
 	TaskID        string
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey string) (string, *VPCConfig, []ActiveContainer, error) {
+func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey, hostIP string) (string, *VPCConfig, []ActiveContainer, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:    name,
 		ApiAddress:   apiAddr,
 		SessionToken: sessionToken,
 		Tags:         tags,
 		WgPublicKey:  wgPublicKey,
+		HostIp:       hostIP,
 	})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("register failed: %w", err)

@@ -37,7 +37,7 @@ wait_for_healthy() {
     local max_wait=$2
     local elapsed=0
     while [ $elapsed -lt $max_wait ]; do
-        if docker exec "$container" banyan-cli status >/dev/null 2>&1; then
+        if docker exec "$container" banyan-cli engine >/dev/null 2>&1; then
             return 0
         fi
         echo "  Waiting for $container... (${elapsed}s)"
@@ -137,8 +137,9 @@ mkdir -p "$SCRIPT_DIR/bin"
 (cd "$REPO_ROOT/cmd/banyan-engine" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-engine" .)
 (cd "$REPO_ROOT/cmd/banyan-agent" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-agent" .)
 (cd "$REPO_ROOT/cmd/banyan-cli" && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o "$SCRIPT_DIR/bin/banyan-cli" .)
-# Generate cache-bust file so Docker detects binary changes
-md5sum "$SCRIPT_DIR/bin/banyan-engine" "$SCRIPT_DIR/bin/banyan-agent" "$SCRIPT_DIR/bin/banyan-cli" > "$SCRIPT_DIR/bin/.cache-bust"
+# Generate cache-bust file so Docker detects binary and script changes
+md5sum "$SCRIPT_DIR/bin/banyan-engine" "$SCRIPT_DIR/bin/banyan-agent" "$SCRIPT_DIR/bin/banyan-cli" \
+    "$SCRIPT_DIR/scripts/engine-entrypoint.sh" "$SCRIPT_DIR/scripts/agent-entrypoint.sh" > "$SCRIPT_DIR/bin/.cache-bust"
 log_info "Binaries built at test/e2e/bin/"
 
 # Step 2: Build Docker images
@@ -151,7 +152,7 @@ docker-compose up -d
 
 # Step 4: Wait for engine to be healthy
 log_info "Waiting for engine to be healthy..."
-wait_for_healthy banyan-engine 60
+wait_for_healthy banyan-engine 120
 log_info "Engine is healthy!"
 
 # Step 5: Wait for agents to register and VPC networking to initialize
@@ -194,7 +195,7 @@ wait_for_containers banyan-worker-2 1 60 || log_warn "Timed out waiting for cont
 
 # Verify deployment status
 log_info "Deployment status:"
-docker exec banyan-engine banyan-cli status
+docker exec banyan-engine banyan-cli deployment
 
 # Verify containers on workers
 log_info "Containers on workers:"
@@ -235,6 +236,47 @@ else
 fi
 
 # =================================================================
+# Phase 2b: env_file Resolution Tests
+# =================================================================
+echo ""
+echo "========================================="
+echo "Phase 2b: env_file Resolution Tests"
+echo "========================================="
+
+log_info "Test: env_file variables resolved into container environment"
+ENVFILE_API_WORKER=""
+ENVFILE_API_CONTAINER=""
+for worker in banyan-worker-1 banyan-worker-2; do
+    for c in $(get_container_names "$worker"); do
+        if [[ "$c" == *"-api-"* ]]; then
+            ENVFILE_API_WORKER="$worker"
+            ENVFILE_API_CONTAINER="$c"
+            break 2
+        fi
+    done
+done
+
+if [ -n "$ENVFILE_API_CONTAINER" ]; then
+    # Test 1: REDIS_HOST from .env file is set
+    REDIS_HOST_VAL=$(docker exec "$ENVFILE_API_WORKER" nerdctl exec "$ENVFILE_API_CONTAINER" printenv REDIS_HOST 2>/dev/null) || REDIS_HOST_VAL=""
+    if [ "$REDIS_HOST_VAL" = "db.internal" ]; then
+        log_test_pass "env_file: REDIS_HOST=db.internal set from .env file"
+    else
+        log_test_fail "env_file: REDIS_HOST expected 'db.internal', got '${REDIS_HOST_VAL}'"
+    fi
+
+    # Test 2: APP_MODE from .env file is set (second variable in file)
+    APP_MODE_VAL=$(docker exec "$ENVFILE_API_WORKER" nerdctl exec "$ENVFILE_API_CONTAINER" printenv APP_MODE 2>/dev/null) || APP_MODE_VAL=""
+    if [ "$APP_MODE_VAL" = "e2e-test" ]; then
+        log_test_pass "env_file: APP_MODE=e2e-test set from .env file"
+    else
+        log_test_fail "env_file: APP_MODE expected 'e2e-test', got '${APP_MODE_VAL}'"
+    fi
+else
+    log_warn "Skipping env_file tests (no API container found)"
+fi
+
+# =================================================================
 # Phase 3: VPC Networking Tests
 # =================================================================
 echo ""
@@ -242,21 +284,7 @@ echo "========================================="
 echo "Phase 3: VPC Networking Tests"
 echo "========================================="
 
-# Test 1: Verify VXLAN overlay interface exists on agents
-log_info "Test: VXLAN overlay interface exists on agents"
-if docker exec banyan-worker-1 ip link show banyan.1 2>/dev/null | grep -q "banyan.1"; then
-    log_test_pass "VXLAN interface banyan.1 exists on worker-1"
-else
-    log_test_fail "VXLAN interface banyan.1 not found on worker-1"
-fi
-
-if docker exec banyan-worker-2 ip link show banyan.1 2>/dev/null | grep -q "banyan.1"; then
-    log_test_pass "VXLAN interface banyan.1 exists on worker-2"
-else
-    log_test_fail "VXLAN interface banyan.1 not found on worker-2"
-fi
-
-# Test 2: Verify containers get overlay IPs (10.0.x.x range)
+# Test 1: Verify containers get overlay IPs (10.0.x.x range)
 log_info "Test: Containers have overlay IPs"
 WORKER1_CONTAINERS=$(get_container_names banyan-worker-1)
 WORKER2_CONTAINERS=$(get_container_names banyan-worker-2)
@@ -291,8 +319,8 @@ for container in $WORKER2_CONTAINERS; do
     fi
 done
 
-# Test 3: Cross-host container connectivity
-log_info "Test: Cross-host container connectivity via VXLAN overlay"
+# Test 2: Cross-host container connectivity
+log_info "Test: Cross-host container connectivity via overlay"
 if [ -n "$WORKER1_IP" ] && [ -n "$WORKER2_IP" ] && [ -n "$WORKER1_CONTAINER" ] && [ -n "$WORKER2_CONTAINER" ]; then
     # Ping from worker-1 container to worker-2 container
     if docker exec banyan-worker-1 nerdctl exec "$WORKER1_CONTAINER" ping -c 3 -W 5 "$WORKER2_IP" 2>/dev/null | grep -q "0% packet loss"; then
@@ -314,7 +342,7 @@ else
     log_warn "Skipping cross-host ping (need at least one container with overlay IP on each worker)"
 fi
 
-# Test 4: Unique overlay IPs across replicas
+# Test 3: Unique overlay IPs across replicas
 log_info "Test: Unique IPs across all containers"
 ALL_IPS=""
 DUPLICATE_FOUND=false
@@ -335,7 +363,7 @@ if [ "$DUPLICATE_FOUND" = false ] && [ -n "$ALL_IPS" ]; then
     log_test_pass "All container IPs are unique:$ALL_IPS"
 fi
 
-# Test 5: Service proxy via iptables DNAT
+# Test 4: Service proxy via iptables DNAT
 log_info "Test: Service proxy via iptables DNAT"
 
 # Debug: IP forwarding status
@@ -431,15 +459,24 @@ if [ -n "$API_CONTAINER" ] && [ -n "$DB_CONTAINER" ]; then
     # Cross-host Redis TCP test: API on different worker → Redis overlay IP
     if [ "$API_WORKER" != "$DB_WORKER" ]; then
         echo "  Cross-host TCP: $API_CONTAINER ($API_WORKER) → Redis $DB_IP:6379 ($DB_WORKER)"
-        docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" node -e "
+        CROSS_HOST_RESULT=$(docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" node -e "
           const net = require('net');
           const s = net.createConnection(6379, '$DB_IP');
           s.setTimeout(5000);
-          s.on('connect', () => { console.log('CROSS-HOST: CONNECTED'); s.write('PING\r\n'); });
-          s.on('data', d => { console.log('CROSS-HOST: ' + d.toString().trim()); s.destroy(); process.exit(0); });
-          s.on('error', e => { console.log('CROSS-HOST ERROR: ' + e.message); process.exit(1); });
-          s.on('timeout', () => { console.log('CROSS-HOST TIMEOUT'); s.destroy(); process.exit(1); });
-        " 2>&1 || true
+          s.on('connect', () => { console.log('CONNECTED'); s.write('PING\r\n'); });
+          s.on('data', d => { console.log(d.toString().trim()); s.destroy(); process.exit(0); });
+          s.on('error', e => { console.log('ERROR: ' + e.message); process.exit(1); });
+          s.on('timeout', () => { console.log('TIMEOUT'); s.destroy(); process.exit(1); });
+        " 2>&1) || true
+        if echo "$CROSS_HOST_RESULT" | grep -q "PONG"; then
+            log_test_pass "Cross-host TCP: Redis PONG via overlay ($API_WORKER → $DB_WORKER)"
+        else
+            log_test_fail "Cross-host TCP: Redis connection failed ($CROSS_HOST_RESULT)"
+            echo "  Debug: WireGuard peer status on $API_WORKER:"
+            docker exec "$API_WORKER" wg show banyan-wg 2>&1 || true
+            echo "  Debug: Overlay routes on $API_WORKER:"
+            docker exec "$API_WORKER" ip route show 2>&1 | grep -E "^10\." || true
+        fi
     fi
 
     # Test 1: DNS resolution from API container → db.internal
@@ -655,7 +692,7 @@ else
 fi
 
 # Show deployment status after redeployment
-docker exec banyan-engine banyan-cli status
+docker exec banyan-engine banyan-cli deployment
 
 # =================================================================
 # Phase 5: Down Command Test
@@ -685,8 +722,8 @@ else
 fi
 
 # Verify no running deployments remain (stopped records are expected)
-DOWN_STATUS=$(docker exec banyan-engine banyan-cli status 2>&1)
-if echo "$DOWN_STATUS" | grep -q "status: running"; then
+DOWN_STATUS=$(docker exec banyan-engine banyan-cli deployment 2>&1)
+if echo "$DOWN_STATUS" | grep -qw "running"; then
     log_test_fail "Down command: engine still shows running deployments"
     echo "$DOWN_STATUS"
 else

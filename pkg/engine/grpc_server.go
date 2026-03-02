@@ -155,9 +155,10 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 		resp.VpcCidr = s.vpcCIDR
 		resp.AllocatedSubnet = subnet.String()
 
-		// Record peer info using the agent's reachable IP from gRPC connection
+		// Record peer info: prefer agent-reported host IP (avoids control tunnel IP),
+		// fall back to gRPC connection IP.
 		if s.peerTracker != nil {
-			hostIP := extractPeerIP(ctx)
+			hostIP := agentHostIP(req.HostIp, ctx)
 			if hostIP != nil {
 				peer := overlay.Peer{
 					Subnet:    *subnet,
@@ -271,31 +272,9 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 
 	// Return VPC peer list if overlay networking is enabled
 	if s.peerTracker != nil {
-		// Update peer's host IP from gRPC connection (in case it changed)
-		hostIP := extractPeerIP(ctx)
-		if hostIP != nil {
-			if s.allocator != nil {
-				subnet, allocErr := s.allocator.Allocate(req.AgentName)
-				if allocErr == nil {
-					// Preserve existing public key from peer tracker
-					existingPeers := s.peerTracker.GetPeersExcluding("")
-					var existingPubKey string
-					for _, ep := range existingPeers {
-						if ep.Subnet.String() == subnet.String() {
-							existingPubKey = ep.PublicKey
-							break
-						}
-					}
-					p := overlay.Peer{
-						Subnet:    *subnet,
-						HostIP:    hostIP,
-						VTEPIP:    overlay.VTEPIP(*subnet),
-						PublicKey: existingPubKey,
-					}
-					s.peerTracker.Update(req.AgentName, p)
-				}
-			}
-		}
+		// Note: we do NOT update the host IP on heartbeat because the gRPC connection
+		// may come through the WireGuard control tunnel (10.200.x.x), which is not
+		// the data-plane address. The correct host IP was set during Register().
 
 		peers := s.peerTracker.GetPeersExcluding(req.AgentName)
 		for _, p := range peers {
@@ -1487,4 +1466,16 @@ func extractPeerIP(ctx context.Context) net.IP {
 		return nil
 	}
 	return addr.IP
+}
+
+// agentHostIP returns the agent's data-plane host IP. It prefers the
+// explicitly reported IP (which skips control tunnel interfaces on the agent)
+// over the gRPC connection IP (which may be a control tunnel address).
+func agentHostIP(reported string, ctx context.Context) net.IP {
+	if reported != "" {
+		if ip := net.ParseIP(reported); ip != nil {
+			return ip
+		}
+	}
+	return extractPeerIP(ctx)
 }

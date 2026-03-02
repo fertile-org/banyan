@@ -231,10 +231,12 @@ func TestInitializeVPCNetworking(t *testing.T) {
 		origChecker := prerequisiteChecker
 		origFactory := overlayDriverFactory
 		origDetector := hostIPDetector
+		origFwd := setupOverlayForwarding
 		t.Cleanup(func() {
 			prerequisiteChecker = origChecker
 			overlayDriverFactory = origFactory
 			hostIPDetector = origDetector
+			setupOverlayForwarding = origFwd
 		})
 		mockSysctlForTest(t)
 
@@ -243,6 +245,7 @@ func TestInitializeVPCNetworking(t *testing.T) {
 		prerequisiteChecker = func() error { return nil }
 		overlayDriverFactory = func(_, _ string) overlay.OverlayDriver { return mockDriver }
 		hostIPDetector = func() (net.IP, error) { return net.ParseIP("192.168.1.10"), nil }
+		setupOverlayForwarding = func() error { return nil }
 
 		a := &Agent{}
 		err := a.initializeVPCNetworking(context.Background(), &VPCConfig{
@@ -392,6 +395,91 @@ func TestInitializeVPCNetworking(t *testing.T) {
 			t.Errorf("expected 'failed to write CNI config' in error, got: %v", err)
 		}
 	})
+}
+
+func TestSetupOverlayForwarding(t *testing.T) {
+	t.Run("inserts FORWARD rules for overlay interfaces", func(t *testing.T) {
+		mock := &mockIPTables{}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		err := defaultSetupOverlayForwarding()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		// Should insert 2 rules (bridge→wg and wg→bridge)
+		if len(mock.inserted) != 2 {
+			t.Fatalf("expected 2 Insert calls, got %d", len(mock.inserted))
+		}
+		// First rule: banyan0 → banyan-wg
+		if !containsAll(mock.inserted[0], "-i", "banyan0", "-o", "banyan-wg", "-j", "ACCEPT") {
+			t.Errorf("unexpected first rule: %v", mock.inserted[0])
+		}
+		// Second rule: banyan-wg → banyan0
+		if !containsAll(mock.inserted[1], "-i", "banyan-wg", "-o", "banyan0", "-j", "ACCEPT") {
+			t.Errorf("unexpected second rule: %v", mock.inserted[1])
+		}
+	})
+
+	t.Run("skips existing rules", func(t *testing.T) {
+		mock := &mockIPTables{existsResult: true}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		err := defaultSetupOverlayForwarding()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		if len(mock.inserted) != 0 {
+			t.Errorf("expected 0 Insert calls when rules exist, got %d", len(mock.inserted))
+		}
+	})
+}
+
+// mockIPTables records iptables operations for testing overlay forwarding.
+type mockIPTables struct {
+	existsResult bool
+	inserted     [][]string
+	insertErr    error
+}
+
+func (m *mockIPTables) Exists(table, chain string, rulespec ...string) (bool, error) {
+	return m.existsResult, nil
+}
+
+func (m *mockIPTables) Insert(table, chain string, pos int, rulespec ...string) error {
+	if m.insertErr != nil {
+		return m.insertErr
+	}
+	m.inserted = append(m.inserted, rulespec)
+	return nil
+}
+
+func (m *mockIPTables) Delete(table, chain string, rulespec ...string) error {
+	return nil
+}
+
+// containsAll checks if all target strings are found in the slice.
+func containsAll(slice []string, targets ...string) bool {
+	for _, t := range targets {
+		found := false
+		for _, s := range slice {
+			if s == t {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
 }
 
 func TestReconcileVPCPeers(t *testing.T) {

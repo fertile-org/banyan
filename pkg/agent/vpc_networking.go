@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
@@ -39,6 +40,45 @@ var (
 const (
 	cniBinDir = "/opt/cni/bin"
 )
+
+// iptablesHandle is the subset of go-iptables methods used for overlay forwarding.
+type iptablesHandle interface {
+	Exists(table, chain string, rulespec ...string) (bool, error)
+	Insert(table, chain string, pos int, rulespec ...string) error
+	Delete(table, chain string, rulespec ...string) error
+}
+
+// iptablesFactory creates an iptables handle. Extracted as a variable for test mocking.
+var iptablesFactory = func() (iptablesHandle, error) {
+	return iptables.New()
+}
+
+// setupOverlayForwarding adds iptables FORWARD rules to allow cross-host
+// container-to-container traffic between the bridge and WireGuard interfaces.
+// Without these rules, the FORWARD chain's default DROP policy (set by containerd)
+// blocks direct TCP connections between containers on different hosts.
+// Extracted as a variable for test mocking.
+var setupOverlayForwarding = defaultSetupOverlayForwarding
+
+func defaultSetupOverlayForwarding() error {
+	ipt, err := iptablesFactory()
+	if err != nil {
+		return fmt.Errorf("failed to init iptables: %w", err)
+	}
+	rules := [][]string{
+		{"-i", "banyan0", "-o", "banyan-wg", "-j", "ACCEPT"},
+		{"-i", "banyan-wg", "-o", "banyan0", "-j", "ACCEPT"},
+	}
+	for _, rule := range rules {
+		exists, _ := ipt.Exists("filter", "FORWARD", rule...)
+		if !exists {
+			if insertErr := ipt.Insert("filter", "FORWARD", 1, rule...); insertErr != nil {
+				return fmt.Errorf("failed to add overlay FORWARD rule: %w", insertErr)
+			}
+		}
+	}
+	return nil
+}
 
 func defaultOverlayDriverFactory(wgPrivateKey, wgPublicKey string) overlay.OverlayDriver {
 	return overlay.NewWireGuardDriver(wgPrivateKey, wgPublicKey)
@@ -80,6 +120,11 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 	// 6. Write CNI config via driver
 	if writeErr := driver.WriteCNIConfig(*subnet); writeErr != nil {
 		return fmt.Errorf("failed to write CNI config: %w", writeErr)
+	}
+
+	// 7. Add iptables FORWARD rules for cross-host overlay traffic
+	if fwdErr := setupOverlayForwarding(); fwdErr != nil {
+		a.logger().Warn("Failed to set up overlay forwarding rules", "error", fwdErr)
 	}
 
 	// Store driver on Agent for later use
@@ -126,23 +171,40 @@ func checkVPCPrerequisites() error {
 	return nil
 }
 
-// detectHostIP returns the host's non-loopback IPv4 address.
+// controlTunnelIfacePrefix is the naming prefix for WireGuard control tunnel
+// interfaces. These must be skipped when detecting the host's "real" IP.
+const controlTunnelIfacePrefix = "wg-ctl-"
+
+// detectHostIP returns the host's non-loopback IPv4 address, skipping
+// WireGuard control tunnel interfaces (wg-ctl-*) whose IPs live in
+// 10.200.0.0/16 and must not be advertised as host endpoints.
 func detectHostIP() (net.IP, error) {
-	addrs, err := net.InterfaceAddrs()
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get interface addresses: %w", err)
+		return nil, fmt.Errorf("failed to get network interfaces: %w", err)
 	}
 
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
+	for _, iface := range ifaces {
+		// Skip control tunnel interfaces
+		if strings.HasPrefix(iface.Name, controlTunnelIfacePrefix) {
 			continue
 		}
-		ip := ipNet.IP
-		if ip.IsLoopback() || ip.To4() == nil {
+
+		addrs, addrErr := iface.Addrs()
+		if addrErr != nil {
 			continue
 		}
-		return ip, nil
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP
+			if ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			return ip, nil
+		}
 	}
 	return nil, fmt.Errorf("no non-loopback IPv4 address found")
 }

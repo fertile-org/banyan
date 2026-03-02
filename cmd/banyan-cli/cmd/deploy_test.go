@@ -487,6 +487,69 @@ services:
 	}
 }
 
+func TestRunDeploy_DryRun_WithEnvFile(t *testing.T) {
+	saveDeployFlags(t)
+
+	tmpDir := t.TempDir()
+
+	// Write .env file
+	envContent := "DB_HOST=localhost\nDB_PORT=5432\n"
+	if err := os.WriteFile(filepath.Join(tmpDir, ".env"), []byte(envContent), 0o644); err != nil {
+		t.Fatalf("failed to write .env: %v", err)
+	}
+
+	// Write manifest with env_file
+	manifest := `name: my-app
+services:
+  web:
+    image: nginx:alpine
+    env_file: .env
+    environment:
+      - APP_ENV=production
+`
+	manifestPath := filepath.Join(tmpDir, "banyan.yaml")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	deployFile = manifestPath
+	deployDryRun = true
+	deployNoWait = false
+	deployTags = nil
+
+	err := runDeploy(deployCmd, nil)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+}
+
+func TestRunDeploy_DryRun_MissingEnvFile(t *testing.T) {
+	saveDeployFlags(t)
+
+	tmpDir := t.TempDir()
+	manifest := `name: my-app
+services:
+  web:
+    image: nginx:alpine
+    env_file: .env.nonexistent
+`
+	manifestPath := filepath.Join(tmpDir, "banyan.yaml")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatalf("failed to write manifest: %v", err)
+	}
+
+	deployFile = manifestPath
+	deployDryRun = true
+
+	err := runDeploy(deployCmd, nil)
+	if err == nil {
+		t.Fatal("expected error for missing env file")
+	}
+	if !strings.Contains(err.Error(), "failed to resolve env_file") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
 func TestRunDeploy_DryRun_InvalidManifest(t *testing.T) {
 	saveDeployFlags(t)
 

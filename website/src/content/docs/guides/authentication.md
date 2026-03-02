@@ -71,7 +71,7 @@ sequenceDiagram
     Note right of Admin: echo '<pubkey>' > /etc/banyan/whitelisted-keys/cli-1.pub
 
     Note over Admin,Engine: Step 6: Start engine
-    Admin->>Engine: banyan-engine start
+    Admin->>Engine: sudo systemctl start banyan-engine
     Engine->>Engine: Load all *.pub from whitelisted-keys/
     Engine->>Engine: Start gRPC server with pubkey auth
 ```

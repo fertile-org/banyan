@@ -300,11 +300,63 @@ install_wireguard() {
         ip link delete wg-test 2>/dev/null
         info "WireGuard kernel support: OK"
     else
-        warn "WireGuard kernel module not available."
-        warn "  - Overlay networking will fall back to VXLAN."
-        warn "  - Control plane tunnel (encrypted gRPC) will be unavailable."
-        warn "To enable WireGuard: modprobe wireguard (requires Linux 5.6+ or wireguard-dkms)"
+        error "WireGuard kernel module not available."
+        error "  - WireGuard is required for overlay networking and the control tunnel."
+        error "To enable WireGuard: modprobe wireguard (requires Linux 5.6+ or wireguard-dkms)"
+        # Fatal for agents — WireGuard is now required (not optional)
+        if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
+            fatal "WireGuard is required for agents. Install the kernel module and try again."
+        fi
     fi
+}
+
+# --- Systemd services ---
+
+install_systemd_services() {
+    info "Installing systemd service files..."
+
+    if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
+        cat > /etc/systemd/system/banyan-engine.service <<EOF
+[Unit]
+Description=Banyan Engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${INSTALL_DIR}/banyan-engine start
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        info "  banyan-engine.service installed"
+    fi
+
+    if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
+        cat > /etc/systemd/system/banyan-agent.service <<EOF
+[Unit]
+Description=Banyan Agent
+After=network-online.target containerd.service
+Wants=network-online.target containerd.service
+
+[Service]
+Type=simple
+ExecStart=${INSTALL_DIR}/banyan-agent start
+Restart=on-failure
+RestartSec=5
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+        info "  banyan-agent.service installed"
+    fi
+
+    systemctl daemon-reload
+    info "systemd services ready (not yet enabled — run init first)"
 }
 
 # --- Verify ---
@@ -340,7 +392,8 @@ verify() {
         if command -v wg &>/dev/null; then
             info "  wireguard-tools: OK (for control tunnel)"
         else
-            warn "  wireguard-tools: NOT FOUND (control tunnel will be unavailable, gRPC falls back to unencrypted)"
+            error "  wireguard-tools: NOT FOUND (required for control tunnel)"
+            ok=false
         fi
     fi
 
@@ -376,7 +429,8 @@ verify() {
         if command -v wg &>/dev/null; then
             info "  wireguard-tools: OK"
         else
-            warn "  wireguard-tools: NOT FOUND (overlay falls back to VXLAN, control tunnel unavailable)"
+            error "  wireguard-tools: NOT FOUND (required for overlay networking and control tunnel)"
+            ok=false
         fi
 
     fi
@@ -392,9 +446,9 @@ verify() {
     echo ""
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
-        echo "  Start the Engine:"
-        echo "    sudo banyan-engine init    # generates keypair, configures etcd"
-        echo "    sudo banyan-engine start"
+        echo "  Engine:"
+        echo "    sudo banyan-engine init                    # one-time setup"
+        echo "    sudo systemctl enable --now banyan-engine  # start + enable on boot"
         echo ""
         echo "  Note: Engine init displays a public key — share it with agents/CLI"
         echo "  to enable encrypted control tunnels (port 51821/UDP)."
@@ -402,11 +456,11 @@ verify() {
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
-        echo "  Start an Agent:"
-        echo "    sudo banyan-agent init     # generates keypair, asks for engine public key"
+        echo "  Agent:"
+        echo "    sudo banyan-agent init                     # one-time setup"
         echo "    # Copy agent's public key to engine:"
         echo "    #   echo '<key>' > /etc/banyan/whitelisted-keys/<name>.pub"
-        echo "    sudo banyan-agent start"
+        echo "    sudo systemctl enable --now banyan-agent   # start + enable on boot"
         echo ""
     fi
 }
@@ -474,6 +528,8 @@ main() {
         install_wireguard  # WireGuard is used for both overlay networking and control tunnel
         install_buildkit
     fi
+
+    install_systemd_services
 
     verify
 }

@@ -34,7 +34,6 @@ type Options struct {
 	EtcdKeyFile     string            // client key for mTLS
 	EtcdCAFile      string            // CA certificate for server verification
 	WhitelistedKeys map[string]string // publicKey → agentName
-	OverlayType     string            // "wireguard" (default) or "vxlan"
 }
 
 // Engine is the Banyan control plane.
@@ -156,7 +155,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		PeerTracker:     peerTracker,
 		VPCCIDR:         e.opts.VPCCIDR,
 		WhitelistedKeys: e.opts.WhitelistedKeys,
-		OverlayType:     e.opts.OverlayType,
 		MetricsRegistry: e.metricsRegistry,
 		Events:          e.events,
 		StartedAt:       e.startedAt,
@@ -810,7 +808,6 @@ var listInterfaceAddrsFunc = listInterfaceAddrs
 // excluded from CIDR conflict checks.
 var banyanInterfaces = map[string]bool{
 	"banyan0":    true, // VPC bridge
-	"banyan.1":   true, // VXLAN data plane
 	"banyan-wg":  true, // WireGuard data plane
 	"wg-ctl-eng": true, // WireGuard control tunnel (engine)
 	"wg-ctl-agt": true, // WireGuard control tunnel (agent)

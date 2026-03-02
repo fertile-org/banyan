@@ -150,8 +150,15 @@ func (a *Agent) Run(ctx context.Context) error {
 		apiAddr = a.opts.NodeName + ":" + a.opts.APIPort
 	}
 
+	// Detect data-plane host IP for overlay peer endpoint
+	detectedIP, _ := hostIPDetector()
+	var hostIPStr string
+	if detectedIP != nil {
+		hostIPStr = detectedIP.String()
+	}
+
 	// Register node
-	registryURL, vpcConfig, activeContainers, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
+	registryURL, vpcConfig, activeContainers, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey, hostIPStr)
 	if err != nil {
 		return fmt.Errorf("failed to register node: %w", err)
 	}
@@ -659,7 +666,13 @@ func (a *Agent) reconnect(ctx context.Context) {
 			apiAddr = a.opts.NodeName + ":" + a.opts.APIPort
 		}
 
-		_, vpcConfig, activeContainers, err := a.client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey)
+		reIP, _ := hostIPDetector()
+		var reHostIPStr string
+		if reIP != nil {
+			reHostIPStr = reIP.String()
+		}
+
+		_, vpcConfig, activeContainers, err := a.client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey, reHostIPStr)
 		if err != nil {
 			if ctx.Err() != nil {
 				return

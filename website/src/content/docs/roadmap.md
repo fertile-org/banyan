@@ -74,8 +74,7 @@ Status: **Done**
 
 Built-in overlay networking and cross-host load balancing without external dependencies.
 
-- WireGuard overlay (default) with VXLAN fallback, both managed by Engine via abstract `OverlayDriver` interface
-- Built-in VXLAN overlay managed by Engine with deterministic VTEP MACs
+- WireGuard overlay managed by Engine via abstract `OverlayDriver` interface
 - Per-agent /24 subnet allocation from VPC CIDR via `SubnetAllocator`
 - Peer discovery via heartbeat RPC (15s convergence)
 - iptables DNAT proxy on each agent for port forwarding to container backends
@@ -120,26 +119,14 @@ See [CLI Reference — dashboard](/reference/cli/#dashboard) for details.
 
 ---
 
-## Milestone 5 — Rootless Mode
+## Milestone 5 — Production Readiness
 
-Run Banyan without root. Today every component needs `sudo` — the engine to manage etcd and WireGuard, the agent to run containerd and configure networking, even the CLI to write config during `init`. This milestone removes that requirement so Banyan works on shared servers, locked-down environments, and developer machines without elevated privileges.
+Deploy with confidence: environment files for configuration, systemd services for reliability.
 
-- **Rootless containerd support**: Agent detects rootless containerd and adapts nerdctl commands accordingly (user socket, unprivileged namespace)
-- **User-space networking**: Replace kernel WireGuard with wireguard-go and iptables DNAT with a Go TCP proxy — no kernel modules, no sysctl writes, no `/proc` access
-- **User-scoped config and data**: Config in `~/.config/banyan/` and data in `~/.local/share/banyan/` instead of `/etc/banyan/` and `/var/lib/banyan/` — no root needed for `init`
-- **Unprivileged ports only**: All default ports already above 1024 (gRPC 50051, registry 5000); services needing 80/443 can use port mapping from a higher port
-- **Graceful fallback**: When running as root, Banyan uses the faster kernel-mode networking (WireGuard, iptables). Without root, it transparently falls back to user-space equivalents. Same manifest, same commands — just without `sudo`
-
----
-
-## Milestone 5.1 — Environment File Support
-
-Support `env_file` directive in the manifest, matching Docker Compose behavior.
-
-- **`env_file` directive**: Reference `.env` files in the manifest (e.g., `env_file: .env` or `env_file: [.env, .env.local]`)
-- **Variable loading**: Read key-value pairs from `.env` files and inject as container environment variables
-- **File distribution**: Bundle referenced `.env` files with the manifest so agents can resolve them
-- **Compose parity**: Support both string and list forms, matching Docker Compose syntax
+- **`env_file` support**: Reference `.env` files in the manifest (`env_file: .env` or `env_file: [.env, .env.local]`), matching Docker Compose syntax
+- **Variable loading**: Parse key-value pairs from `.env` files and inject as container environment variables at deploy time
+- **File distribution**: CLI bundles referenced `.env` files with the manifest so agents can resolve them on any node
+- **Systemd service files**: Install script creates `banyan-engine.service` and `banyan-agent.service` for `systemctl enable --now` lifecycle management — auto-start on boot, restart on crash
 
 ---
 
@@ -209,7 +196,7 @@ Authorizaton, secrets management, and certificate rotation for secure cluster op
 
 Automatically redistribute services across nodes based on actual resource usage and node capacity.
 
-- Engine tracks actual CPU/memory usage per container (from metrics collected in Milestone 5)
+- Engine tracks actual CPU/memory usage per container (from agent health reports)
 - Identify over-utilized and under-utilized nodes
 - Gracefully move containers from crowded nodes to nodes with available capacity
 - Drain-and-restart for stateless services; manual rebalancing only for stateful services

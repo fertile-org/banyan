@@ -7,11 +7,11 @@ sidebar:
 
 Banyan uses three binaries. Install only what each machine needs.
 
-| Binary | Role | Install on |
-|--------|------|------------|
-| `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node |
-| `banyan-agent` | Worker (task execution, container management) | Worker nodes |
-| `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine |
+| Binary | Role | Install on | Requires sudo |
+|--------|------|------------|---------------|
+| `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node | Yes (all commands) |
+| `banyan-agent` | Worker (task execution, container management) | Worker nodes | Yes (all commands) |
+| `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine | Only `init` |
 
 ---
 
@@ -21,7 +21,7 @@ Run on your control plane node.
 
 ### init
 
-Set up the Engine node: creates data directories and walks you through an interactive setup wizard.
+One-time setup. Creates `/etc/banyan/` config directories, enables IP forwarding, generates a WireGuard keypair, and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-engine init
@@ -38,9 +38,20 @@ The wizard generates a WireGuard keypair for authentication and asks:
 
 The engine's public key is displayed during init. Share this key with agents and CLI clients that want to use the encrypted WireGuard control tunnel. See [Authentication](/guides/authentication/) for details.
 
+### Service management
+
+The install script creates a systemd service. After init, manage the engine with:
+
+```bash
+sudo systemctl enable --now banyan-engine  # start + enable on boot
+sudo systemctl stop banyan-engine          # stop
+sudo systemctl status banyan-engine        # check status
+sudo journalctl -u banyan-engine -f        # view logs
+```
+
 ### start
 
-Start the Engine. Launches managed etcd (or connects to external etcd), initializes networking, starts the gRPC server, and watches for deployments.
+Start the Engine in the foreground. Useful for development and debugging. In production, use `systemctl` instead.
 
 ```bash
 sudo banyan-engine start
@@ -59,7 +70,7 @@ Runs in the foreground. Stop with `Ctrl+C`.
 
 ### stop
 
-Stop the Engine.
+Stop the Engine (foreground mode). For systemd, use `sudo systemctl stop banyan-engine`.
 
 ```bash
 sudo banyan-engine stop
@@ -70,7 +81,7 @@ sudo banyan-engine stop
 Show Engine status (agents, deployments, containers). Connects to the configured store backend.
 
 ```bash
-banyan-engine status
+sudo banyan-engine status
 ```
 
 | Flag | Default | Description |
@@ -86,7 +97,7 @@ Run on each worker node.
 
 ### init
 
-Prepare the worker node: creates data directories, verifies containerd and nerdctl are installed, generates a WireGuard keypair, and walks you through an interactive setup wizard.
+One-time setup. Creates `/etc/banyan/` config directories, enables IP forwarding, verifies containerd and nerdctl are installed, generates a WireGuard keypair, and walks you through an interactive setup wizard.
 
 ```bash
 sudo banyan-agent init
@@ -121,12 +132,23 @@ agent:
 EOF
 
 # Init generates a keypair and skips prompts since config exists
-sudo banyan-agent init
+banyan-agent init
+```
+
+### Service management
+
+The install script creates a systemd service. After init, manage the agent with:
+
+```bash
+sudo systemctl enable --now banyan-agent   # start + enable on boot
+sudo systemctl stop banyan-agent           # stop
+sudo systemctl status banyan-agent         # check status
+sudo journalctl -u banyan-agent -f         # view logs
 ```
 
 ### start
 
-Start the Agent. Connects to the Engine, registers the node, and begins executing tasks.
+Start the Agent in the foreground. Useful for development and debugging. In production, use `systemctl` instead.
 
 ```bash
 sudo banyan-agent start --node-name worker-1
@@ -145,7 +167,7 @@ The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `init`). 
 
 ### stop
 
-Stop the Agent.
+Stop the Agent (foreground mode). For systemd, use `sudo systemctl stop banyan-agent`.
 
 ```bash
 sudo banyan-agent stop
@@ -156,7 +178,7 @@ sudo banyan-agent stop
 Show the Agent's connection status.
 
 ```bash
-banyan-agent status
+sudo banyan-agent status
 ```
 
 | Flag | Default | Description |
@@ -167,11 +189,11 @@ banyan-agent status
 
 ## banyan-cli
 
-Run on any machine to manage deployments. Run `banyan-cli init` once to configure the engine connection, then use `up`, `down`, and the resource commands freely.
+Run on any machine to manage deployments. The CLI does not need `sudo` — only `init` requires it once to create the WireGuard control tunnel. After that, all commands run as your normal user.
 
 ### init
 
-Configure the CLI with an interactive setup wizard. Generates a WireGuard keypair for authentication.
+One-time setup. Generates a WireGuard keypair, creates the encrypted control tunnel to the engine, and saves the connection config. Requires `sudo` because creating a WireGuard kernel interface needs root.
 
 ```bash
 sudo banyan-cli init

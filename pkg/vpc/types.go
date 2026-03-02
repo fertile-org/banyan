@@ -67,7 +67,7 @@ type SubnetLease struct {
 
 // TraceHop represents a single hop in a connection trace
 type TraceHop struct {
-	Type    string `json:"type"`    // gateway, vxlan, container, etc.
+	Type    string `json:"type"`    // gateway, wireguard, container, nat, loopback, destination, etc.
 	Address string `json:"address"` // IP or hostname
 	Latency string `json:"latency,omitempty"`
 }

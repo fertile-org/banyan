@@ -9,8 +9,11 @@ import (
 	"github.com/coreos/go-iptables/iptables"
 )
 
-// sysctlWriter allows tests to override sysctl writes.
-var sysctlWriter = writeSysctl
+// sysctlWriter and sysctlReader allow tests to override sysctl access.
+var (
+	sysctlWriter = defaultSysctlWriter
+	sysctlReader = defaultSysctlReader
+)
 
 // SetSysctlWriter overrides the sysctl writer for testing from external packages.
 func SetSysctlWriter(fn func(string, string) error) func() {
@@ -19,8 +22,32 @@ func SetSysctlWriter(fn func(string, string) error) func() {
 	return func() { sysctlWriter = orig }
 }
 
-func writeSysctl(path, value string) error {
+func defaultSysctlWriter(path, value string) error {
 	return os.WriteFile(path, []byte(value), 0o644)
+}
+
+func defaultSysctlReader(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// ensureSysctl checks that a sysctl value is set correctly.
+// If already correct, it does nothing. Otherwise, it attempts to write (may succeed
+// with CAP_NET_ADMIN). Returns an error only if the value is wrong and cannot be corrected.
+func ensureSysctl(path, expected string) error {
+	current, err := sysctlReader(path)
+	if err == nil && current == expected {
+		return nil // already set correctly (e.g. by 'setup' command)
+	}
+
+	// Value is wrong or unreadable — attempt to write
+	if writeErr := sysctlWriter(path, expected); writeErr != nil {
+		return fmt.Errorf("%s is %q, expected %q, and write failed: %w", path, current, expected, writeErr)
+	}
+	return nil
 }
 
 // Chain name constants for iptables rules.
@@ -86,13 +113,14 @@ func (p *Proxy) init() error {
 	// can route to container IPs on bridge interfaces. Without this,
 	// "curl localhost:<port>" would be silently dropped by the kernel.
 	// This is the same approach used by kube-proxy in iptables mode.
-	if err := sysctlWriter("/proc/sys/net/ipv4/conf/all/route_localnet", "1"); err != nil {
-		return fmt.Errorf("failed to enable route_localnet: %w", err)
+	// If init was run with sudo, these are already set. We check first, attempt write if needed.
+	if err := ensureSysctl("/proc/sys/net/ipv4/conf/all/route_localnet", "1"); err != nil {
+		return fmt.Errorf("failed to enable route_localnet (run 'sudo banyan-agent init' first): %w", err)
 	}
 
-	// Ensure IP forwarding is enabled (usually set by containerd, but be explicit)
-	if err := sysctlWriter("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
-		return fmt.Errorf("failed to enable ip_forward: %w", err)
+	// Ensure IP forwarding is enabled (usually set by init, but verify)
+	if err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
+		return fmt.Errorf("failed to enable ip_forward (run 'sudo banyan-agent init' first): %w", err)
 	}
 
 	// Clean up any stale chains from a previous crash

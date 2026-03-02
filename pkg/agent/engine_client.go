@@ -38,15 +38,13 @@ func NewEngineClient(engineAddr, publicKey string) (*EngineClient, error) {
 type VPCConfig struct {
 	VPCCIDR         string
 	AllocatedSubnet string // /24 subnet allocated for this agent
-	OverlayType     string // "wireguard" or "vxlan"
 }
 
 // VPCPeer represents a remote agent in the overlay network.
 type VPCPeer struct {
 	Subnet    string
 	HostIP    string
-	VTEPMAC   string // VXLAN
-	PublicKey string // WireGuard
+	PublicKey string // WireGuard public key
 }
 
 // ActiveContainer describes a container previously running on this agent.
@@ -59,13 +57,14 @@ type ActiveContainer struct {
 	TaskID        string
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey string) (string, *VPCConfig, []ActiveContainer, error) {
+func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey, hostIP string) (string, *VPCConfig, []ActiveContainer, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:    name,
 		ApiAddress:   apiAddr,
 		SessionToken: sessionToken,
 		Tags:         tags,
 		WgPublicKey:  wgPublicKey,
+		HostIp:       hostIP,
 	})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("register failed: %w", err)
@@ -76,7 +75,6 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 		vpcConfig = &VPCConfig{
 			VPCCIDR:         resp.VpcCidr,
 			AllocatedSubnet: resp.AllocatedSubnet,
-			OverlayType:     resp.OverlayType,
 		}
 	}
 
@@ -118,7 +116,6 @@ func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string,
 		peers = append(peers, VPCPeer{
 			Subnet:    p.Subnet,
 			HostIP:    p.HostIp,
-			VTEPMAC:   p.VtepMac,
 			PublicKey: p.PublicKey,
 		})
 	}

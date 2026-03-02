@@ -191,11 +191,11 @@ func (m *Manager) TraceConnection(ctx context.Context, fromIP, toIP net.IP, port
 			Latency: "1ms",
 		})
 
-		// For cross-subnet internal traffic, add VXLAN hop
+		// For cross-subnet internal traffic, add WireGuard tunnel hop
 		if !sameSubnet && isInternal {
 			result.Hops = append(result.Hops, vpc.TraceHop{
-				Type:    "vxlan",
-				Address: fmt.Sprintf("vxlan-%s", toSubnet),
+				Type:    "wireguard",
+				Address: fmt.Sprintf("wg-%s", toSubnet),
 				Latency: "2ms",
 			})
 		}

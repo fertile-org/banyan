@@ -369,20 +369,20 @@ func TestDebugManager_ComplexScenarios(t *testing.T) {
 
 		// Verify hop types
 		hasGateway := false
-		hasVxlan := false
+		hasWG := false
 		for _, hop := range result.Hops {
 			if hop.Type == "gateway" {
 				hasGateway = true
 			}
-			if hop.Type == "vxlan" {
-				hasVxlan = true
+			if hop.Type == "wireguard" {
+				hasWG = true
 			}
 		}
 		if !hasGateway {
 			t.Error("Expected gateway hop")
 		}
-		if !hasVxlan {
-			t.Error("Expected VXLAN tunnel hop")
+		if !hasWG {
+			t.Error("Expected WireGuard tunnel hop")
 		}
 	})
 

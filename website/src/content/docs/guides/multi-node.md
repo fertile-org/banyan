@@ -41,7 +41,7 @@ On your Engine server (e.g., `192.168.1.10`):
 
 ```bash
 sudo banyan-engine init
-sudo banyan-engine start
+sudo systemctl enable --now banyan-engine
 ```
 
 During init, Banyan generates a WireGuard keypair for the engine and creates the whitelisted keys directory at `/etc/banyan/whitelisted-keys/`. The wizard also asks for:
@@ -89,7 +89,7 @@ On Worker 1 (`192.168.1.11`):
 
 ```bash
 sudo banyan-agent init
-sudo banyan-agent start --node-name worker-1
+sudo systemctl enable --now banyan-agent
 ```
 
 The init wizard asks for:
@@ -109,7 +109,7 @@ On Worker 2 (`192.168.1.12`):
 
 ```bash
 sudo banyan-agent init
-sudo banyan-agent start --node-name worker-2
+sudo systemctl enable --now banyan-agent
 ```
 
 Each Agent connects to the Engine via gRPC, registers, and starts a heartbeat.
@@ -213,7 +213,7 @@ banyan-cli up -f banyan.yaml
 1. Install `banyan-agent`, containerd, nerdctl, and wireguard-tools on the new server.
 2. Run `sudo banyan-agent init` (enter engine host, port, and node name).
 3. Copy the agent's public key to the engine: `echo '<pubkey>' > /etc/banyan/whitelisted-keys/<name>.pub`
-4. Run `sudo banyan-agent start`
+4. Run `sudo systemctl enable --now banyan-agent`
 
 The new worker appears in `banyan-cli agent` within seconds. Future deployments include it automatically.
 

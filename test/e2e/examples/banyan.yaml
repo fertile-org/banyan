@@ -12,8 +12,7 @@ services:
       replicas: 2
     ports:
       - "3000:3000"
-    environment:
-      - REDIS_HOST=db.internal
+    env_file: .env
     command:
       - node
       - -e

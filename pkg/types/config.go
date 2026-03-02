@@ -52,7 +52,6 @@ type EngineConfig struct {
 	EtcdKeyFile        string `yaml:"etcd_key_file,omitempty"`
 	EtcdCAFile         string `yaml:"etcd_ca_file,omitempty"`
 	WhitelistedKeysDir string `yaml:"whitelisted_keys_dir,omitempty"`
-	OverlayType        string `yaml:"overlay_type,omitempty"` // "wireguard" (default) or "vxlan"
 	WGPrivateKeyFile   string `yaml:"wg_private_key_file,omitempty"`
 	WGPublicKey        string `yaml:"wg_public_key,omitempty"`
 	ManagedEtcd        bool   `yaml:"managed_etcd,omitempty"`

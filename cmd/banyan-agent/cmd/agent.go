@@ -100,7 +100,12 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("========================================"))
 
 	if os.Geteuid() != 0 {
-		fmt.Println(styleWarn.Render("Warning: Not running as root. Some operations may require sudo."))
+		return fmt.Errorf("init must be run as root: sudo banyan-agent init")
+	}
+
+	// --- System setup (config dirs, sysctl) ---
+	if err := runAgentSystemSetup(); err != nil {
+		return err
 	}
 
 	// --- Directory creation ---
@@ -112,7 +117,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		"/var/run",
 	}
 
-	fmt.Println(styleInfo.Render("\nCreating directories..."))
+	fmt.Println(styleInfo.Render("\nCreating data directories..."))
 	for _, dir := range dirs {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
@@ -287,11 +292,21 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("========================================"))
 	fmt.Println(styleOK.Render("Initialization complete!"))
 	fmt.Println()
-	fmt.Println(styleInfo.Render("Next step: banyan-agent start"))
+	fmt.Println(styleInfo.Render("Next steps:"))
+	fmt.Println()
+	fmt.Println("  sudo systemctl enable --now banyan-agent   # start + enable on boot")
+	fmt.Println()
+	fmt.Println(styleDim.Render("Or run in foreground (for development):"))
+	fmt.Println()
+	fmt.Println("  sudo banyan-agent start")
 	return nil
 }
 
 func runAgentStart(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("start must be run as root: sudo banyan-agent start")
+	}
+
 	logging.Setup(nil)
 	log := logging.New("agent")
 	log.Info("Banyan Agent starting")
@@ -540,4 +555,57 @@ func parseTags(input string) []string {
 		}
 	}
 	return tags
+}
+
+// runAgentSystemSetup performs one-time system configuration:
+// creates /etc/banyan/ directories and enables IP forwarding.
+func runAgentSystemSetup() error {
+	// Step 1: Create config directories
+	fmt.Print(styleInfo.Render("\nConfiguring system...") + "\n")
+	fmt.Print("  Creating /etc/banyan/ directories... ")
+	configDirs := []string{"/etc/banyan", "/etc/banyan/keys"}
+	for _, dir := range configDirs {
+		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+			fmt.Println("[FAIL]")
+			return fmt.Errorf("create %s: %w", dir, mkErr)
+		}
+	}
+	fmt.Println(styleOK.Render("[OK]"))
+
+	// Step 2: Enable IP forwarding
+	fmt.Print("  Enabling net.ipv4.ip_forward... ")
+	if err := enableAgentSysctlPersistent("net.ipv4.ip_forward"); err != nil {
+		fmt.Println("[FAIL]")
+		return err
+	}
+	fmt.Println(styleOK.Render("[OK]"))
+
+	return nil
+}
+
+// enableAgentSysctlPersistent sets a sysctl value persistently via /etc/sysctl.d/ and applies it.
+func enableAgentSysctlPersistent(key string) error {
+	value := "1"
+	confFile := "/etc/sysctl.d/99-banyan.conf"
+	existing, _ := os.ReadFile(confFile)
+	line := key + " = " + value
+	if !strings.Contains(string(existing), line) {
+		content := string(existing)
+		if content != "" && !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
+		content += line + "\n"
+		if err := os.WriteFile(confFile, []byte(content), 0o644); err != nil { //nolint:gosec // sysctl.d config must be world-readable
+			return fmt.Errorf("write sysctl config: %w", err)
+		}
+	}
+	return runInitCmd("sysctl", "-w", key+"="+value)
+}
+
+// runInitCmd runs a command and returns an error if it fails.
+func runInitCmd(name string, args ...string) error {
+	c := exec.Command(name, args...) //nolint:gosec // args are constructed internally
+	c.Stdout = os.Stdout
+	c.Stderr = os.Stderr
+	return c.Run()
 }

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/coreos/go-iptables/iptables"
 	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/vpc/dns"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
@@ -26,6 +27,8 @@ var (
 		return dns.NewServer(m, c)
 	}
 	reclaimDNSPort = defaultReclaimDNSPort
+	readSysctl     = defaultReadSysctl
+	writeSysctl    = defaultWriteSysctl
 )
 
 // Paths used by findUDPListenerPID — variables for testability.
@@ -38,14 +41,50 @@ const (
 	cniBinDir = "/opt/cni/bin"
 )
 
-func defaultOverlayDriverFactory(overlayType, wgPrivateKey, wgPublicKey string) overlay.OverlayDriver {
-	if overlayType == "wireguard" && wgPrivateKey != "" && wgPublicKey != "" {
-		return overlay.NewWireGuardDriver(wgPrivateKey, wgPublicKey)
-	}
-	return overlay.NewVXLANDriver()
+// iptablesHandle is the subset of go-iptables methods used for overlay forwarding.
+type iptablesHandle interface {
+	Exists(table, chain string, rulespec ...string) (bool, error)
+	Insert(table, chain string, pos int, rulespec ...string) error
+	Delete(table, chain string, rulespec ...string) error
 }
 
-// initializeVPCNetworking sets up the VXLAN overlay network for this agent.
+// iptablesFactory creates an iptables handle. Extracted as a variable for test mocking.
+var iptablesFactory = func() (iptablesHandle, error) {
+	return iptables.New()
+}
+
+// setupOverlayForwarding adds iptables FORWARD rules to allow cross-host
+// container-to-container traffic between the bridge and WireGuard interfaces.
+// Without these rules, the FORWARD chain's default DROP policy (set by containerd)
+// blocks direct TCP connections between containers on different hosts.
+// Extracted as a variable for test mocking.
+var setupOverlayForwarding = defaultSetupOverlayForwarding
+
+func defaultSetupOverlayForwarding() error {
+	ipt, err := iptablesFactory()
+	if err != nil {
+		return fmt.Errorf("failed to init iptables: %w", err)
+	}
+	rules := [][]string{
+		{"-i", "banyan0", "-o", "banyan-wg", "-j", "ACCEPT"},
+		{"-i", "banyan-wg", "-o", "banyan0", "-j", "ACCEPT"},
+	}
+	for _, rule := range rules {
+		exists, _ := ipt.Exists("filter", "FORWARD", rule...)
+		if !exists {
+			if insertErr := ipt.Insert("filter", "FORWARD", 1, rule...); insertErr != nil {
+				return fmt.Errorf("failed to add overlay FORWARD rule: %w", insertErr)
+			}
+		}
+	}
+	return nil
+}
+
+func defaultOverlayDriverFactory(wgPrivateKey, wgPublicKey string) overlay.OverlayDriver {
+	return overlay.NewWireGuardDriver(wgPrivateKey, wgPublicKey)
+}
+
+// initializeVPCNetworking sets up the WireGuard overlay network for this agent.
 // Called once during Agent.Run() after registration.
 func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfig) error {
 	// 1. Check prerequisites (CNI plugins — no more flanneld check)
@@ -65,13 +104,15 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 		return fmt.Errorf("failed to detect host IP: %w", err)
 	}
 
-	// 4. Enable IP forwarding (required for routing between bridge and VXLAN)
-	if writeErr := os.WriteFile("/proc/sys/net/ipv4/ip_forward", []byte("1"), 0o644); writeErr != nil {
-		a.logger().Warn("Failed to enable IP forwarding", "error", writeErr)
+	// 4. Ensure IP forwarding is enabled (required for routing between bridge and WireGuard)
+	// If init was run with sudo, this is already set via sysctl.d. We check first, then attempt
+	// to write if needed (may succeed with CAP_NET_ADMIN), and warn clearly on failure.
+	if err := ensureSysctl("/proc/sys/net/ipv4/ip_forward", "1"); err != nil {
+		a.logger().Warn("IP forwarding is not enabled — run 'sudo banyan-agent init' first", "error", err)
 	}
 
 	// 5. Create overlay driver and call Init()
-	driver := overlayDriverFactory(vpcConfig.OverlayType, a.opts.WGPrivateKey, a.opts.WGPublicKey)
+	driver := overlayDriverFactory(a.opts.WGPrivateKey, a.opts.WGPublicKey)
 	if initErr := driver.Init(ctx, *subnet, hostIP); initErr != nil {
 		return fmt.Errorf("overlay init failed: %w", initErr)
 	}
@@ -79,6 +120,11 @@ func (a *Agent) initializeVPCNetworking(ctx context.Context, vpcConfig *VPCConfi
 	// 6. Write CNI config via driver
 	if writeErr := driver.WriteCNIConfig(*subnet); writeErr != nil {
 		return fmt.Errorf("failed to write CNI config: %w", writeErr)
+	}
+
+	// 7. Add iptables FORWARD rules for cross-host overlay traffic
+	if fwdErr := setupOverlayForwarding(); fwdErr != nil {
+		a.logger().Warn("Failed to set up overlay forwarding rules", "error", fwdErr)
 	}
 
 	// Store driver on Agent for later use
@@ -97,13 +143,7 @@ func (a *Agent) reconcileVPCPeers(ctx context.Context, peers []VPCPeer) error {
 
 	overlayPeers := make([]overlay.Peer, 0, len(peers))
 	for _, p := range peers {
-		var peer overlay.Peer
-		var err error
-		if p.PublicKey != "" {
-			peer, err = overlay.PeerFromSubnetAndHostWG(p.Subnet, p.HostIP, p.PublicKey)
-		} else {
-			peer, err = overlay.PeerFromSubnetAndHost(p.Subnet, p.HostIP, p.VTEPMAC)
-		}
+		peer, err := overlay.PeerFromProto(p.Subnet, p.HostIP, p.PublicKey)
 		if err != nil {
 			a.logger().Warn("Skipping invalid peer", "error", err)
 			continue
@@ -119,7 +159,6 @@ func (a *Agent) reconcileVPCPeers(ctx context.Context, peers []VPCPeer) error {
 }
 
 // checkVPCPrerequisites verifies required CNI plugins exist.
-// No longer checks for flanneld since we use built-in VXLAN.
 func checkVPCPrerequisites() error {
 	requiredPlugins := []string{"bridge", "host-local", "loopback", "portmap"}
 	for _, plugin := range requiredPlugins {
@@ -132,23 +171,40 @@ func checkVPCPrerequisites() error {
 	return nil
 }
 
-// detectHostIP returns the host's non-loopback IPv4 address.
+// controlTunnelIfacePrefix is the naming prefix for WireGuard control tunnel
+// interfaces. These must be skipped when detecting the host's "real" IP.
+const controlTunnelIfacePrefix = "wg-ctl-"
+
+// detectHostIP returns the host's non-loopback IPv4 address, skipping
+// WireGuard control tunnel interfaces (wg-ctl-*) whose IPs live in
+// 10.200.0.0/16 and must not be advertised as host endpoints.
 func detectHostIP() (net.IP, error) {
-	addrs, err := net.InterfaceAddrs()
+	ifaces, err := net.Interfaces()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get interface addresses: %w", err)
+		return nil, fmt.Errorf("failed to get network interfaces: %w", err)
 	}
 
-	for _, addr := range addrs {
-		ipNet, ok := addr.(*net.IPNet)
-		if !ok {
+	for _, iface := range ifaces {
+		// Skip control tunnel interfaces
+		if strings.HasPrefix(iface.Name, controlTunnelIfacePrefix) {
 			continue
 		}
-		ip := ipNet.IP
-		if ip.IsLoopback() || ip.To4() == nil {
+
+		addrs, addrErr := iface.Addrs()
+		if addrErr != nil {
 			continue
 		}
-		return ip, nil
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip := ipNet.IP
+			if ip.IsLoopback() || ip.To4() == nil {
+				continue
+			}
+			return ip, nil
+		}
 	}
 	return nil, fmt.Errorf("no non-loopback IPv4 address found")
 }
@@ -323,4 +379,35 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 	for hostname := range desired {
 		a.registeredDNS[hostname] = true
 	}
+}
+
+// defaultReadSysctl reads a sysctl value from /proc/sys.
+func defaultReadSysctl(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// defaultWriteSysctl writes a sysctl value to /proc/sys.
+func defaultWriteSysctl(path, value string) error {
+	return os.WriteFile(path, []byte(value), 0o644)
+}
+
+// ensureSysctl checks that a sysctl value is set correctly.
+// If the value is already correct, it does nothing. Otherwise, it attempts
+// to write the value (may succeed with CAP_NET_ADMIN). Returns an error
+// only if the value is wrong and cannot be corrected.
+func ensureSysctl(path, expected string) error {
+	current, err := readSysctl(path)
+	if err == nil && current == expected {
+		return nil // already set correctly (e.g. by 'sudo banyan-agent init')
+	}
+
+	// Value is wrong or unreadable — attempt to write
+	if writeErr := writeSysctl(path, expected); writeErr != nil {
+		return fmt.Errorf("%s is %q, expected %q, and write failed: %w", path, current, expected, writeErr)
+	}
+	return nil
 }

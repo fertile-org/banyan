@@ -80,6 +80,8 @@ When building from source, you still need runtime dependencies on each node:
 - **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below), wireguard-tools (for control tunnel).
 - **Worker nodes**: containerd, nerdctl, CNI plugins, wireguard-tools (for overlay and control tunnel), BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
 
+You also need to create systemd service files manually (the install script does this automatically). See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for the service file contents, or run the engine/agent in the foreground with `sudo banyan-engine start`.
+
 ### Etcd (state store)
 
 Banyan uses etcd to store cluster state (deployments, container status, agent registrations). You choose how to run etcd during `banyan-engine init`:
@@ -111,15 +113,40 @@ You must install, run, and manage external etcd yourself. See the [etcd document
 
 ## Setup order
 
+The engine and agent require `sudo` for all commands — they manage network interfaces, iptables rules, and containers. The CLI only needs `sudo` for `init` (to create the WireGuard control tunnel); all other CLI commands run as your normal user.
+
+### Engine
+
+```bash
+sudo banyan-engine init                    # one-time: config dirs, keypair, etcd setup
+sudo systemctl enable --now banyan-engine  # start + enable on boot
+```
+
+### Agent (each worker)
+
+```bash
+sudo banyan-agent init                     # one-time: config dirs, keypair
+sudo systemctl enable --now banyan-agent   # start + enable on boot
+```
+
+### CLI (any machine)
+
+```bash
+sudo banyan-cli init       # one-time: generates keypair, creates WireGuard tunnel
+banyan-cli up -f app.yaml  # no sudo needed after init
+```
+
 Each component generates a WireGuard keypair during `init`. Agent and CLI public keys must be copied to the engine's whitelisted keys directory before they can connect (see [Authentication](/guides/authentication/) for details).
 
-The order is always:
+The engine's public key is displayed during `banyan-engine init`. Provide it during agent and CLI init to enable the encrypted WireGuard control tunnel (port 51821/UDP).
 
-1. **Engine**: `banyan-engine init` → note the engine's public key → `banyan-engine start`
-2. **Agents**: `banyan-agent init` (provide engine's public key for encrypted tunnel) → copy agent's public key to engine → `banyan-agent start` (on each worker)
-3. **CLI**: `banyan-cli init` (provide engine's public key for encrypted tunnel) → copy CLI's public key to engine (on any machine where you want to deploy from)
-
-The engine's public key is optional during agent/CLI init. If provided, all gRPC traffic is encrypted via a WireGuard control tunnel (port 51821/UDP). Without it, gRPC runs over plain TCP with public key metadata authentication.
+:::tip
+For development or debugging, you can run the engine or agent in the foreground instead of as a service:
+```bash
+sudo banyan-engine start   # runs in foreground, Ctrl+C to stop
+sudo banyan-agent start    # runs in foreground, Ctrl+C to stop
+```
+:::
 
 ## Verify
 

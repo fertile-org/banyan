@@ -59,7 +59,7 @@ func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
 	}
 
 	if !controlTunnelExistsFn(types.ControlIfaceCLI) {
-		return nil, fmt.Errorf("WireGuard control tunnel (wg-control) is not active. Run 'sudo banyan-cli init' to set it up")
+		return nil, fmt.Errorf("WireGuard control tunnel is not active. Run 'sudo banyan-cli login' to re-establish it")
 	}
 
 	port := "50051"

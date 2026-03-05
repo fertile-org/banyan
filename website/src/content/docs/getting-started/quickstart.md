@@ -51,7 +51,11 @@ In a third terminal:
 sudo banyan-cli init
 ```
 
-The wizard asks for engine host and port. It generates a WireGuard keypair and displays whitelisting instructions. `init` is the only CLI command that needs `sudo` (to create the WireGuard tunnel). After init, all commands run as your normal user:
+The wizard asks for engine host and port. It generates a WireGuard keypair and displays whitelisting instructions. `init` and `login` are the only CLI commands that need `sudo` (they create WireGuard kernel interfaces). After init, all other commands run as your normal user:
+
+:::note
+The WireGuard tunnel doesn't survive machine reboots. After a restart, run `sudo banyan-cli login` to reconnect — no prompts, no key regeneration.
+:::
 
 ```bash
 banyan-cli engine

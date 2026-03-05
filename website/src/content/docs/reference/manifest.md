@@ -21,8 +21,13 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Placement | `deploy.placement.constraints:` | `deploy.placement.node:` | Glob pattern for node name matching |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
 | Build | `build:` | `build:` | Same syntax (context + dockerfile) |
-| Volumes | `volumes:` | -- | Not yet supported |
+| Restart | `restart:` | `restart:` | Same |
+| Entrypoint | `entrypoint:` | `entrypoint:` | Same |
+| Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus) |
+| Healthcheck | `healthcheck:` | -- | Planned |
+| Volumes | `volumes:` | -- | Planned |
 | Networks | `networks:` | -- | Managed automatically |
+| Labels | `labels:` | -- | Not supported — Banyan uses built-in service DNS and load balancing instead of label-based service discovery |
 
 If you already write Docker Compose files, you already know most of this.
 

@@ -58,13 +58,18 @@ type DeploymentRecord struct {
 
 // ServiceRecord describes a service within a deployment.
 type ServiceRecord struct {
-	Image       string   `json:"image"`
-	Placement   string   `json:"placement,omitempty"`
-	Ports       []string `json:"ports,omitempty"`
-	Environment []string `json:"env,omitempty"`
-	Command     []string `json:"command,omitempty"`
-	DependsOn   []string `json:"depends_on,omitempty"`
-	Replicas    int      `json:"replicas"`
+	Image             string   `json:"image"`
+	Placement         string   `json:"placement,omitempty"`
+	Restart           string   `json:"restart,omitempty"`
+	MemoryLimit       string   `json:"memory_limit,omitempty"`
+	CPULimit          string   `json:"cpu_limit,omitempty"`
+	MemoryReservation string   `json:"memory_reservation,omitempty"`
+	Ports             []string `json:"ports,omitempty"`
+	Environment       []string `json:"env,omitempty"`
+	Command           []string `json:"command,omitempty"`
+	Entrypoint        []string `json:"entrypoint,omitempty"`
+	DependsOn         []string `json:"depends_on,omitempty"`
+	Replicas          int      `json:"replicas"`
 }
 
 // TaskRecord is stored at /tasks/<agent-id>/<task-id> in etcd.
@@ -84,7 +89,12 @@ type TaskRecord struct {
 	Type               string            `json:"type"`
 	Status             string            `json:"status"`
 	Image              string            `json:"image"`
+	Restart            string            `json:"restart,omitempty"`
+	MemoryLimit        string            `json:"memory_limit,omitempty"`
+	CPULimit           string            `json:"cpu_limit,omitempty"`
+	MemoryReservation  string            `json:"memory_reservation,omitempty"`
 	Command            []string          `json:"command,omitempty"`
+	Entrypoint         []string          `json:"entrypoint,omitempty"`
 	Ports              []string          `json:"ports,omitempty"`
 	Environment        []string          `json:"env,omitempty"`
 	ReplicaIndex       int               `json:"replica_index"`

@@ -174,6 +174,8 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 			Environment: svc.Environment,
 			Command:     svc.Command,
 			DependsOn:   svc.DependsOn,
+			Restart:     svc.Restart,
+			Entrypoint:  svc.Entrypoint,
 		}
 		if svc.Build != nil {
 			ms.Build = &banyanpb.ManifestBuild{
@@ -189,6 +191,22 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 				md.Placement = &banyanpb.ManifestPlacement{
 					Node: svc.Deploy.Placement.Node,
 				}
+			}
+			if svc.Deploy.Resources != nil {
+				mr := &banyanpb.ManifestResources{}
+				if svc.Deploy.Resources.Limits != nil {
+					mr.Limits = &banyanpb.ResourceSpec{
+						Memory: svc.Deploy.Resources.Limits.Memory,
+						Cpus:   svc.Deploy.Resources.Limits.CPUs,
+					}
+				}
+				if svc.Deploy.Resources.Reservations != nil {
+					mr.Reservations = &banyanpb.ResourceSpec{
+						Memory: svc.Deploy.Resources.Reservations.Memory,
+						Cpus:   svc.Deploy.Resources.Reservations.CPUs,
+					}
+				}
+				md.Resources = mr
 			}
 			ms.Deploy = md
 		}

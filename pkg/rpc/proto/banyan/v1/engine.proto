@@ -141,6 +141,11 @@ message TaskRecord {
   repeated string ports = 10;
   repeated string environment = 11;
   repeated string command = 12;
+  string restart = 13;
+  repeated string entrypoint = 14;
+  string memory_limit = 15;
+  string cpu_limit = 16;
+  string memory_reservation = 17;
 }
 
 // --- CLI messages ---
@@ -170,6 +175,8 @@ message ManifestService {
   repeated string environment = 5;
   repeated string command = 6;
   repeated string depends_on = 7;
+  string restart = 8;
+  repeated string entrypoint = 9;
 }
 
 message ManifestBuild {
@@ -180,6 +187,17 @@ message ManifestBuild {
 message ManifestDeploy {
   int32 replicas = 1;
   ManifestPlacement placement = 2;
+  ManifestResources resources = 3;
+}
+
+message ManifestResources {
+  ResourceSpec limits = 1;
+  ResourceSpec reservations = 2;
+}
+
+message ResourceSpec {
+  string memory = 1;
+  string cpus = 2;
 }
 
 message ManifestPlacement {

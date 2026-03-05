@@ -311,18 +311,23 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 		}
 
 		tasks = append(tasks, &banyanpb.TaskRecord{
-			Id:            task.ID,
-			DeploymentId:  task.DeploymentID,
-			ServiceName:   task.ServiceName,
-			ReplicaIndex:  int32(task.ReplicaIndex), //nolint:gosec // replica index is always small
-			AgentId:       task.AgentID,
-			Type:          task.Type,
-			Status:        task.Status,
-			Image:         task.Image,
-			ContainerName: task.ContainerName,
-			Ports:         task.Ports,
-			Environment:   task.Environment,
-			Command:       task.Command,
+			Id:                task.ID,
+			DeploymentId:      task.DeploymentID,
+			ServiceName:       task.ServiceName,
+			ReplicaIndex:      int32(task.ReplicaIndex), //nolint:gosec // replica index is always small
+			AgentId:           task.AgentID,
+			Type:              task.Type,
+			Status:            task.Status,
+			Image:             task.Image,
+			ContainerName:     task.ContainerName,
+			Ports:             task.Ports,
+			Environment:       task.Environment,
+			Command:           task.Command,
+			Restart:           task.Restart,
+			Entrypoint:        task.Entrypoint,
+			MemoryLimit:       task.MemoryLimit,
+			CpuLimit:          task.CPULimit,
+			MemoryReservation: task.MemoryReservation,
 		})
 	}
 
@@ -1083,6 +1088,8 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 			Environment: svc.Environment,
 			Command:     svc.Command,
 			DependsOn:   svc.DependsOn,
+			Restart:     svc.Restart,
+			Entrypoint:  svc.Entrypoint,
 		}
 		if svc.Build != nil {
 			ms.Build = &types.ManifestBuild{
@@ -1098,6 +1105,22 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 				md.Placement = &types.ManifestPlacement{
 					Node: svc.Deploy.Placement.Node,
 				}
+			}
+			if svc.Deploy.Resources != nil {
+				mr := &types.ManifestResources{}
+				if svc.Deploy.Resources.Limits != nil {
+					mr.Limits = &types.ResourceSpec{
+						Memory: svc.Deploy.Resources.Limits.Memory,
+						CPUs:   svc.Deploy.Resources.Limits.Cpus,
+					}
+				}
+				if svc.Deploy.Resources.Reservations != nil {
+					mr.Reservations = &types.ResourceSpec{
+						Memory: svc.Deploy.Resources.Reservations.Memory,
+						CPUs:   svc.Deploy.Resources.Reservations.Cpus,
+					}
+				}
+				md.Resources = mr
 			}
 			ms.Deploy = md
 		}

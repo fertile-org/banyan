@@ -169,3 +169,116 @@ services:
 		}
 	})
 }
+
+func TestManifestRestartParsing(t *testing.T) {
+	input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    restart: unless-stopped
+  db:
+    image: postgres
+    restart: on-failure:3
+  worker:
+    image: python:3
+`
+	var manifest BanyanManifest
+	if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if manifest.Services["web"].Restart != "unless-stopped" {
+		t.Errorf("expected 'unless-stopped', got %q", manifest.Services["web"].Restart)
+	}
+	if manifest.Services["db"].Restart != "on-failure:3" {
+		t.Errorf("expected 'on-failure:3', got %q", manifest.Services["db"].Restart)
+	}
+	if manifest.Services["worker"].Restart != "" {
+		t.Errorf("expected empty restart, got %q", manifest.Services["worker"].Restart)
+	}
+}
+
+func TestManifestEntrypointParsing(t *testing.T) {
+	t.Run("list form", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  db:
+    image: postgres
+    entrypoint:
+      - docker-entrypoint.sh
+      - --config
+      - /etc/pg.conf
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		ep := manifest.Services["db"].Entrypoint
+		if len(ep) != 3 {
+			t.Fatalf("expected 3 entrypoint args, got %d: %v", len(ep), ep)
+		}
+		if ep[0] != "docker-entrypoint.sh" || ep[1] != "--config" || ep[2] != "/etc/pg.conf" {
+			t.Errorf("unexpected entrypoint: %v", ep)
+		}
+	})
+
+	t.Run("string form", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    entrypoint: /custom-entrypoint.sh
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		ep := manifest.Services["web"].Entrypoint
+		if len(ep) != 1 || ep[0] != "/custom-entrypoint.sh" {
+			t.Errorf("expected [/custom-entrypoint.sh], got %v", ep)
+		}
+	})
+}
+
+func TestManifestResourcesParsing(t *testing.T) {
+	input := `
+name: my-app
+services:
+  api:
+    image: my-api
+    deploy:
+      replicas: 2
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+        reservations:
+          memory: 256m
+          cpus: "0.25"
+`
+	var manifest BanyanManifest
+	if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	api := manifest.Services["api"]
+	if api.Deploy == nil || api.Deploy.Resources == nil {
+		t.Fatal("expected deploy.resources to be set")
+	}
+	if api.Deploy.Resources.Limits == nil {
+		t.Fatal("expected limits to be set")
+	}
+	if api.Deploy.Resources.Limits.Memory != "512m" {
+		t.Errorf("expected memory limit '512m', got %q", api.Deploy.Resources.Limits.Memory)
+	}
+	if api.Deploy.Resources.Limits.CPUs != "0.5" {
+		t.Errorf("expected cpu limit '0.5', got %q", api.Deploy.Resources.Limits.CPUs)
+	}
+	if api.Deploy.Resources.Reservations == nil {
+		t.Fatal("expected reservations to be set")
+	}
+	if api.Deploy.Resources.Reservations.Memory != "256m" {
+		t.Errorf("expected memory reservation '256m', got %q", api.Deploy.Resources.Reservations.Memory)
+	}
+}

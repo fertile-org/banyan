@@ -295,18 +295,23 @@ func (a *Agent) processTasks(ctx context.Context) {
 // pbTaskToLocal converts a protobuf TaskRecord to a local types.TaskRecord for execution.
 func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
 	return &types.TaskRecord{
-		ID:            pb.Id,
-		DeploymentID:  pb.DeploymentId,
-		ServiceName:   pb.ServiceName,
-		ReplicaIndex:  int(pb.ReplicaIndex),
-		AgentID:       pb.AgentId,
-		Type:          pb.Type,
-		Status:        pb.Status,
-		Image:         pb.Image,
-		ContainerName: pb.ContainerName,
-		Ports:         pb.Ports,
-		Environment:   pb.Environment,
-		Command:       pb.Command,
+		ID:                pb.Id,
+		DeploymentID:      pb.DeploymentId,
+		ServiceName:       pb.ServiceName,
+		ReplicaIndex:      int(pb.ReplicaIndex),
+		AgentID:           pb.AgentId,
+		Type:              pb.Type,
+		Status:            pb.Status,
+		Image:             pb.Image,
+		ContainerName:     pb.ContainerName,
+		Ports:             pb.Ports,
+		Environment:       pb.Environment,
+		Command:           pb.Command,
+		Restart:           pb.Restart,
+		Entrypoint:        pb.Entrypoint,
+		MemoryLimit:       pb.MemoryLimit,
+		CPULimit:          pb.CpuLimit,
+		MemoryReservation: pb.MemoryReservation,
 	}
 }
 
@@ -423,11 +428,34 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 		}
 	}
 
+	if task.Restart != "" {
+		args = append(args, "--restart", task.Restart)
+	}
+
+	if task.MemoryLimit != "" {
+		args = append(args, "--memory", task.MemoryLimit)
+	}
+	if task.CPULimit != "" {
+		args = append(args, "--cpus", task.CPULimit)
+	}
+	if task.MemoryReservation != "" {
+		args = append(args, "--memory-reservation", task.MemoryReservation)
+	}
+
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
 	}
 
+	if len(task.Entrypoint) > 0 {
+		args = append(args, "--entrypoint", task.Entrypoint[0])
+	}
+
 	args = append(args, task.Image)
+
+	// Entrypoint args (after index 0) become command args
+	if len(task.Entrypoint) > 1 {
+		args = append(args, task.Entrypoint[1:]...)
+	}
 	args = append(args, task.Command...)
 	return args
 }

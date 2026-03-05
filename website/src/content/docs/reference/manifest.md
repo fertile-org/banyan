@@ -40,10 +40,19 @@ services:
   <service-name>:           # One or more services
     image: <image>          # Required (unless build is set)
     build: <context-path>   # Build from Dockerfile
+    restart: unless-stopped # Restart policy
+    entrypoint:             # Override ENTRYPOINT
+      - <binary>
     deploy:
       replicas: <number>    # Default: 1
       placement:
         node: <pattern>     # Glob pattern for node name
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+        reservations:
+          memory: 256m
     ports:
       - "<host>:<container>"
     environment:
@@ -72,6 +81,11 @@ services:
 | `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
 | `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
 | `deploy.placement.node` | string | No | -- | Glob pattern to pin this service to specific nodes. Supports `*`, `?`, and `[abc]`. Example: `gateway-*` matches `gateway-1`, `gateway-2`. |
+| `deploy.resources.limits.memory` | string | No | -- | Memory limit (e.g., `512m`, `1g`). Container is killed if it exceeds this. |
+| `deploy.resources.limits.cpus` | string | No | -- | CPU limit (e.g., `"0.5"`, `"2"`). Fractional cores allowed. |
+| `deploy.resources.reservations.memory` | string | No | -- | Soft memory limit (e.g., `256m`). Used as a reservation hint. |
+| `restart` | string | No | `no` | Restart policy: `no`, `always`, `unless-stopped`, `on-failure`, or `on-failure:N`. |
+| `entrypoint` | string or list | No | -- | Override the container's ENTRYPOINT. Supports string or list form. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
@@ -114,6 +128,7 @@ name: my-app
 services:
   caddy:
     image: caddy:latest
+    restart: unless-stopped
     command: caddy reverse-proxy --from example.com --to api:8080
     deploy:
       placement:
@@ -124,8 +139,15 @@ services:
 
   api:
     build: ./api
+    restart: unless-stopped
     deploy:
       replicas: 3
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1"
+        reservations:
+          memory: 256m
     ports:
       - "8080:8080"
     environment:
@@ -136,6 +158,9 @@ services:
 
   db:
     image: postgres:15-alpine
+    restart: unless-stopped
+    entrypoint:
+      - docker-entrypoint.sh
     ports:
       - "5432:5432"
     environment:

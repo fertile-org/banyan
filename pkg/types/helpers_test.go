@@ -58,6 +58,41 @@ func TestBuildServiceRecords(t *testing.T) {
 			t.Errorf("unexpected depends_on: %v", svc.DependsOn)
 		}
 	})
+
+	t.Run("maps restart entrypoint and resources", func(t *testing.T) {
+		manifest := map[string]ManifestService{
+			"api": {
+				Image:      "my-api:v1",
+				Restart:    "unless-stopped",
+				Entrypoint: ShellCommand{"python", "-m", "api"},
+				Deploy: &ManifestDeploy{
+					Replicas: 1,
+					Resources: &ManifestResources{
+						Limits:       &ResourceSpec{Memory: "512m", CPUs: "0.5"},
+						Reservations: &ResourceSpec{Memory: "256m"},
+					},
+				},
+			},
+		}
+		services := BuildServiceRecords(manifest)
+		svc := services["api"]
+
+		if svc.Restart != "unless-stopped" {
+			t.Errorf("expected restart 'unless-stopped', got %q", svc.Restart)
+		}
+		if len(svc.Entrypoint) != 3 || svc.Entrypoint[0] != "python" {
+			t.Errorf("unexpected entrypoint: %v", svc.Entrypoint)
+		}
+		if svc.MemoryLimit != "512m" {
+			t.Errorf("expected memory limit '512m', got %q", svc.MemoryLimit)
+		}
+		if svc.CPULimit != "0.5" {
+			t.Errorf("expected cpu limit '0.5', got %q", svc.CPULimit)
+		}
+		if svc.MemoryReservation != "256m" {
+			t.Errorf("expected memory reservation '256m', got %q", svc.MemoryReservation)
+		}
+	})
 }
 
 func TestBuildTasksForDeployment(t *testing.T) {

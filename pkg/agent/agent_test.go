@@ -184,6 +184,112 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 			t.Errorf("expected command at end, got %v", lastTwo)
 		}
 	})
+
+	t.Run("with restart policy", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Image:         "nginx:alpine",
+			Restart:       "unless-stopped",
+		}
+		args := buildNerdctlRunArgs(task, false)
+		found := false
+		for i, arg := range args {
+			if arg == "--restart" && i+1 < len(args) && args[i+1] == "unless-stopped" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected --restart unless-stopped in args: %v", args)
+		}
+	})
+
+	t.Run("with entrypoint", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-db-0",
+			Image:         "postgres:15",
+			Entrypoint:    []string{"docker-entrypoint.sh", "--config", "/etc/pg.conf"},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		// Should have --entrypoint docker-entrypoint.sh before the image
+		found := false
+		for i, arg := range args {
+			if arg == "--entrypoint" && i+1 < len(args) && args[i+1] == "docker-entrypoint.sh" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected --entrypoint docker-entrypoint.sh in args: %v", args)
+		}
+		// Remaining entrypoint args should come after image
+		imageIdx := -1
+		for i, arg := range args {
+			if arg == "postgres:15" {
+				imageIdx = i
+				break
+			}
+		}
+		if imageIdx == -1 {
+			t.Fatalf("image not found in args: %v", args)
+		}
+		afterImage := args[imageIdx+1:]
+		if len(afterImage) < 2 || afterImage[0] != "--config" || afterImage[1] != "/etc/pg.conf" {
+			t.Errorf("expected entrypoint args after image, got %v", afterImage)
+		}
+	})
+
+	t.Run("with resource limits", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName:     "myapp-api-0",
+			Image:             "my-api:latest",
+			MemoryLimit:       "512m",
+			CPULimit:          "0.5",
+			MemoryReservation: "256m",
+		}
+		args := buildNerdctlRunArgs(task, false)
+		checks := map[string]string{
+			"--memory":             "512m",
+			"--cpus":               "0.5",
+			"--memory-reservation": "256m",
+		}
+		for flag, val := range checks {
+			found := false
+			for i, arg := range args {
+				if arg == flag && i+1 < len(args) && args[i+1] == val {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected %s %s in args: %v", flag, val, args)
+			}
+		}
+	})
+
+	t.Run("with entrypoint and command", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-worker-0",
+			Image:         "python:3",
+			Entrypoint:    []string{"python"},
+			Command:       []string{"worker.py", "--verbose"},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		imageIdx := -1
+		for i, arg := range args {
+			if arg == "python:3" {
+				imageIdx = i
+				break
+			}
+		}
+		if imageIdx == -1 {
+			t.Fatalf("image not found in args: %v", args)
+		}
+		afterImage := args[imageIdx+1:]
+		if len(afterImage) != 2 || afterImage[0] != "worker.py" || afterImage[1] != "--verbose" {
+			t.Errorf("expected [worker.py --verbose] after image, got %v", afterImage)
+		}
+	})
 }
 
 func TestProcessTasks(t *testing.T) {

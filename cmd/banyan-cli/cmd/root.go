@@ -17,7 +17,8 @@ var rootCmd = &cobra.Command{
 	Long: `banyan-cli is the command-line client for Banyan container orchestration.
 
 Commands:
-  init         Initialize CLI configuration (engine host, port, password)
+  init         Initialize CLI configuration (engine host, port, WireGuard keys)
+  login        Re-establish WireGuard tunnel after restart
   up           Deploy applications from banyan.yaml (alias: deploy)
   down         Stop and remove deployed services
   engine       Show engine status and cluster summary

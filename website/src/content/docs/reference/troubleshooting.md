@@ -69,7 +69,7 @@ If agents or CLI cannot connect through the WireGuard control tunnel:
 3. Ensure port 51821/UDP is open from agents/CLI to the engine.
 4. Test connectivity: `ping 10.200.0.1` from the agent/CLI.
 5. If the control tunnel fails, Banyan falls back to direct TCP with public key metadata authentication. Check the agent/engine logs for "Control tunnel setup failed" messages.
-6. The CLI creates its tunnel during `banyan-cli init` (requires root). Subsequent CLI commands don't need root because the tunnel persists as a kernel interface.
+6. The CLI creates its tunnel during `banyan-cli init` (requires root). The tunnel is a kernel interface and doesn't survive reboots. After a restart, run `sudo banyan-cli login` to re-establish it without re-running init. Subsequent CLI commands don't need root.
 
 ---
 
@@ -184,7 +184,7 @@ sudo banyan-agent init
 sudo systemctl enable --now banyan-agent
 ```
 
-The CLI only needs `sudo` for `init` (to create the WireGuard control tunnel). All other CLI commands (`up`, `down`, `engine`, `agent`, `deployment`, `container`, `events`, `logs`, `dashboard`) run as your normal user.
+The CLI needs `sudo` for `init` and `login` (both create WireGuard kernel interfaces). All other CLI commands (`up`, `down`, `engine`, `agent`, `deployment`, `container`, `events`, `logs`, `dashboard`) run as your normal user. After a machine restart, run `sudo banyan-cli login` to re-establish the tunnel.
 
 ### Checking logs
 

@@ -208,6 +208,8 @@ echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
 banyan-cli up -f banyan.yaml
 ```
 
+After a machine reboot, run `sudo banyan-cli login` to re-establish the WireGuard tunnel. No prompts — it reads the saved config.
+
 ## Adding more workers
 
 1. Install `banyan-agent`, containerd, nerdctl, and wireguard-tools on the new server.

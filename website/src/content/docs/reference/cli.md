@@ -11,7 +11,7 @@ Banyan uses three binaries. Install only what each machine needs.
 |--------|------|------------|---------------|
 | `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node | Yes (all commands) |
 | `banyan-agent` | Worker (task execution, container management) | Worker nodes | Yes (all commands) |
-| `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine | Only `init` |
+| `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine | `init` and `login` |
 
 ---
 
@@ -189,7 +189,7 @@ sudo banyan-agent status
 
 ## banyan-cli
 
-Run on any machine to manage deployments. The CLI does not need `sudo` — only `init` requires it once to create the WireGuard control tunnel. After that, all commands run as your normal user.
+Run on any machine to manage deployments. The CLI needs `sudo` for `init` and `login` (both create WireGuard kernel interfaces). All other commands run as your normal user.
 
 ### init
 
@@ -209,6 +209,18 @@ The wizard generates a WireGuard keypair and asks:
 After init, the CLI's public key is displayed. Copy it to the engine's whitelisted keys directory. See [Authentication](/guides/authentication/) for details.
 
 Run this once on any machine where you want to use `banyan-cli` commands. If a keypair and engine host already exist in the config, you'll be asked whether to overwrite.
+
+### login
+
+Re-establish the WireGuard control tunnel after a machine restart. Reads the existing config and private key — no prompts, no key regeneration. Requires `sudo`.
+
+```bash
+sudo banyan-cli login
+```
+
+The WireGuard tunnel is a kernel interface that doesn't survive reboots. After a restart, run `login` to reconnect. If the tunnel is already active, the command exits immediately.
+
+If no config exists yet, run `init` first.
 
 ### up
 

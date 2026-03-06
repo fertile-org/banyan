@@ -66,14 +66,30 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 		if svc.Deploy != nil && svc.Deploy.Placement != nil {
 			placement = svc.Deploy.Placement.Node
 		}
+		var memLimit, cpuLimit, memReservation string
+		if svc.Deploy != nil && svc.Deploy.Resources != nil {
+			if svc.Deploy.Resources.Limits != nil {
+				memLimit = svc.Deploy.Resources.Limits.Memory
+				cpuLimit = svc.Deploy.Resources.Limits.CPUs
+			}
+			if svc.Deploy.Resources.Reservations != nil {
+				memReservation = svc.Deploy.Resources.Reservations.Memory
+			}
+		}
 		services[name] = ServiceRecord{
-			Image:       svc.Image,
-			Replicas:    replicas,
-			Placement:   placement,
-			Ports:       svc.Ports,
-			Environment: svc.Environment,
-			Command:     svc.Command,
-			DependsOn:   svc.DependsOn,
+			Image:             svc.Image,
+			Replicas:          replicas,
+			Placement:         placement,
+			Ports:             svc.Ports,
+			Environment:       svc.Environment,
+			Command:           svc.Command,
+			Entrypoint:        svc.Entrypoint,
+			DependsOn:         svc.DependsOn,
+			Restart:           svc.Restart,
+			MemoryLimit:       memLimit,
+			CPULimit:          cpuLimit,
+			MemoryReservation: memReservation,
+			Healthcheck:       svc.Healthcheck,
 		}
 	}
 	return services
@@ -108,20 +124,26 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 
 			now := time.Now()
 			tasks = append(tasks, &TaskRecord{
-				ID:            fmt.Sprintf("%s-%s-%d", deployment.ID, svcName, i),
-				DeploymentID:  deployment.ID,
-				ServiceName:   svcName,
-				ReplicaIndex:  i,
-				AgentID:       agent.Name,
-				Type:          TaskTypeCreateAndStart,
-				Status:        StatusPending,
-				Image:         svc.Image,
-				ContainerName: fmt.Sprintf("%s-%s-%d", containerPrefix, svcName, i),
-				Ports:         svc.Ports,
-				Environment:   svc.Environment,
-				Command:       svc.Command,
-				CreatedAt:     now,
-				UpdatedAt:     now,
+				ID:                fmt.Sprintf("%s-%s-%d", deployment.ID, svcName, i),
+				DeploymentID:      deployment.ID,
+				ServiceName:       svcName,
+				ReplicaIndex:      i,
+				AgentID:           agent.Name,
+				Type:              TaskTypeCreateAndStart,
+				Status:            StatusPending,
+				Image:             svc.Image,
+				ContainerName:     fmt.Sprintf("%s-%s-%d", containerPrefix, svcName, i),
+				Ports:             svc.Ports,
+				Environment:       svc.Environment,
+				Command:           svc.Command,
+				Entrypoint:        svc.Entrypoint,
+				Restart:           svc.Restart,
+				MemoryLimit:       svc.MemoryLimit,
+				CPULimit:          svc.CPULimit,
+				MemoryReservation: svc.MemoryReservation,
+				Healthcheck:       svc.Healthcheck,
+				CreatedAt:         now,
+				UpdatedAt:         now,
 			})
 		}
 	}

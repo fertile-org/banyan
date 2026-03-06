@@ -210,7 +210,7 @@ Automatically redistribute services across nodes based on actual resource usage 
 
 Service discovery, traffic policies, and encrypted communication across the cluster.
 
-- **Health-check-based routing**: Only route to healthy containers — filter backends by `container_status` before including in HeartbeatResponse
+- **Health-check-based routing**: Only route to healthy containers — health status is already tracked via `healthcheck:` in the manifest; next step is filtering backends by health status in HeartbeatResponse
 - **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
 - **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
 - **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions

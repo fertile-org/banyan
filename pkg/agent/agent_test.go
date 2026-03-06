@@ -290,6 +290,104 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 			t.Errorf("expected [worker.py --verbose] after image, got %v", afterImage)
 		}
 	})
+
+	t.Run("with healthcheck CMD", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-db-0",
+			Image:         "postgres:15",
+			Healthcheck: &types.ManifestHealthcheck{
+				Test:        []string{"CMD", "pg_isready", "-U", "postgres"},
+				Interval:    "10s",
+				Timeout:     "5s",
+				Retries:     3,
+				StartPeriod: "30s",
+			},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		checks := map[string]string{
+			"--health-cmd":          "pg_isready -U postgres",
+			"--health-interval":     "10s",
+			"--health-timeout":      "5s",
+			"--health-retries":      "3",
+			"--health-start-period": "30s",
+		}
+		for flag, val := range checks {
+			found := false
+			for i, arg := range args {
+				if arg == flag && i+1 < len(args) && args[i+1] == val {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("expected %s %s in args: %v", flag, val, args)
+			}
+		}
+	})
+
+	t.Run("with healthcheck CMD-SHELL", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Image:         "nginx",
+			Healthcheck: &types.ManifestHealthcheck{
+				Test:     []string{"CMD-SHELL", "curl -f http://localhost || exit 1"},
+				Interval: "15s",
+			},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		found := false
+		for i, arg := range args {
+			if arg == "--health-cmd" && i+1 < len(args) && args[i+1] == "curl -f http://localhost || exit 1" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected --health-cmd with CMD-SHELL value in args: %v", args)
+		}
+	})
+
+	t.Run("with healthcheck disable", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Image:         "nginx",
+			Healthcheck: &types.ManifestHealthcheck{
+				Disable: true,
+			},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		found := false
+		for _, arg := range args {
+			if arg == "--no-healthcheck" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected --no-healthcheck in args: %v", args)
+		}
+	})
+
+	t.Run("with healthcheck NONE test", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-web-0",
+			Image:         "nginx",
+			Healthcheck: &types.ManifestHealthcheck{
+				Test: []string{"NONE"},
+			},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		found := false
+		for _, arg := range args {
+			if arg == "--no-healthcheck" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected --no-healthcheck in args: %v", args)
+		}
+	})
 }
 
 func TestProcessTasks(t *testing.T) {

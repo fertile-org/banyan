@@ -58,46 +58,49 @@ type DeploymentRecord struct {
 
 // ServiceRecord describes a service within a deployment.
 type ServiceRecord struct {
-	Image             string   `json:"image"`
-	Placement         string   `json:"placement,omitempty"`
-	Restart           string   `json:"restart,omitempty"`
-	MemoryLimit       string   `json:"memory_limit,omitempty"`
-	CPULimit          string   `json:"cpu_limit,omitempty"`
-	MemoryReservation string   `json:"memory_reservation,omitempty"`
-	Ports             []string `json:"ports,omitempty"`
-	Environment       []string `json:"env,omitempty"`
-	Command           []string `json:"command,omitempty"`
-	Entrypoint        []string `json:"entrypoint,omitempty"`
-	DependsOn         []string `json:"depends_on,omitempty"`
-	Replicas          int      `json:"replicas"`
+	Healthcheck       *ManifestHealthcheck `json:"healthcheck,omitempty"`
+	Image             string               `json:"image"`
+	Placement         string               `json:"placement,omitempty"`
+	Restart           string               `json:"restart,omitempty"`
+	MemoryLimit       string               `json:"memory_limit,omitempty"`
+	CPULimit          string               `json:"cpu_limit,omitempty"`
+	MemoryReservation string               `json:"memory_reservation,omitempty"`
+	Ports             []string             `json:"ports,omitempty"`
+	Environment       []string             `json:"env,omitempty"`
+	Command           []string             `json:"command,omitempty"`
+	Entrypoint        []string             `json:"entrypoint,omitempty"`
+	DependsOn         []string             `json:"depends_on,omitempty"`
+	Replicas          int                  `json:"replicas"`
 }
 
 // TaskRecord is stored at /tasks/<agent-id>/<task-id> in etcd.
 type TaskRecord struct {
-	ContainerCheckedAt time.Time         `json:"container_checked_at,omitempty"`
-	UpdatedAt          time.Time         `json:"updated_at"`
-	CreatedAt          time.Time         `json:"created_at"`
-	Result             *TaskResultRecord `json:"result,omitempty"`
-	DeploymentID       string            `json:"deployment_id"`
-	ContainerName      string            `json:"container_name"`
-	ContainerIP        string            `json:"container_ip,omitempty"`
-	Error              string            `json:"error,omitempty"`
-	ID                 string            `json:"id"`
-	ContainerStatus    string            `json:"container_status,omitempty"`
-	ServiceName        string            `json:"service_name"`
-	AgentID            string            `json:"agent_id"`
-	Type               string            `json:"type"`
-	Status             string            `json:"status"`
-	Image              string            `json:"image"`
-	Restart            string            `json:"restart,omitempty"`
-	MemoryLimit        string            `json:"memory_limit,omitempty"`
-	CPULimit           string            `json:"cpu_limit,omitempty"`
-	MemoryReservation  string            `json:"memory_reservation,omitempty"`
-	Command            []string          `json:"command,omitempty"`
-	Entrypoint         []string          `json:"entrypoint,omitempty"`
-	Ports              []string          `json:"ports,omitempty"`
-	Environment        []string          `json:"env,omitempty"`
-	ReplicaIndex       int               `json:"replica_index"`
+	ContainerCheckedAt time.Time            `json:"container_checked_at,omitempty"`
+	UpdatedAt          time.Time            `json:"updated_at"`
+	CreatedAt          time.Time            `json:"created_at"`
+	Result             *TaskResultRecord    `json:"result,omitempty"`
+	Healthcheck        *ManifestHealthcheck `json:"healthcheck,omitempty"`
+	DeploymentID       string               `json:"deployment_id"`
+	ContainerName      string               `json:"container_name"`
+	ContainerIP        string               `json:"container_ip,omitempty"`
+	Error              string               `json:"error,omitempty"`
+	ID                 string               `json:"id"`
+	ContainerStatus    string               `json:"container_status,omitempty"`
+	HealthStatus       string               `json:"health_status,omitempty"`
+	ServiceName        string               `json:"service_name"`
+	AgentID            string               `json:"agent_id"`
+	Type               string               `json:"type"`
+	Status             string               `json:"status"`
+	Image              string               `json:"image"`
+	Restart            string               `json:"restart,omitempty"`
+	MemoryLimit        string               `json:"memory_limit,omitempty"`
+	CPULimit           string               `json:"cpu_limit,omitempty"`
+	MemoryReservation  string               `json:"memory_reservation,omitempty"`
+	Command            []string             `json:"command,omitempty"`
+	Entrypoint         []string             `json:"entrypoint,omitempty"`
+	Ports              []string             `json:"ports,omitempty"`
+	Environment        []string             `json:"env,omitempty"`
+	ReplicaIndex       int                  `json:"replica_index"`
 }
 
 // TaskResultRecord stores the outcome of task execution.

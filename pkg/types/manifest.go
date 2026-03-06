@@ -12,16 +12,27 @@ type BanyanManifest struct {
 
 // ManifestService represents a service in the manifest.
 type ManifestService struct {
-	Image       string          `yaml:"image"`
-	Build       *ManifestBuild  `yaml:"build,omitempty"`
-	Deploy      *ManifestDeploy `yaml:"deploy,omitempty"`
-	Ports       []string        `yaml:"ports,omitempty"`
-	Environment []string        `yaml:"environment,omitempty"`
-	EnvFile     EnvFile         `yaml:"env_file,omitempty"`
-	Command     []string        `yaml:"command,omitempty"`
-	DependsOn   []string        `yaml:"depends_on,omitempty"`
-	Restart     string          `yaml:"restart,omitempty"`
-	Entrypoint  ShellCommand    `yaml:"entrypoint,omitempty"`
+	Image       string               `yaml:"image"`
+	Build       *ManifestBuild       `yaml:"build,omitempty"`
+	Deploy      *ManifestDeploy      `yaml:"deploy,omitempty"`
+	Healthcheck *ManifestHealthcheck `yaml:"healthcheck,omitempty"`
+	Ports       []string             `yaml:"ports,omitempty"`
+	Environment []string             `yaml:"environment,omitempty"`
+	EnvFile     EnvFile              `yaml:"env_file,omitempty"`
+	Command     []string             `yaml:"command,omitempty"`
+	DependsOn   []string             `yaml:"depends_on,omitempty"`
+	Restart     string               `yaml:"restart,omitempty"`
+	Entrypoint  ShellCommand         `yaml:"entrypoint,omitempty"`
+}
+
+// ManifestHealthcheck represents healthcheck configuration (matches Docker Compose).
+type ManifestHealthcheck struct {
+	Interval    string       `yaml:"interval,omitempty"`
+	Timeout     string       `yaml:"timeout,omitempty"`
+	StartPeriod string       `yaml:"start_period,omitempty"`
+	Test        ShellCommand `yaml:"test,omitempty"`
+	Retries     int          `yaml:"retries,omitempty"`
+	Disable     bool         `yaml:"disable,omitempty"`
 }
 
 // ManifestDeploy represents deploy configuration (matches Docker Compose).

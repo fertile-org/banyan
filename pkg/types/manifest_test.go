@@ -282,3 +282,114 @@ services:
 		t.Errorf("expected memory reservation '256m', got %q", api.Deploy.Resources.Reservations.Memory)
 	}
 }
+
+func TestManifestHealthcheckParsing(t *testing.T) {
+	t.Run("list form (CMD)", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  db:
+    image: postgres:15
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		db := manifest.Services["db"]
+		if db.Healthcheck == nil {
+			t.Fatal("expected healthcheck to be set")
+		}
+		if len(db.Healthcheck.Test) != 4 {
+			t.Fatalf("expected 4 test entries, got %d", len(db.Healthcheck.Test))
+		}
+		if db.Healthcheck.Test[0] != "CMD" {
+			t.Errorf("expected test[0] 'CMD', got %q", db.Healthcheck.Test[0])
+		}
+		if db.Healthcheck.Test[1] != "pg_isready" {
+			t.Errorf("expected test[1] 'pg_isready', got %q", db.Healthcheck.Test[1])
+		}
+		if db.Healthcheck.Interval != "10s" {
+			t.Errorf("expected interval '10s', got %q", db.Healthcheck.Interval)
+		}
+		if db.Healthcheck.Timeout != "5s" {
+			t.Errorf("expected timeout '5s', got %q", db.Healthcheck.Timeout)
+		}
+		if db.Healthcheck.Retries != 3 {
+			t.Errorf("expected retries 3, got %d", db.Healthcheck.Retries)
+		}
+		if db.Healthcheck.StartPeriod != "30s" {
+			t.Errorf("expected start_period '30s', got %q", db.Healthcheck.StartPeriod)
+		}
+	})
+
+	t.Run("string form (CMD-SHELL)", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    healthcheck:
+      test: curl -f http://localhost
+      interval: 15s
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		web := manifest.Services["web"]
+		if web.Healthcheck == nil {
+			t.Fatal("expected healthcheck to be set")
+		}
+		if len(web.Healthcheck.Test) != 1 || web.Healthcheck.Test[0] != "curl -f http://localhost" {
+			t.Errorf("expected test ['curl -f http://localhost'], got %v", web.Healthcheck.Test)
+		}
+		if web.Healthcheck.Interval != "15s" {
+			t.Errorf("expected interval '15s', got %q", web.Healthcheck.Interval)
+		}
+	})
+
+	t.Run("disable healthcheck", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    healthcheck:
+      disable: true
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		web := manifest.Services["web"]
+		if web.Healthcheck == nil {
+			t.Fatal("expected healthcheck to be set")
+		}
+		if !web.Healthcheck.Disable {
+			t.Error("expected disable to be true")
+		}
+	})
+
+	t.Run("no healthcheck is nil", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		web := manifest.Services["web"]
+		if web.Healthcheck != nil {
+			t.Error("expected nil healthcheck")
+		}
+	})
+}

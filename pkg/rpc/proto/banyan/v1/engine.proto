@@ -116,6 +116,7 @@ message ContainerStatus {
   string container_name = 1;
   string status = 2;
   string ip = 3;                              // container's overlay IP
+  string health_status = 4;                   // "", "starting", "healthy", "unhealthy"
 }
 
 message ServiceBackend {
@@ -146,6 +147,7 @@ message TaskRecord {
   string memory_limit = 15;
   string cpu_limit = 16;
   string memory_reservation = 17;
+  ManifestHealthcheck healthcheck = 18;
 }
 
 // --- CLI messages ---
@@ -177,6 +179,16 @@ message ManifestService {
   repeated string depends_on = 7;
   string restart = 8;
   repeated string entrypoint = 9;
+  ManifestHealthcheck healthcheck = 10;
+}
+
+message ManifestHealthcheck {
+  repeated string test = 1;
+  string interval = 2;
+  string timeout = 3;
+  int32 retries = 4;
+  string start_period = 5;
+  bool disable = 6;
 }
 
 message ManifestBuild {
@@ -271,6 +283,7 @@ message TaskInfo {
   int64 created_at_unix = 15;
   int64 updated_at_unix = 16;
   string error = 17;
+  string health_status = 18;
 }
 
 message GetLogsRequest {

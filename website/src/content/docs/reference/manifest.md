@@ -24,7 +24,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Restart | `restart:` | `restart:` | Same |
 | Entrypoint | `entrypoint:` | `entrypoint:` | Same |
 | Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus) |
-| Healthcheck | `healthcheck:` | -- | Planned |
+| Healthcheck | `healthcheck:` | `healthcheck:` | Same (test, interval, timeout, retries, start_period, disable) |
 | Volumes | `volumes:` | -- | Planned |
 | Networks | `networks:` | -- | Managed automatically |
 | Labels | `labels:` | -- | Not supported — Banyan uses built-in service DNS and load balancing instead of label-based service discovery |
@@ -53,6 +53,12 @@ services:
           cpus: "0.5"
         reservations:
           memory: 256m
+    healthcheck:
+      test: ["CMD", "<command>"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     ports:
       - "<host>:<container>"
     environment:
@@ -89,6 +95,12 @@ services:
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
+| `healthcheck.test` | string or list | No | -- | Health check command. List form: `["CMD", "pg_isready"]` or `["CMD-SHELL", "curl -f http://localhost"]`. String form: `curl -f http://localhost` (treated as CMD-SHELL). `["NONE"]` disables. |
+| `healthcheck.interval` | string | No | -- | Time between checks (e.g., `10s`, `1m`). |
+| `healthcheck.timeout` | string | No | -- | Timeout per check (e.g., `5s`). |
+| `healthcheck.retries` | integer | No | -- | Consecutive failures before marking unhealthy. |
+| `healthcheck.start_period` | string | No | -- | Grace period for startup (e.g., `30s`). Failures during this period don't count toward retries. |
+| `healthcheck.disable` | boolean | No | `false` | Set `true` to disable any healthcheck defined in the image. |
 | `depends_on` | list | No | -- | Services that should start first. Validated during [per-service deploys](/guides/redeployment/#dependency-validation). |
 
 ## Container naming
@@ -161,6 +173,12 @@ services:
     restart: unless-stopped
     entrypoint:
       - docker-entrypoint.sh
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "banyan"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     ports:
       - "5432:5432"
     environment:
@@ -169,7 +187,7 @@ services:
       - POSTGRES_DB=app
 ```
 
-This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, and service DNS (`api:8080`, `db`) for cross-service communication.
+This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, `healthcheck:` for container health monitoring, and service DNS (`api:8080`, `db`) for cross-service communication. During blue-green redeployments, Banyan waits for healthchecks to pass before tearing down old containers.
 
 ### Build from source
 

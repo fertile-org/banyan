@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -47,18 +48,18 @@ type Options struct {
 
 // Agent is the Banyan data-plane worker.
 type Agent struct {
-	opts            Options
-	client          *EngineClient
-	containers      *containerTracker
-	sessionToken    string
-	proxy           PortProxy
-	vpcEnabled      bool
-	overlayDriver   overlay.OverlayDriver
-	remoteBackends  map[string]ServiceBackend // key: containerName
-	dnsManager      *dns.Manager
-	dnsServer       *dns.Server
-	gatewayIP       string          // bridge gateway IP (e.g., "10.0.45.1")
-	registeredDNS   map[string]bool // tracked DNS hostnames for stale cleanup
+	opts             Options
+	client           *EngineClient
+	containers       *containerTracker
+	sessionToken     string
+	proxy            PortProxy
+	vpcEnabled       bool
+	overlayDriver    overlay.OverlayDriver
+	remoteBackends   map[string]ServiceBackend // key: containerName
+	dnsManager       *dns.Manager
+	dnsServer        *dns.Server
+	gatewayIP        string          // bridge gateway IP (e.g., "10.0.45.1")
+	registeredDNS    map[string]bool // tracked DNS hostnames for stale cleanup
 	connected        atomic.Bool     // true when registered and heartbeat is healthy
 	allocatedSubnet  string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
 	metricsCollector *metrics.SystemCollector
@@ -74,14 +75,15 @@ const (
 
 // Package-level function variables for testing.
 var (
-	taskExecutor        = executeTask
-	containerStatusFunc = getContainerStatus
-	commandRunner       = runCommand
-	containerIDGetter   = getContainerID
-	containerRemover    = removeContainer
-	containerIPGetter   = getContainerIP
-	vpcNetworkEnabled   bool   // set by Agent.Run() after VPC init
-	dnsGatewayIPAddr    string // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
+	taskExecutor              = executeTask
+	containerStatusFunc       = getContainerStatus
+	containerHealthStatusFunc = getContainerHealthStatus
+	commandRunner             = runCommand
+	containerIDGetter         = getContainerID
+	containerRemover          = removeContainer
+	containerIPGetter         = getContainerIP
+	vpcNetworkEnabled         bool   // set by Agent.Run() after VPC init
+	dnsGatewayIPAddr          string // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
 )
 
 // New creates a new Agent with a random session token.
@@ -294,7 +296,7 @@ func (a *Agent) processTasks(ctx context.Context) {
 
 // pbTaskToLocal converts a protobuf TaskRecord to a local types.TaskRecord for execution.
 func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
-	return &types.TaskRecord{
+	task := &types.TaskRecord{
 		ID:                pb.Id,
 		DeploymentID:      pb.DeploymentId,
 		ServiceName:       pb.ServiceName,
@@ -313,6 +315,17 @@ func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
 		CPULimit:          pb.CpuLimit,
 		MemoryReservation: pb.MemoryReservation,
 	}
+	if pb.Healthcheck != nil {
+		task.Healthcheck = &types.ManifestHealthcheck{
+			Test:        pb.Healthcheck.Test,
+			Interval:    pb.Healthcheck.Interval,
+			Timeout:     pb.Healthcheck.Timeout,
+			Retries:     int(pb.Healthcheck.Retries),
+			StartPeriod: pb.Healthcheck.StartPeriod,
+			Disable:     pb.Healthcheck.Disable,
+		}
+	}
+	return task
 }
 
 func executeTask(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
@@ -442,6 +455,39 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 		args = append(args, "--memory-reservation", task.MemoryReservation)
 	}
 
+	if task.Healthcheck != nil && !task.Healthcheck.Disable {
+		hc := task.Healthcheck
+		if len(hc.Test) > 0 {
+			switch hc.Test[0] {
+			case "CMD":
+				args = append(args, "--health-cmd", strings.Join(hc.Test[1:], " "))
+			case "CMD-SHELL":
+				if len(hc.Test) > 1 {
+					args = append(args, "--health-cmd", hc.Test[1])
+				}
+			case "NONE":
+				args = append(args, "--no-healthcheck")
+			default:
+				// String form from compose — treat as CMD-SHELL
+				args = append(args, "--health-cmd", strings.Join(hc.Test, " "))
+			}
+		}
+		if hc.Interval != "" {
+			args = append(args, "--health-interval", hc.Interval)
+		}
+		if hc.Timeout != "" {
+			args = append(args, "--health-timeout", hc.Timeout)
+		}
+		if hc.Retries > 0 {
+			args = append(args, "--health-retries", strconv.Itoa(hc.Retries))
+		}
+		if hc.StartPeriod != "" {
+			args = append(args, "--health-start-period", hc.StartPeriod)
+		}
+	} else if task.Healthcheck != nil && task.Healthcheck.Disable {
+		args = append(args, "--no-healthcheck")
+	}
+
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
 	}
@@ -474,6 +520,18 @@ func getContainerStatus(ctx context.Context, containerName string) string {
 		return "not_found"
 	}
 	return status
+}
+
+// getContainerHealthStatus runs nerdctl inspect to get the container's health status.
+// Returns "" if no healthcheck is configured, or "starting", "healthy", "unhealthy".
+func getContainerHealthStatus(ctx context.Context, containerName string) string {
+	cmd := exec.CommandContext(ctx, "nerdctl", "inspect", "--format", "{{if .State.Health}}{{.State.Health.Status}}{{end}}", containerName) //nolint:gosec // container name comes from engine
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(stdout.String())
 }
 
 func (a *Agent) agentHeartbeat(ctx context.Context) {
@@ -550,11 +608,15 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 	var statuses []*banyanpb.ContainerStatus
 	for _, c := range tracked {
 		status := containerStatusFunc(ctx, c.containerName)
-		statuses = append(statuses, &banyanpb.ContainerStatus{
+		cs := &banyanpb.ContainerStatus{
 			ContainerName: c.containerName,
 			Status:        status,
 			Ip:            c.containerIP,
-		})
+		}
+		if hs := containerHealthStatusFunc(ctx, c.containerName); hs != "" {
+			cs.HealthStatus = hs
+		}
+		statuses = append(statuses, cs)
 	}
 
 	if err := a.client.ReportContainerHealth(ctx, a.opts.NodeName, statuses); err != nil {

@@ -93,6 +93,35 @@ func TestBuildServiceRecords(t *testing.T) {
 			t.Errorf("expected memory reservation '256m', got %q", svc.MemoryReservation)
 		}
 	})
+
+	t.Run("maps healthcheck", func(t *testing.T) {
+		manifest := map[string]ManifestService{
+			"db": {
+				Image: "postgres:15",
+				Healthcheck: &ManifestHealthcheck{
+					Test:        ShellCommand{"CMD", "pg_isready"},
+					Interval:    "10s",
+					Timeout:     "5s",
+					Retries:     3,
+					StartPeriod: "30s",
+				},
+			},
+		}
+		services := BuildServiceRecords(manifest)
+		svc := services["db"]
+		if svc.Healthcheck == nil {
+			t.Fatal("expected healthcheck to be set")
+		}
+		if len(svc.Healthcheck.Test) != 2 || svc.Healthcheck.Test[0] != "CMD" {
+			t.Errorf("unexpected healthcheck test: %v", svc.Healthcheck.Test)
+		}
+		if svc.Healthcheck.Interval != "10s" {
+			t.Errorf("expected interval '10s', got %q", svc.Healthcheck.Interval)
+		}
+		if svc.Healthcheck.Retries != 3 {
+			t.Errorf("expected retries 3, got %d", svc.Healthcheck.Retries)
+		}
+	})
 }
 
 func TestBuildTasksForDeployment(t *testing.T) {
@@ -293,6 +322,34 @@ func TestBuildTasksForDeployment(t *testing.T) {
 		_, err := BuildTasksForDeployment(deployment, allAgents)
 		if err == nil {
 			t.Fatal("expected error when no agents match placement, got nil")
+		}
+	})
+
+	t.Run("passes healthcheck to tasks", func(t *testing.T) {
+		hc := &ManifestHealthcheck{
+			Test:     ShellCommand{"CMD", "pg_isready"},
+			Interval: "10s",
+			Retries:  3,
+		}
+		deployment := &DeploymentRecord{
+			ID:   "deploy-hc",
+			Name: "app",
+			Services: map[string]ServiceRecord{
+				"db": {Image: "postgres:15", Replicas: 1, Healthcheck: hc},
+			},
+		}
+		tasks, err := BuildTasksForDeployment(deployment, agents)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(tasks))
+		}
+		if tasks[0].Healthcheck == nil {
+			t.Fatal("expected task to have healthcheck")
+		}
+		if tasks[0].Healthcheck.Interval != "10s" {
+			t.Errorf("expected interval '10s', got %q", tasks[0].Healthcheck.Interval)
 		}
 	})
 }
@@ -564,10 +621,10 @@ func TestCollectDeploymentTasks(t *testing.T) {
 
 // errorStateStore is a StateStore that can inject errors for specific operations.
 type errorStateStore struct {
-	data          map[string]any
-	listError     error           // if set, List returns this error
-	listErrorFor  string          // if set, List returns listError only for this prefix
-	getErrorKeys  map[string]bool // keys for which Get returns an error
+	data         map[string]any
+	listError    error           // if set, List returns this error
+	listErrorFor string          // if set, List returns listError only for this prefix
+	getErrorKeys map[string]bool // keys for which Get returns an error
 }
 
 func (m *errorStateStore) Save(_ context.Context, key string, value any) error {

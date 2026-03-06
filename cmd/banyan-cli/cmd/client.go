@@ -177,6 +177,16 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 			Restart:     svc.Restart,
 			Entrypoint:  svc.Entrypoint,
 		}
+		if svc.Healthcheck != nil {
+			ms.Healthcheck = &banyanpb.ManifestHealthcheck{
+				Test:        svc.Healthcheck.Test,
+				Interval:    svc.Healthcheck.Interval,
+				Timeout:     svc.Healthcheck.Timeout,
+				Retries:     int32(svc.Healthcheck.Retries), //nolint:gosec // retries is always small
+				StartPeriod: svc.Healthcheck.StartPeriod,
+				Disable:     svc.Healthcheck.Disable,
+			}
+		}
 		if svc.Build != nil {
 			ms.Build = &banyanpb.ManifestBuild{
 				Context:    svc.Build.Context,

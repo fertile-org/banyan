@@ -310,7 +310,7 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 			continue
 		}
 
-		tasks = append(tasks, &banyanpb.TaskRecord{
+		pbTask := &banyanpb.TaskRecord{
 			Id:                task.ID,
 			DeploymentId:      task.DeploymentID,
 			ServiceName:       task.ServiceName,
@@ -328,7 +328,18 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 			MemoryLimit:       task.MemoryLimit,
 			CpuLimit:          task.CPULimit,
 			MemoryReservation: task.MemoryReservation,
-		})
+		}
+		if task.Healthcheck != nil {
+			pbTask.Healthcheck = &banyanpb.ManifestHealthcheck{
+				Test:        task.Healthcheck.Test,
+				Interval:    task.Healthcheck.Interval,
+				Timeout:     task.Healthcheck.Timeout,
+				Retries:     int32(task.Healthcheck.Retries), //nolint:gosec // retries is always small
+				StartPeriod: task.Healthcheck.StartPeriod,
+				Disable:     task.Healthcheck.Disable,
+			}
+		}
+		tasks = append(tasks, pbTask)
 	}
 
 	return &banyanpb.PollTasksResponse{Tasks: tasks}, nil
@@ -368,13 +379,17 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
 
-	// Build maps of container statuses and IPs for quick lookup
+	// Build maps of container statuses, IPs, and health statuses for quick lookup
 	statusMap := make(map[string]string, len(req.Containers))
 	ipMap := make(map[string]string, len(req.Containers))
+	healthMap := make(map[string]string, len(req.Containers))
 	for _, c := range req.Containers {
 		statusMap[c.ContainerName] = c.Status
 		if c.Ip != "" {
 			ipMap[c.ContainerName] = c.Ip
+		}
+		if c.HealthStatus != "" {
+			healthMap[c.ContainerName] = c.HealthStatus
 		}
 	}
 
@@ -401,6 +416,9 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 			task.ContainerCheckedAt = time.Now()
 			if ip, hasIP := ipMap[task.ContainerName]; hasIP {
 				task.ContainerIP = ip
+			}
+			if hs, hasHS := healthMap[task.ContainerName]; hasHS {
+				task.HealthStatus = hs
 			}
 			if err := s.store.Save(ctx, key, &task); err != nil {
 				s.logger().Warn("Failed to save container health", "container", task.ContainerName, "error", err)
@@ -665,6 +683,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 				Environment:            allTasks[i].Environment,
 				Command:                allTasks[i].Command,
 				ContainerStatus:        allTasks[i].ContainerStatus,
+				HealthStatus:           allTasks[i].HealthStatus,
 				ContainerCheckedAtUnix: allTasks[i].ContainerCheckedAt.Unix(),
 				CreatedAtUnix:          allTasks[i].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[i].UpdatedAt.Unix(),
@@ -1091,6 +1110,16 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 			Restart:     svc.Restart,
 			Entrypoint:  svc.Entrypoint,
 		}
+		if svc.Healthcheck != nil {
+			ms.Healthcheck = &types.ManifestHealthcheck{
+				Test:        svc.Healthcheck.Test,
+				Interval:    svc.Healthcheck.Interval,
+				Timeout:     svc.Healthcheck.Timeout,
+				Retries:     int(svc.Healthcheck.Retries),
+				StartPeriod: svc.Healthcheck.StartPeriod,
+				Disable:     svc.Healthcheck.Disable,
+			}
+		}
 		if svc.Build != nil {
 			ms.Build = &types.ManifestBuild{
 				Context:    svc.Build.Context,
@@ -1414,6 +1443,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				Environment:            allTasks[j].Environment,
 				Command:                allTasks[j].Command,
 				ContainerStatus:        allTasks[j].ContainerStatus,
+				HealthStatus:           allTasks[j].HealthStatus,
 				ContainerCheckedAtUnix: allTasks[j].ContainerCheckedAt.Unix(),
 				CreatedAtUnix:          allTasks[j].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[j].UpdatedAt.Unix(),

@@ -89,6 +89,7 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 			MemoryLimit:       memLimit,
 			CPULimit:          cpuLimit,
 			MemoryReservation: memReservation,
+			Healthcheck:       svc.Healthcheck,
 		}
 	}
 	return services
@@ -140,6 +141,7 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 				MemoryLimit:       svc.MemoryLimit,
 				CPULimit:          svc.CPULimit,
 				MemoryReservation: svc.MemoryReservation,
+				Healthcheck:       svc.Healthcheck,
 				CreatedAt:         now,
 				UpdatedAt:         now,
 			})

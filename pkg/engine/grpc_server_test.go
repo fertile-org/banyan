@@ -3255,6 +3255,40 @@ func TestReportContainerHealth_StoresIP(t *testing.T) {
 	}
 }
 
+func TestReportContainerHealth_StoresHealthStatus(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-hc1", &types.TaskRecord{
+		ID: "task-hc1", AgentID: "worker-1",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-db-0",
+	})
+
+	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+		AgentName: "worker-1",
+		Containers: []*banyanpb.ContainerStatus{
+			{ContainerName: "app-db-0", Status: "running", Ip: "10.0.1.10", HealthStatus: "healthy"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReportContainerHealth failed: %v", err)
+	}
+
+	var updated types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-hc1", &updated); err != nil {
+		t.Fatalf("failed to get task: %v", err)
+	}
+	if updated.HealthStatus != "healthy" {
+		t.Errorf("expected health status 'healthy', got %q", updated.HealthStatus)
+	}
+	if updated.ContainerStatus != "running" {
+		t.Errorf("expected container status 'running', got %q", updated.ContainerStatus)
+	}
+}
+
 func TestCollectServiceBackends(t *testing.T) {
 	store := storage.NewMemoryStore()
 	srv := &engineGRPCServer{store: store}

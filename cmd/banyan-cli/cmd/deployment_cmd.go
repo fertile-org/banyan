@@ -121,15 +121,19 @@ func showDeploymentDetail(deployments []dashboard.DeploymentData, query string) 
 		fmt.Println()
 		fmt.Println("Containers")
 		fmt.Println(strings.Repeat("-", 60))
-		fmt.Printf("  %-25s %-12s %-15s %s\n", "NAME", "STATUS", "AGENT", "IMAGE")
+		fmt.Printf("  %-25s %-12s %-12s %-15s %s\n", "NAME", "STATUS", "HEALTH", "AGENT", "IMAGE")
 		for j := range dep.Containers {
 			c := &dep.Containers[j]
 			status := c.ContainerStatus
 			if status == "" {
 				status = c.Status
 			}
-			fmt.Printf("  %-25s %-12s %-15s %s\n",
-				c.Name, status, c.AgentName, c.Image)
+			health := c.HealthStatus
+			if health == "" {
+				health = "-"
+			}
+			fmt.Printf("  %-25s %-12s %-12s %-15s %s\n",
+				c.Name, status, health, c.AgentName, c.Image)
 		}
 	}
 

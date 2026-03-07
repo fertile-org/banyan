@@ -541,7 +541,11 @@ func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types
 			e.logger().Info("Deployment is running", "name", deployment.Name, "containers", completedTasks)
 			e.emitEvent("deployment.running", fmt.Sprintf("Deployment %s is running (%d containers)", deployment.Name, completedTasks), "info")
 			if deployment.UpdateStrategy != types.UpdateStrategyRecreate {
-				e.blueGreenTeardownOld(ctx, deployment)
+				if e.allHealthchecksHealthy(ctx, deployment) {
+					e.blueGreenTeardownOld(ctx, deployment)
+				} else {
+					e.logger().Info("Blue-green: waiting for healthchecks to pass", "name", deployment.Name)
+				}
 			}
 		}
 	}
@@ -572,6 +576,38 @@ func (e *Engine) areReplacedServicesStopped(ctx context.Context, deployment *typ
 		}
 	}
 
+	return true
+}
+
+// allHealthchecksHealthy returns true if all containers with healthchecks in the
+// deployment report healthy status. If no services have healthchecks, returns true.
+func (e *Engine) allHealthchecksHealthy(ctx context.Context, deployment *types.DeploymentRecord) bool {
+	// Check if any service has a healthcheck configured
+	hasHealthcheck := false
+	healthcheckServices := make(map[string]bool)
+	for svcName, svc := range deployment.Services {
+		if svc.Healthcheck != nil && !svc.Healthcheck.Disable {
+			hasHealthcheck = true
+			healthcheckServices[svcName] = true
+		}
+	}
+	if !hasHealthcheck {
+		return true
+	}
+
+	tasks := types.CollectDeploymentTasks(ctx, e.store, deployment.ID)
+	for i := range tasks {
+		task := &tasks[i]
+		if task.Type != types.TaskTypeCreateAndStart {
+			continue
+		}
+		if !healthcheckServices[task.ServiceName] {
+			continue
+		}
+		if task.HealthStatus != "healthy" {
+			return false
+		}
+	}
 	return true
 }
 

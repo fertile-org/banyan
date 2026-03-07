@@ -2117,3 +2117,127 @@ func TestSchedulePendingDeployment_RecreateWaitsForStopTasks(t *testing.T) {
 		}
 	})
 }
+
+func TestAllHealthchecksHealthy(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no healthchecks returns true", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app",
+			Services: map[string]types.ServiceRecord{
+				"web": {Image: "nginx", Replicas: 1},
+			},
+		}
+		if !eng.allHealthchecksHealthy(ctx, deployment) {
+			t.Error("expected true when no healthchecks")
+		}
+	})
+
+	t.Run("disabled healthcheck returns true", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app",
+			Services: map[string]types.ServiceRecord{
+				"web": {
+					Image: "nginx", Replicas: 1,
+					Healthcheck: &types.ManifestHealthcheck{Disable: true},
+				},
+			},
+		}
+		if !eng.allHealthchecksHealthy(ctx, deployment) {
+			t.Error("expected true when healthcheck is disabled")
+		}
+	})
+
+	t.Run("healthy containers return true", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "deploy-1", ServiceName: "db",
+			Type: types.TaskTypeCreateAndStart, HealthStatus: "healthy",
+			AgentID: "agent-1",
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app",
+			Services: map[string]types.ServiceRecord{
+				"db": {
+					Image: "postgres", Replicas: 1,
+					Healthcheck: &types.ManifestHealthcheck{
+						Test: []string{"CMD", "pg_isready"},
+					},
+				},
+			},
+		}
+		if !eng.allHealthchecksHealthy(ctx, deployment) {
+			t.Error("expected true when all containers healthy")
+		}
+	})
+
+	t.Run("starting containers return false", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "deploy-1", ServiceName: "db",
+			Type: types.TaskTypeCreateAndStart, HealthStatus: "starting",
+			AgentID: "agent-1",
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app",
+			Services: map[string]types.ServiceRecord{
+				"db": {
+					Image: "postgres", Replicas: 1,
+					Healthcheck: &types.ManifestHealthcheck{
+						Test: []string{"CMD", "pg_isready"},
+					},
+				},
+			},
+		}
+		if eng.allHealthchecksHealthy(ctx, deployment) {
+			t.Error("expected false when container is starting")
+		}
+	})
+
+	t.Run("mixed services with and without healthcheck", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		eng := &Engine{store: store}
+
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1"})
+		// db has healthcheck and is healthy
+		store.Save(ctx, types.KeyTasks+"agent-1/task-db", &types.TaskRecord{
+			ID: "task-db", DeploymentID: "deploy-1", ServiceName: "db",
+			Type: types.TaskTypeCreateAndStart, HealthStatus: "healthy",
+			AgentID: "agent-1",
+		})
+		// web has no healthcheck
+		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+			ID: "task-web", DeploymentID: "deploy-1", ServiceName: "web",
+			Type:    types.TaskTypeCreateAndStart,
+			AgentID: "agent-1",
+		})
+
+		deployment := &types.DeploymentRecord{
+			ID: "deploy-1", Name: "app",
+			Services: map[string]types.ServiceRecord{
+				"db": {
+					Image: "postgres", Replicas: 1,
+					Healthcheck: &types.ManifestHealthcheck{
+						Test: []string{"CMD", "pg_isready"},
+					},
+				},
+				"web": {Image: "nginx", Replicas: 1},
+			},
+		}
+		if !eng.allHealthchecksHealthy(ctx, deployment) {
+			t.Error("expected true when healthcheck services are healthy and others have no healthcheck")
+		}
+	})
+}

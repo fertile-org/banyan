@@ -58,6 +58,70 @@ func TestBuildServiceRecords(t *testing.T) {
 			t.Errorf("unexpected depends_on: %v", svc.DependsOn)
 		}
 	})
+
+	t.Run("maps restart entrypoint and resources", func(t *testing.T) {
+		manifest := map[string]ManifestService{
+			"api": {
+				Image:      "my-api:v1",
+				Restart:    "unless-stopped",
+				Entrypoint: ShellCommand{"python", "-m", "api"},
+				Deploy: &ManifestDeploy{
+					Replicas: 1,
+					Resources: &ManifestResources{
+						Limits:       &ResourceSpec{Memory: "512m", CPUs: "0.5"},
+						Reservations: &ResourceSpec{Memory: "256m"},
+					},
+				},
+			},
+		}
+		services := BuildServiceRecords(manifest)
+		svc := services["api"]
+
+		if svc.Restart != "unless-stopped" {
+			t.Errorf("expected restart 'unless-stopped', got %q", svc.Restart)
+		}
+		if len(svc.Entrypoint) != 3 || svc.Entrypoint[0] != "python" {
+			t.Errorf("unexpected entrypoint: %v", svc.Entrypoint)
+		}
+		if svc.MemoryLimit != "512m" {
+			t.Errorf("expected memory limit '512m', got %q", svc.MemoryLimit)
+		}
+		if svc.CPULimit != "0.5" {
+			t.Errorf("expected cpu limit '0.5', got %q", svc.CPULimit)
+		}
+		if svc.MemoryReservation != "256m" {
+			t.Errorf("expected memory reservation '256m', got %q", svc.MemoryReservation)
+		}
+	})
+
+	t.Run("maps healthcheck", func(t *testing.T) {
+		manifest := map[string]ManifestService{
+			"db": {
+				Image: "postgres:15",
+				Healthcheck: &ManifestHealthcheck{
+					Test:        ShellCommand{"CMD", "pg_isready"},
+					Interval:    "10s",
+					Timeout:     "5s",
+					Retries:     3,
+					StartPeriod: "30s",
+				},
+			},
+		}
+		services := BuildServiceRecords(manifest)
+		svc := services["db"]
+		if svc.Healthcheck == nil {
+			t.Fatal("expected healthcheck to be set")
+		}
+		if len(svc.Healthcheck.Test) != 2 || svc.Healthcheck.Test[0] != "CMD" {
+			t.Errorf("unexpected healthcheck test: %v", svc.Healthcheck.Test)
+		}
+		if svc.Healthcheck.Interval != "10s" {
+			t.Errorf("expected interval '10s', got %q", svc.Healthcheck.Interval)
+		}
+		if svc.Healthcheck.Retries != 3 {
+			t.Errorf("expected retries 3, got %d", svc.Healthcheck.Retries)
+		}
+	})
 }
 
 func TestBuildTasksForDeployment(t *testing.T) {
@@ -258,6 +322,34 @@ func TestBuildTasksForDeployment(t *testing.T) {
 		_, err := BuildTasksForDeployment(deployment, allAgents)
 		if err == nil {
 			t.Fatal("expected error when no agents match placement, got nil")
+		}
+	})
+
+	t.Run("passes healthcheck to tasks", func(t *testing.T) {
+		hc := &ManifestHealthcheck{
+			Test:     ShellCommand{"CMD", "pg_isready"},
+			Interval: "10s",
+			Retries:  3,
+		}
+		deployment := &DeploymentRecord{
+			ID:   "deploy-hc",
+			Name: "app",
+			Services: map[string]ServiceRecord{
+				"db": {Image: "postgres:15", Replicas: 1, Healthcheck: hc},
+			},
+		}
+		tasks, err := BuildTasksForDeployment(deployment, agents)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(tasks) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(tasks))
+		}
+		if tasks[0].Healthcheck == nil {
+			t.Fatal("expected task to have healthcheck")
+		}
+		if tasks[0].Healthcheck.Interval != "10s" {
+			t.Errorf("expected interval '10s', got %q", tasks[0].Healthcheck.Interval)
 		}
 	})
 }

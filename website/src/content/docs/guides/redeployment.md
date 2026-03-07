@@ -14,7 +14,7 @@ With Banyan, you run the same command again.
 When you run `banyan-cli up` for an application that's already running, Banyan automatically replaces the old containers using a **blue-green** strategy:
 
 1. New containers start alongside the old ones
-2. Banyan waits for all new containers to reach `running` status
+2. Banyan waits for all new containers to reach `running` status. If any service has a [`healthcheck`](/reference/manifest/#service) configured, Banyan also waits for those containers to report `healthy` before proceeding.
 3. Old containers are torn down
 
 If the new deployment fails, the old containers keep running. No downtime, no manual rollback.
@@ -54,7 +54,7 @@ Waiting for deployment to complete...
 Deployment 'my-app' is RUNNING!
 ```
 
-Behind the scenes, Banyan ran both old and new containers simultaneously, confirmed the new ones were healthy, then removed the old ones. The transition typically takes a few seconds.
+Behind the scenes, Banyan ran both old and new containers simultaneously, confirmed the new ones were healthy (including passing any configured healthchecks), then removed the old ones. The transition typically takes a few seconds.
 
 ## Updating specific services
 
@@ -151,7 +151,7 @@ Container names may change after a blue-green redeployment. If you reference con
 | | Blue-green (full deploy) | Recreate (per-service) |
 |---|---|---|
 | **Command** | `banyan-cli up -f banyan.yaml` | `banyan-cli up -f banyan.yaml web` |
-| **Downtime** | None — old and new run simultaneously | Brief — old stopped before new starts |
+| **Downtime** | None — old and new run simultaneously; waits for healthchecks | Brief — old stopped before new starts |
 | **On failure** | Old containers keep running | Targeted services go down |
 | **Port conflicts** | Avoided via deployment-ID naming | Avoided by stopping old first |
 | **Best for** | Production updates | Development iterations, non-critical services |

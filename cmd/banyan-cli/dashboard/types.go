@@ -85,6 +85,7 @@ type ContainerData struct {
 	DeploymentID    string
 	Status          string
 	ContainerStatus string
+	HealthStatus    string
 	Image           string
 	Ports           []string
 	ReplicaIndex    int32
@@ -198,6 +199,7 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 				DeploymentID:    d.Id,
 				Status:          t.Status,
 				ContainerStatus: t.ContainerStatus,
+				HealthStatus:    t.HealthStatus,
 				Image:           t.Image,
 				Ports:           t.Ports,
 				ReplicaIndex:    t.ReplicaIndex,

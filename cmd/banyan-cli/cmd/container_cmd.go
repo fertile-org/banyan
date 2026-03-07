@@ -50,9 +50,9 @@ func listContainers(containers []dashboard.ContainerData) error {
 		return nil
 	}
 
-	fmt.Printf("%-25s %-12s %-15s %-15s %s\n",
-		"NAME", "SERVICE", "AGENT", "DEPLOYMENT", "STATUS")
-	fmt.Println(strings.Repeat("-", 80))
+	fmt.Printf("%-25s %-12s %-15s %-15s %-12s %s\n",
+		"NAME", "SERVICE", "AGENT", "DEPLOYMENT", "STATUS", "HEALTH")
+	fmt.Println(strings.Repeat("-", 92))
 
 	for i := range containers {
 		c := &containers[i]
@@ -60,8 +60,12 @@ func listContainers(containers []dashboard.ContainerData) error {
 		if status == "" {
 			status = c.Status
 		}
-		fmt.Printf("%-25s %-12s %-15s %-15s %s\n",
-			c.Name, c.ServiceName, c.AgentName, c.DeploymentName, status)
+		health := c.HealthStatus
+		if health == "" {
+			health = "-"
+		}
+		fmt.Printf("%-25s %-12s %-15s %-15s %-12s %s\n",
+			c.Name, c.ServiceName, c.AgentName, c.DeploymentName, status, health)
 	}
 
 	return nil
@@ -90,6 +94,9 @@ func showContainerDetail(containers []dashboard.ContainerData, name string) erro
 		status = container.Status
 	}
 	fmt.Printf("  Status:      %s\n", status)
+	if container.HealthStatus != "" {
+		fmt.Printf("  Health:      %s\n", container.HealthStatus)
+	}
 	fmt.Printf("  Service:     %s\n", container.ServiceName)
 	fmt.Printf("  Agent:       %s\n", container.AgentName)
 	fmt.Printf("  Deployment:  %s\n", container.DeploymentName)

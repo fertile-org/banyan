@@ -22,8 +22,13 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
 | Build | `build:` | `build:` | Same syntax (context + dockerfile) |
 | Env files | `env_file:` | `env_file:` | Same (string or list of paths) |
-| Volumes | `volumes:` | -- | Not yet supported |
+| Restart | `restart:` | `restart:` | Same |
+| Entrypoint | `entrypoint:` | `entrypoint:` | Same |
+| Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus) |
+| Healthcheck | `healthcheck:` | `healthcheck:` | Same (test, interval, timeout, retries, start_period, disable) |
+| Volumes | `volumes:` | -- | Planned |
 | Networks | `networks:` | -- | Managed automatically |
+| Labels | `labels:` | -- | Not supported — Banyan uses built-in service DNS and load balancing instead of label-based service discovery |
 
 If you already write Docker Compose files, you already know most of this.
 
@@ -36,10 +41,25 @@ services:
   <service-name>:           # One or more services
     image: <image>          # Required (unless build is set)
     build: <context-path>   # Build from Dockerfile
+    restart: unless-stopped # Restart policy
+    entrypoint:             # Override ENTRYPOINT
+      - <binary>
     deploy:
       replicas: <number>    # Default: 1
       placement:
         node: <pattern>     # Glob pattern for agent name
+      resources:
+        limits:
+          memory: 512m
+          cpus: "0.5"
+        reservations:
+          memory: 256m
+    healthcheck:
+      test: ["CMD", "<command>"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     ports:
       - "<host>:<container>"
     environment:
@@ -69,10 +89,21 @@ services:
 | `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
 | `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
 | `deploy.placement.node` | string | No | -- | Glob pattern to pin this service to specific nodes. Supports `*`, `?`, and `[abc]`. Example: `gateway-*` matches `gateway-1`, `gateway-2`. |
+| `deploy.resources.limits.memory` | string | No | -- | Memory limit (e.g., `512m`, `1g`). Container is killed if it exceeds this. |
+| `deploy.resources.limits.cpus` | string | No | -- | CPU limit (e.g., `"0.5"`, `"2"`). Fractional cores allowed. |
+| `deploy.resources.reservations.memory` | string | No | -- | Soft memory limit (e.g., `256m`). Used as a reservation hint. |
+| `restart` | string | No | `no` | Restart policy: `no`, `always`, `unless-stopped`, `on-failure`, or `on-failure:N`. |
+| `entrypoint` | string or list | No | -- | Override the container's ENTRYPOINT. Supports string or list form. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |
 | `env_file` | string or list | No | -- | Load environment variables from file(s). Supports `.env` format. See [env_file](#env_file) below. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
+| `healthcheck.test` | string or list | No | -- | Health check command. List form: `["CMD", "pg_isready"]` or `["CMD-SHELL", "curl -f http://localhost"]`. String form: `curl -f http://localhost` (treated as CMD-SHELL). `["NONE"]` disables. |
+| `healthcheck.interval` | string | No | -- | Time between checks (e.g., `10s`, `1m`). |
+| `healthcheck.timeout` | string | No | -- | Timeout per check (e.g., `5s`). |
+| `healthcheck.retries` | integer | No | -- | Consecutive failures before marking unhealthy. |
+| `healthcheck.start_period` | string | No | -- | Grace period for startup (e.g., `30s`). Failures during this period don't count toward retries. |
+| `healthcheck.disable` | boolean | No | `false` | Set `true` to disable any healthcheck defined in the image. |
 | `depends_on` | list | No | -- | Services that should start first. Validated during [per-service deploys](/guides/redeployment/#dependency-validation). |
 
 ## Container naming
@@ -112,6 +143,7 @@ name: my-app
 services:
   caddy:
     image: caddy:latest
+    restart: unless-stopped
     command: caddy reverse-proxy --from example.com --to api:8080
     deploy:
       placement:
@@ -122,8 +154,15 @@ services:
 
   api:
     build: ./api
+    restart: unless-stopped
     deploy:
       replicas: 3
+      resources:
+        limits:
+          memory: 512m
+          cpus: "1"
+        reservations:
+          memory: 256m
     ports:
       - "8080:8080"
     environment:
@@ -134,6 +173,15 @@ services:
 
   db:
     image: postgres:15-alpine
+    restart: unless-stopped
+    entrypoint:
+      - docker-entrypoint.sh
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "banyan"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     ports:
       - "5432:5432"
     environment:
@@ -142,7 +190,7 @@ services:
       - POSTGRES_DB=app
 ```
 
-This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, and service DNS (`api:8080`, `db`) for cross-service communication.
+This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, `healthcheck:` for container health monitoring, and service DNS (`api:8080`, `db`) for cross-service communication. During blue-green redeployments, Banyan waits for healthchecks to pass before tearing down old containers.
 
 ### Build from source
 

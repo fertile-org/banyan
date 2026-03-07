@@ -1,6 +1,6 @@
 # [HIGH-TEST-002] Flaky Tests Using time.Sleep
 
-**Status**: ACKNOWLEDGED — 11 instances across 4 packages. Tests currently pass. Replacing requires per-case analysis of what's being waited on. Recommend fixing incrementally when tests are modified for other reasons.
+**Status**: FIXED (2026-03-07) — Replaced 10 `time.Sleep` calls with proper synchronization: `waitForDNSReady` helper (4 DNS tests), `waitForTCPReady` helper (1 agent test), removed unnecessary sleeps (5 tests). 1 intentional mock delay left as-is.
 **Severity**: High
 **Category**: TEST
 **Component**: pkg/engine, pkg/agent, pkg/storage, pkg/vpc

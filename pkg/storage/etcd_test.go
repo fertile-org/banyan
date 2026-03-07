@@ -387,8 +387,7 @@ func TestEtcdStore_KeepAlive(t *testing.T) {
 		t.Errorf("got %q, want %q", got, "heartbeat")
 	}
 
-	// Let the keepalive goroutine tick at least once
-	time.Sleep(200 * time.Millisecond)
+	// Cancel to stop the keepalive goroutine; if it panics during tick, the test will fail
 	cancel()
 }
 

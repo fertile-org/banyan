@@ -1,6 +1,6 @@
 # [MED-TEST-001] Engine Deployment Functions Lack Direct Unit Tests
 
-**Status**: ACKNOWLEDGED — Functions are methods on engineGRPCServer requiring full server setup. Covered by existing integration tests. Recommend extracting pure logic into standalone functions when these methods are next modified.
+**Status**: FIXED (2026-03-07) — Added 8 targeted edge case tests: tag filtering for findRunningDeploymentByName (3 cases), stop task exclusion for getRunningServiceNames, empty service list for teardownDeploymentServices, and 4 edge cases for collectServiceBackends (empty store, stopped deployment, no IP, exited container).
 **Severity**: Medium
 **Category**: TEST
 **Component**: pkg/engine

@@ -15,8 +15,8 @@ Serena MCP server used for codebase exploration and symbol analysis.
 
 | Status | Count | Details |
 |--------|-------|---------|
-| **FIXED** | 12 | Code/doc changes applied, tests pass |
-| **ACKNOWLEDGED** | 4 | Valid findings, deferred due to risk/scope |
+| **FIXED** | 14 | Code/doc changes applied, tests pass |
+| **ACKNOWLEDGED** | 2 | Valid findings, low value vs effort |
 | **DEFERRED** | 0 | |
 | **Total** | **16** | |
 
@@ -46,7 +46,7 @@ Serena MCP server used for codebase exploration and symbol analysis.
 | [HIGH-SMELL-002](findings/HIGH-SMELL-002-inconsistent-error-wrapping.md) | Inconsistent `%v` vs `%w` wrapping | **FIXED** |
 | [HIGH-SMELL-003](findings/HIGH-SMELL-003-function-with-7-parameters.md) | `Register()` 7 parameters | **FIXED** (RegisterRequest struct) |
 | [HIGH-TEST-001](findings/HIGH-TEST-001-untested-log-provider.md) | `log_provider.go` untested | **FIXED** (tests added) |
-| [HIGH-TEST-002](findings/HIGH-TEST-002-flaky-time-sleep-tests.md) | `time.Sleep` in tests | ACKNOWLEDGED |
+| [HIGH-TEST-002](findings/HIGH-TEST-002-flaky-time-sleep-tests.md) | `time.Sleep` in tests | **FIXED** |
 
 ## Medium Findings
 
@@ -57,7 +57,7 @@ Serena MCP server used for codebase exploration and symbol analysis.
 | [MED-CONS-002](findings/MED-CONS-002-logging-pattern-inconsistency.md) | Logging pattern inconsistency | ACKNOWLEDGED |
 | [MED-BUILD-001](findings/MED-BUILD-001-go-mod-tidy-diff.md) | `go mod tidy` diff | **FIXED** |
 | [MED-BUILD-002](findings/MED-BUILD-002-golangci-lint-findings.md) | golangci-lint findings | **FIXED** (errcheck, gosec, gofmt) |
-| [MED-TEST-001](findings/MED-TEST-001-untested-deployment-functions.md) | Deployment functions undertested | ACKNOWLEDGED |
+| [MED-TEST-001](findings/MED-TEST-001-untested-deployment-functions.md) | Deployment functions undertested | **FIXED** |
 | [MED-TEST-002](findings/MED-TEST-002-skipped-tests-without-ci-alternative.md) | Skipped infra-dependent tests | ACKNOWLEDGED |
 
 ## Low Findings
@@ -161,4 +161,4 @@ cmd/banyan-engine ok  4.0s
 
 **Audit Date**: 2026-03-06
 **Branch**: `feat/code-audit`
-**Status**: Complete — 16 findings: 12 fixed, 4 acknowledged
+**Status**: Complete — 16 findings: 14 fixed, 2 acknowledged

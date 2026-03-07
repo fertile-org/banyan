@@ -2248,10 +2248,7 @@ func TestFindContainerAgent_GetTaskError(t *testing.T) {
 func TestStreamAgentLogs_StreamLogsError(t *testing.T) {
 	// Start a mock agent server and immediately stop it so StreamLogs fails.
 	agentAddr, cleanup := startMockAgentServer(t, nil)
-	cleanup() // stop immediately
-
-	// Give the server time to fully shut down
-	time.Sleep(50 * time.Millisecond)
+	cleanup() // stop immediately — Stop() is synchronous
 
 	ctx := context.Background()
 	_, err := streamAgentLogs(ctx, agentAddr, "token", "container", false, 10)
@@ -4063,6 +4060,179 @@ func TestRegister_ReturnsActiveContainers(t *testing.T) {
 		}
 		if len(resp.ActiveContainers) != 0 {
 			t.Errorf("expected 0 active containers, got %d", len(resp.ActiveContainers))
+		}
+	})
+}
+
+func TestFindRunningDeploymentByName_TagFiltering(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+
+	store.Save(ctx, types.KeyDeployments+"prod", &types.DeploymentRecord{
+		ID: "prod", Name: "app", Status: types.StatusRunning, Tags: []string{"env:prod"},
+		CreatedAt: time.Now(),
+	})
+	store.Save(ctx, types.KeyDeployments+"staging", &types.DeploymentRecord{
+		ID: "staging", Name: "app", Status: types.StatusRunning, Tags: []string{"env:staging"},
+		CreatedAt: time.Now(),
+	})
+
+	t.Run("matches correct tags", func(t *testing.T) {
+		deploy, _, err := srv.findRunningDeploymentByName(ctx, "app", []string{"env:prod"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deploy.ID != "prod" {
+			t.Errorf("expected 'prod', got %q", deploy.ID)
+		}
+	})
+
+	t.Run("no match with wrong tags", func(t *testing.T) {
+		_, _, err := srv.findRunningDeploymentByName(ctx, "app", []string{"env:dev"})
+		if err == nil {
+			t.Fatal("expected error when no deployment matches tags")
+		}
+	})
+
+	t.Run("nil tags matches nil-tagged deployments only", func(t *testing.T) {
+		store2 := storage.NewMemoryStore()
+		srv2 := &engineGRPCServer{store: store2}
+		store2.Save(ctx, types.KeyDeployments+"noTags", &types.DeploymentRecord{
+			ID: "noTags", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
+		})
+		deploy, _, err := srv2.findRunningDeploymentByName(ctx, "app", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if deploy.ID != "noTags" {
+			t.Errorf("expected 'noTags', got %q", deploy.ID)
+		}
+	})
+}
+
+func TestGetRunningServiceNames_ExcludesStopTasks(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+		ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1",
+		ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+	})
+	store.Save(ctx, types.KeyTasks+"agent-1/task-1-stop", &types.TaskRecord{
+		ID: "task-1-stop", DeploymentID: "deploy-1", AgentID: "agent-1",
+		ServiceName: "web", Type: types.TaskTypeStopAndRemove, Status: types.StatusCompleted,
+	})
+
+	names := srv.getRunningServiceNames(ctx, "deploy-1")
+	nameSet := make(map[string]bool)
+	for _, n := range names {
+		nameSet[n] = true
+	}
+	if !nameSet["web"] {
+		t.Error("expected 'web' from create_and_start task")
+	}
+	if len(names) != 1 {
+		t.Errorf("expected 1 name (stop task excluded), got %d: %v", len(names), names)
+	}
+}
+
+func TestTeardownDeploymentServices_EmptyServiceList(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store}
+
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
+		ID: "task-web", DeploymentID: "deploy-1", AgentID: "agent-1",
+		ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "app-web-0",
+	})
+
+	// Empty service list should create no stop tasks
+	srv.teardownDeploymentServices(ctx, "deploy-1", []string{})
+
+	var stopTask types.TaskRecord
+	if err := store.Get(ctx, types.KeyTasks+"agent-1/task-web-stop", &stopTask); err == nil {
+		t.Error("expected no stop task when service list is empty")
+	}
+}
+
+func TestCollectServiceBackends_EdgeCases(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("empty store returns nil", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		backends := srv.collectServiceBackends(ctx)
+		if len(backends) != 0 {
+			t.Errorf("expected 0 backends from empty store, got %d", len(backends))
+		}
+	})
+
+	t.Run("no running deployments returns nil", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"d1", &types.DeploymentRecord{
+			ID: "d1", Name: "app", Status: types.StatusStopped,
+		})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "d1", AgentID: "agent-1", ServiceName: "web",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-web-0", ContainerStatus: "running",
+			ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
+		})
+
+		backends := srv.collectServiceBackends(ctx)
+		if len(backends) != 0 {
+			t.Errorf("expected 0 backends (deployment stopped), got %d", len(backends))
+		}
+	})
+
+	t.Run("excludes containers without IP", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"d1", &types.DeploymentRecord{
+			ID: "d1", Name: "app", Status: types.StatusRunning,
+		})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "d1", AgentID: "agent-1", ServiceName: "web",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-web-0", ContainerStatus: "running",
+			ContainerIP: "", // no IP assigned yet
+		})
+
+		backends := srv.collectServiceBackends(ctx)
+		if len(backends) != 0 {
+			t.Errorf("expected 0 backends (no IP), got %d", len(backends))
+		}
+	})
+
+	t.Run("excludes non-running containers", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		srv := &engineGRPCServer{store: store}
+
+		store.Save(ctx, types.KeyDeployments+"d1", &types.DeploymentRecord{
+			ID: "d1", Name: "app", Status: types.StatusRunning,
+		})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", DeploymentID: "d1", AgentID: "agent-1", ServiceName: "web",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "app-web-0", ContainerStatus: "exited",
+			ContainerIP: "10.0.1.5",
+		})
+
+		backends := srv.collectServiceBackends(ctx)
+		if len(backends) != 0 {
+			t.Errorf("expected 0 backends (container exited), got %d", len(backends))
 		}
 	})
 }

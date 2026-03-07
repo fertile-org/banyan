@@ -18,9 +18,10 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Command | `command:` | `command:` | Same |
 | Dependencies | `depends_on:` | `depends_on:` | Same (informational for full deploys; validated for per-service deploys) |
 | Replicas | `deploy.replicas:` | `deploy.replicas:` | Same |
-| Placement | `deploy.placement.constraints:` | `deploy.placement.node:` | Glob pattern for node name matching |
+| Placement | `deploy.placement.constraints:` | `deploy.placement.node:` | Glob pattern for agent name matching |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
 | Build | `build:` | `build:` | Same syntax (context + dockerfile) |
+| Env files | `env_file:` | `env_file:` | Same (string or list of paths) |
 | Restart | `restart:` | `restart:` | Same |
 | Entrypoint | `entrypoint:` | `entrypoint:` | Same |
 | Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus) |
@@ -46,7 +47,7 @@ services:
     deploy:
       replicas: <number>    # Default: 1
       placement:
-        node: <pattern>     # Glob pattern for node name
+        node: <pattern>     # Glob pattern for agent name
       resources:
         limits:
           memory: 512m
@@ -63,6 +64,7 @@ services:
       - "<host>:<container>"
     environment:
       - KEY=value
+    env_file: .env            # Or a list of files
     command:
       - <arg1>
       - <arg2>
@@ -94,6 +96,7 @@ services:
 | `entrypoint` | string or list | No | -- | Override the container's ENTRYPOINT. Supports string or list form. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |
+| `env_file` | string or list | No | -- | Load environment variables from file(s). Supports `.env` format. See [env_file](#env_file) below. |
 | `command` | list | No | -- | Override the container's default command. Each argument is a list item. |
 | `healthcheck.test` | string or list | No | -- | Health check command. List form: `["CMD", "pg_isready"]` or `["CMD-SHELL", "curl -f http://localhost"]`. String form: `curl -f http://localhost` (treated as CMD-SHELL). `["NONE"]` disables. |
 | `healthcheck.interval` | string | No | -- | Time between checks (e.g., `10s`, `1m`). |
@@ -225,6 +228,45 @@ services:
 Each service must have either `image` or `build` (or both).
 
 The [full example](#full-example-examplesbanyanyml) above demonstrates mixing `build:` and `image:` services. Services with `build:` are built locally and pushed to the Engine's registry. Services with only `image:` are pulled directly by agents.
+
+### env_file
+
+Load environment variables from one or more files, using the same syntax as Docker Compose.
+
+**String form** — single file:
+
+```yaml
+services:
+  api:
+    image: my-api:latest
+    env_file: .env
+```
+
+**List form** — multiple files (later files override earlier ones):
+
+```yaml
+services:
+  api:
+    image: my-api:latest
+    env_file:
+      - .env
+      - .env.production
+```
+
+Files use standard `.env` format: `KEY=VALUE` pairs, one per line. Comments (`#`), blank lines, quoted values, and `export` prefixes are all supported.
+
+**Merge order:** Variables from `env_file` are loaded first, then inline `environment` values override them. This lets you keep defaults in a file and override specific values in the manifest:
+
+```yaml
+services:
+  api:
+    image: my-api:latest
+    env_file: .env              # Loads DB_HOST=localhost, DB_PORT=5432
+    environment:
+      - DB_HOST=production-db   # Overrides DB_HOST from .env
+```
+
+Paths are relative to the manifest file's directory.
 
 ## Validation
 

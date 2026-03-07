@@ -12,9 +12,9 @@ import (
 )
 
 const (
-	defaultWGName     = "banyan-wg"
-	defaultWGPort     = 51820
-	defaultKeepalive  = 25
+	defaultWGName    = "banyan-wg"
+	defaultWGPort    = 51820
+	defaultKeepalive = 25
 )
 
 // WireGuardDriver implements OverlayDriver using Linux WireGuard interfaces.
@@ -63,8 +63,12 @@ func NewWireGuardDriverWithOps(linkOps LinkOperations, wgOps WireGuardOps, priva
 // veth pairs attached to it — deleting it would break their networking.
 func (d *WireGuardDriver) Init(ctx context.Context, subnet net.IPNet, hostIP net.IP) error {
 	// Always recreate the WireGuard tunnel interface (safe — no container veths attached)
-	if exists, _ := d.linkOps.LinkExists(d.wgName); exists {
-		_ = d.linkOps.DeleteLink(d.wgName)
+	if exists, existsErr := d.linkOps.LinkExists(d.wgName); existsErr != nil {
+		logging.New("overlay").Warn("Failed to check WireGuard interface", "iface", d.wgName, "error", existsErr)
+	} else if exists {
+		if delErr := d.linkOps.DeleteLink(d.wgName); delErr != nil {
+			logging.New("overlay").Warn("Failed to delete stale WireGuard interface", "iface", d.wgName, "error", delErr)
+		}
 	}
 
 	// 1. Create WireGuard interface
@@ -168,7 +172,7 @@ func (d *WireGuardDriver) WriteCNIConfig(subnet net.IPNet) error {
 	}
 
 	configPath := filepath.Join(cniConfigDir, cniConfigFile)
-	if writeErr := os.WriteFile(configPath, data, 0o644); writeErr != nil {
+	if writeErr := os.WriteFile(configPath, data, 0o644); writeErr != nil { //nolint:gosec // CNI config must be readable by CNI plugins
 		return fmt.Errorf("write CNI config to %s: %w", configPath, writeErr)
 	}
 

@@ -23,7 +23,7 @@ func SetSysctlWriter(fn func(string, string) error) func() {
 }
 
 func defaultSysctlWriter(path, value string) error {
-	return os.WriteFile(path, []byte(value), 0o644)
+	return os.WriteFile(path, []byte(value), 0o644) //nolint:gosec // sysctl pseudo-files in /proc/sys require world-readable permissions
 }
 
 func defaultSysctlReader(path string) (string, error) {

@@ -10,6 +10,23 @@ import (
 	mdns "github.com/miekg/dns"
 )
 
+// waitForDNSReady polls the DNS server until it responds or the timeout expires.
+func waitForDNSReady(t *testing.T, addr string) {
+	t.Helper()
+	client := &mdns.Client{Net: "udp", Timeout: 100 * time.Millisecond}
+	msg := new(mdns.Msg)
+	msg.SetQuestion(".", mdns.TypeNS)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		_, _, err := client.Exchange(msg, addr)
+		if err == nil {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("DNS server at %s not ready within timeout", addr)
+}
+
 func TestServer_StartStop(t *testing.T) {
 	manager := dns.NewManager()
 	config := dns.ServerConfig{
@@ -70,8 +87,8 @@ func TestServer_InternalDomainResolution(t *testing.T) {
 	}
 	defer server.Stop()
 
-	// Give server time to start
-	time.Sleep(50 * time.Millisecond)
+	// Wait for server to be ready
+	waitForDNSReady(t, "127.0.0.1:15354")
 
 	// Test DNS resolution
 	tests := []struct {
@@ -158,7 +175,7 @@ func TestServer_MultipleIPs(t *testing.T) {
 	}
 	defer server.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForDNSReady(t, "127.0.0.1:15355")
 
 	client := &mdns.Client{
 		Net:     "udp",
@@ -214,7 +231,7 @@ func TestServer_HealthAwareResolution(t *testing.T) {
 	}
 	defer server.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForDNSReady(t, "127.0.0.1:15356")
 
 	client := &mdns.Client{
 		Net:     "udp",
@@ -280,7 +297,7 @@ func TestServer_IPv6Resolution(t *testing.T) {
 	}
 	defer server.Stop()
 
-	time.Sleep(50 * time.Millisecond)
+	waitForDNSReady(t, "127.0.0.1:15357")
 
 	client := &mdns.Client{
 		Net:     "udp",

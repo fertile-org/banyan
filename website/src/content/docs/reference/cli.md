@@ -151,7 +151,7 @@ sudo journalctl -u banyan-agent -f         # view logs
 Start the Agent in the foreground. Useful for development and debugging. In production, use `systemctl` instead.
 
 ```bash
-sudo banyan-agent start --node-name worker-1
+sudo banyan-agent start --agent-name worker-1
 ```
 
 The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `init`). Runs in the foreground. Stop with `Ctrl+C`.
@@ -160,7 +160,7 @@ The engine endpoint is read from `/etc/banyan/banyan.yaml` (set during `init`). 
 |------|---------|-------------|
 | `--data-dir` | `/var/lib/banyan` | Data directory |
 | `--engine` | (from config) | Engine gRPC endpoint override (e.g., `192.168.1.10:50051`) |
-| `--node-name` | hostname | Name for this node. Must be unique in the cluster. |
+| `--agent-name` | hostname | Name for this agent. Must be unique in the cluster. |
 | `--pid-file` | `/var/run/banyan-agent.pid` | Agent PID file |
 | `--api-port` | `50052` | Agent gRPC server port (used for log streaming from engine) |
 | `--api-address` | | Agent API address override (e.g., `192.168.1.10:50052`) |

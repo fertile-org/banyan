@@ -69,7 +69,7 @@ func (c *EngineConfig) GetStoreBackend() string {
 type AgentConfig struct {
 	EngineHost        string   `yaml:"engine_host,omitempty"`
 	EnginePort        string   `yaml:"engine_port,omitempty"`
-	NodeName          string   `yaml:"node_name,omitempty"`
+	AgentName         string   `yaml:"agent_name,omitempty"`
 	WGPrivateKeyFile  string   `yaml:"wg_private_key_file,omitempty"`
 	WGPublicKey       string   `yaml:"wg_public_key,omitempty"`
 	EngineWGPublicKey string   `yaml:"engine_wg_public_key,omitempty"`

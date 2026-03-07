@@ -1037,8 +1037,8 @@ func TestReconcileDNS(t *testing.T) {
 		}
 
 		backends := []ServiceBackend{
-			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", ServiceName: "", AgentName: "worker-1"},  // no service name
-			{ContainerName: "app-db-0", ContainerIP: "", ServiceName: "db", AgentName: "worker-1"},          // no IP
+			{ContainerName: "app-web-0", ContainerIP: "10.0.1.5", ServiceName: "", AgentName: "worker-1"},    // no service name
+			{ContainerName: "app-db-0", ContainerIP: "", ServiceName: "db", AgentName: "worker-1"},           // no IP
 			{ContainerName: "app-api-0", ContainerIP: "10.0.1.7", ServiceName: "api", AgentName: "worker-1"}, // valid
 		}
 

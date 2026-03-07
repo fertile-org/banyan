@@ -40,7 +40,7 @@ cat > /etc/banyan/banyan.yaml <<EOF
 agent:
     engine_host: ${ENGINE_HOST}
     engine_port: "${ENGINE_GRPC_PORT}"
-    node_name: ${NODE_NAME}
+    agent_name: ${NODE_NAME}
     wg_private_key_file: /etc/banyan/keys/agent.key
     wg_public_key: ${AGENT_PUB_KEY}
     engine_wg_public_key: ${ENGINE_WG_PUB_KEY}
@@ -67,4 +67,4 @@ sleep 2
 
 # 9. Start agent
 echo "Starting agent..."
-exec banyan-agent start --node-name "$NODE_NAME"
+exec banyan-agent start --agent-name "$NODE_NAME"

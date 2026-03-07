@@ -133,7 +133,9 @@ func (s *EventStore) Add(e Event) {
 			Severity:  e.Severity,
 		}
 		if data, err := json.Marshal(we); err == nil {
-			s.file.Write(append(data, '\n'))
+			if _, writeErr := s.file.Write(append(data, '\n')); writeErr != nil {
+				logging.New("events").Warn("Failed to write event to WAL", "error", writeErr)
+			}
 		}
 	}
 
@@ -203,7 +205,7 @@ func (s *EventStore) compact() {
 			Severity:  s.events[i].Severity,
 		}
 		if data, err := json.Marshal(we); err == nil {
-			f.Write(append(data, '\n'))
+			_, _ = f.Write(append(data, '\n')) // best-effort during compaction
 		}
 	}
 

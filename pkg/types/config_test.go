@@ -65,7 +65,7 @@ func TestLoadSaveConfig(t *testing.T) {
 			Agent: AgentConfig{
 				EngineHost: "192.168.1.10",
 				EnginePort: "2379",
-				NodeName:   "worker-1",
+				AgentName:  "worker-1",
 			},
 			CLI: CLIConfig{
 				WGPublicKey: "cli-pubkey",
@@ -98,8 +98,8 @@ func TestLoadSaveConfig(t *testing.T) {
 		if loaded.Agent.EnginePort != "2379" {
 			t.Errorf("expected engine_port=2379, got %s", loaded.Agent.EnginePort)
 		}
-		if loaded.Agent.NodeName != "worker-1" {
-			t.Errorf("expected agent node_name=worker-1, got %s", loaded.Agent.NodeName)
+		if loaded.Agent.AgentName != "worker-1" {
+			t.Errorf("expected agent agent_name=worker-1, got %s", loaded.Agent.AgentName)
 		}
 		if loaded.CLI.WGPublicKey != "cli-pubkey" {
 			t.Errorf("expected cli wg_public_key=cli-pubkey, got %s", loaded.CLI.WGPublicKey)

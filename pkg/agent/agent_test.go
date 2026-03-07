@@ -104,7 +104,7 @@ func TestContainerTracker(t *testing.T) {
 func TestNew(t *testing.T) {
 	t.Run("creates agent with session token", func(t *testing.T) {
 		a, err := New(&Options{
-			NodeName:       "worker-1",
+			AgentName:       "worker-1",
 			EngineEndpoint: "localhost:50051",
 		})
 		if err != nil {
@@ -116,8 +116,8 @@ func TestNew(t *testing.T) {
 		if len(a.sessionToken) != 64 { // 32 bytes hex-encoded
 			t.Errorf("expected 64-char hex token, got %d chars", len(a.sessionToken))
 		}
-		if a.opts.NodeName != "worker-1" {
-			t.Errorf("expected node name 'worker-1', got %q", a.opts.NodeName)
+		if a.opts.AgentName != "worker-1" {
+			t.Errorf("expected agent name 'worker-1', got %q", a.opts.AgentName)
 		}
 	})
 }
@@ -418,7 +418,7 @@ func TestProcessTasks(t *testing.T) {
 		})
 
 		a := &Agent{
-			opts:       Options{NodeName: "worker-1"},
+			opts:       Options{AgentName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
 			proxy:      newTestProxy(t),
@@ -463,7 +463,7 @@ func TestProcessTasks(t *testing.T) {
 		})
 
 		a := &Agent{
-			opts:       Options{NodeName: "worker-1"},
+			opts:       Options{AgentName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
 			proxy:      newTestProxy(t),
@@ -487,7 +487,7 @@ func TestProcessTasks(t *testing.T) {
 		defer cleanup()
 
 		a := &Agent{
-			opts:       Options{NodeName: "worker-1"},
+			opts:       Options{AgentName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
 			proxy:      newTestProxy(t),
@@ -513,7 +513,7 @@ func TestProcessTasks(t *testing.T) {
 		})
 
 		a := &Agent{
-			opts:       Options{NodeName: "worker-1"},
+			opts:       Options{AgentName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
 			proxy:      newTestProxy(t),
@@ -541,7 +541,7 @@ func TestCheckContainerHealth(t *testing.T) {
 		}
 
 		a := &Agent{
-			opts:       Options{NodeName: "worker-1"},
+			opts:       Options{AgentName: "worker-1"},
 			client:     client,
 			containers: &containerTracker{},
 		}
@@ -893,7 +893,7 @@ func TestProcessTasks_PollError(t *testing.T) {
 	cleanup() // Stop server immediately to trigger error
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
@@ -923,7 +923,7 @@ func TestProcessTasks_NilResult(t *testing.T) {
 	})
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
@@ -954,7 +954,7 @@ func TestCheckContainerHealth_ReportError(t *testing.T) {
 	}
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 	}
@@ -1034,7 +1034,7 @@ func TestProcessTasks_ReportRunningFails(t *testing.T) {
 	}
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
@@ -1073,7 +1073,7 @@ func TestProcessTasks_ReportFailureFails(t *testing.T) {
 	})
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
@@ -1297,7 +1297,7 @@ func TestProcessTasks_StopRemovesProxyBackend(t *testing.T) {
 	})
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 		proxy:      p,
@@ -1317,7 +1317,7 @@ func TestReconcileRemoteBackends(t *testing.T) {
 		p := newTestProxy(t)
 		defer p.Close()
 		a := &Agent{
-			opts:           Options{NodeName: "worker-1"},
+			opts:           Options{AgentName: "worker-1"},
 			proxy:          p,
 			remoteBackends: make(map[string]ServiceBackend),
 		}
@@ -1339,7 +1339,7 @@ func TestReconcileRemoteBackends(t *testing.T) {
 		p := newTestProxy(t)
 		defer p.Close()
 		a := &Agent{
-			opts:  Options{NodeName: "worker-1"},
+			opts:  Options{AgentName: "worker-1"},
 			proxy: p,
 			remoteBackends: map[string]ServiceBackend{
 				"app-web-0": {ContainerName: "app-web-0", ContainerIP: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
@@ -1364,7 +1364,7 @@ func TestReconcileRemoteBackends(t *testing.T) {
 		p := newTestProxy(t)
 		defer p.Close()
 		a := &Agent{
-			opts:           Options{NodeName: "worker-1"},
+			opts:           Options{AgentName: "worker-1"},
 			proxy:          p,
 			remoteBackends: make(map[string]ServiceBackend),
 		}
@@ -1391,7 +1391,7 @@ func TestReconcileRemoteBackends(t *testing.T) {
 		p := newTestProxy(t)
 		defer p.Close()
 		a := &Agent{
-			opts:  Options{NodeName: "worker-1"},
+			opts:  Options{AgentName: "worker-1"},
 			proxy: p,
 			remoteBackends: map[string]ServiceBackend{
 				"app-web-0": {ContainerName: "app-web-0", ContainerIP: "10.0.2.5", Ports: []string{"8080:80"}, AgentName: "worker-2"},
@@ -1428,7 +1428,7 @@ func TestReconcileRemoteBackends(t *testing.T) {
 		p := newTestProxy(t)
 		defer p.Close()
 		a := &Agent{
-			opts:           Options{NodeName: "worker-1"},
+			opts:           Options{AgentName: "worker-1"},
 			proxy:          p,
 			remoteBackends: make(map[string]ServiceBackend),
 		}
@@ -1450,7 +1450,7 @@ func TestProcessTasks_SkipsWhenDisconnected(t *testing.T) {
 	cleanup() // Stop server — any RPC call would fail
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 		proxy:      newTestProxy(t),
@@ -1476,7 +1476,7 @@ func TestCheckContainerHealth_SkipsWhenDisconnected(t *testing.T) {
 	cleanup()
 
 	a := &Agent{
-		opts:       Options{NodeName: "worker-1"},
+		opts:       Options{AgentName: "worker-1"},
 		client:     client,
 		containers: &containerTracker{},
 	}
@@ -1495,7 +1495,7 @@ func TestReconnect_ReRegistersSuccessfully(t *testing.T) {
 	defer cleanup()
 
 	a := &Agent{
-		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
 		sessionToken: "test-token",
 	}
@@ -1512,7 +1512,7 @@ func TestReconnect_RespectsContextCancellation(t *testing.T) {
 	cleanup()
 
 	a := &Agent{
-		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
 		sessionToken: "test-token",
 	}
@@ -1551,7 +1551,7 @@ func TestReconnect_RetriesOnRegisterFailure(t *testing.T) {
 	defer cleanup()
 
 	a := &Agent{
-		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
 		sessionToken: "test-token",
 	}
@@ -1582,7 +1582,7 @@ func TestAgentHeartbeat_TriggersReconnectAfterConsecutiveFailures(t *testing.T) 
 	defer cleanup()
 
 	a := &Agent{
-		opts:         Options{NodeName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
+		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
 		sessionToken: "test-token",
 		containers:   &containerTracker{},
@@ -1592,7 +1592,7 @@ func TestAgentHeartbeat_TriggersReconnectAfterConsecutiveFailures(t *testing.T) 
 	// Simulate the heartbeat loop's failure detection logic directly
 	consecutiveFails := 0
 	for i := 0; i < maxConsecutiveHeartbeatFails; i++ {
-		_, _, err := a.client.Heartbeat(context.Background(), a.opts.NodeName, a.sessionToken, a.opts.Tags, metrics.SystemMetrics{})
+		_, _, err := a.client.Heartbeat(context.Background(), a.opts.AgentName, a.sessionToken, a.opts.Tags, metrics.SystemMetrics{})
 		if err != nil {
 			consecutiveFails++
 		}

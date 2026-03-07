@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/fertile-org/banyan/pkg/vpc/registry"
 	"github.com/fertile-org/banyan/pkg/storage"
+	"github.com/fertile-org/banyan/pkg/vpc/registry"
 )
 
 // RuntimeServiceResolver resolves service names to IPs using the service registry

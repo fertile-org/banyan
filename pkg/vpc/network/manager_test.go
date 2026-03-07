@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/vpc/network"
-	"github.com/fertile-org/banyan/pkg/storage"
 )
 
 func TestNetworkManager_CreateNetwork(t *testing.T) {

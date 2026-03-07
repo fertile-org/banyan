@@ -11,7 +11,7 @@ import (
 
 // Logger is a structured logger for a specific component.
 type Logger struct {
-	slog *slog.Logger
+	slog      *slog.Logger
 	component string
 }
 

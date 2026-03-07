@@ -3,6 +3,7 @@ module github.com/fertile-org/banyan/pkg/agent
 go 1.24.3
 
 require (
+	github.com/coreos/go-iptables v0.8.0
 	github.com/fertile-org/banyan/pkg/logging v0.0.0
 	github.com/fertile-org/banyan/pkg/metrics v0.0.0
 	github.com/fertile-org/banyan/pkg/proxy v0.0.0
@@ -17,7 +18,6 @@ require (
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
-	github.com/coreos/go-iptables v0.8.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect

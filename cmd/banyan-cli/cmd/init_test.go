@@ -104,7 +104,7 @@ func TestApplyCLIInit_PreservesOtherConfig(t *testing.T) {
 	// Write a config with agent section
 	existingCfg := types.BanyanConfig{
 		Agent: types.AgentConfig{
-			NodeName:   "worker-1",
+			AgentName:  "worker-1",
 			EngineHost: "10.0.0.1",
 		},
 	}
@@ -128,8 +128,8 @@ func TestApplyCLIInit_PreservesOtherConfig(t *testing.T) {
 
 	// Verify agent section was preserved
 	cfg, _ := types.LoadConfig(configPath)
-	if cfg.Agent.NodeName != "worker-1" {
-		t.Errorf("expected agent node name 'worker-1' preserved, got %q", cfg.Agent.NodeName)
+	if cfg.Agent.AgentName != "worker-1" {
+		t.Errorf("expected agent name 'worker-1' preserved, got %q", cfg.Agent.AgentName)
 	}
 }
 

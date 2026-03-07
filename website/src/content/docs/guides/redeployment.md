@@ -71,7 +71,7 @@ banyan-cli up -f banyan.yaml web api
 ```
 
 :::caution
-Per-service deploys use a **recreate** strategy (stop old, then start new) instead of blue-green. This avoids port conflicts but causes a brief interruption for the updated services. Other services continue running uninterrupted.
+Per-service deploys use the same **blue-green** strategy as full deploys — new containers start alongside old ones and old containers are torn down only after the new deployment is healthy. Other services continue running uninterrupted.
 :::
 
 ### Dependency validation

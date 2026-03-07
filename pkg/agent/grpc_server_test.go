@@ -19,6 +19,21 @@ import (
 	"google.golang.org/grpc/test/bufconn"
 )
 
+// waitForTCPReady polls until a TCP connection to addr succeeds or timeout expires.
+func waitForTCPReady(t *testing.T, addr string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 50*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("TCP server at %s not ready within %v", addr, timeout)
+}
+
 // mockLogProvider returns bytes from a buffer.
 type mockLogProvider struct {
 	data []byte
@@ -209,8 +224,6 @@ func TestStreamLogs(t *testing.T) {
 		// The server should detect the broken stream when Send fails.
 		cancel()
 
-		// Allow the server goroutine to detect the disconnect
-		time.Sleep(100 * time.Millisecond)
 	})
 }
 
@@ -223,14 +236,8 @@ func TestStartAgentGRPC(t *testing.T) {
 		// Use port "0" to let the OS assign a free port
 		startAgentGRPC(ctx, provider, "0", "test-session-token")
 
-		// Give the server a moment to start
-		time.Sleep(50 * time.Millisecond)
-
 		// Cancel context to trigger graceful stop
 		cancel()
-
-		// Give the server a moment to stop
-		time.Sleep(50 * time.Millisecond)
 	})
 
 	t.Run("handles listen failure on invalid port", func(t *testing.T) {
@@ -260,8 +267,8 @@ func TestStartAgentGRPC(t *testing.T) {
 		portStr := fmt.Sprintf("%d", port)
 		startAgentGRPC(ctx, provider, portStr, "test-token-123")
 
-		// Give the server a moment to start
-		time.Sleep(100 * time.Millisecond)
+		// Wait for the server to be ready
+		waitForTCPReady(t, fmt.Sprintf("localhost:%s", portStr), 2*time.Second)
 
 		// Connect a client to the running server
 		addr := fmt.Sprintf("localhost:%s", portStr)

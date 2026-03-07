@@ -52,4 +52,3 @@ func InitializeNetwork(ctx context.Context, etcdEndpoints []string, vpcCIDR stri
 
 	return nil
 }
-

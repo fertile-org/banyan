@@ -16,7 +16,7 @@ Commands:
 
 Quick Start:
   banyan-agent init
-  banyan-agent start --node-name my-worker`,
+  banyan-agent start --agent-name my-worker`,
 }
 
 // Execute runs the root command.

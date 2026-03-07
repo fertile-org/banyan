@@ -10,7 +10,6 @@ use (
 	./pkg/metrics
 	./pkg/proxy
 	./pkg/rpc
-	./pkg/shared/domain
 	./pkg/storage
 	./pkg/types
 	./pkg/vpc

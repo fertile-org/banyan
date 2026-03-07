@@ -669,7 +669,7 @@ func TestDown(t *testing.T) {
 
 		srv3.store.Save(ctx, types.KeyDeployments+"deploy-inv", &types.DeploymentRecord{
 			ID: "deploy-inv", Name: "inv-app", Status: types.StatusRunning,
-			Services: map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+			Services:  map[string]types.ServiceRecord{"web": {Image: "nginx"}},
 			CreatedAt: time.Now(),
 		})
 
@@ -688,7 +688,7 @@ func TestDown(t *testing.T) {
 
 		srv4.store.Save(ctx, types.KeyDeployments+"deploy-norun", &types.DeploymentRecord{
 			ID: "deploy-norun", Name: "norun-app", Status: types.StatusPending,
-			Services: map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+			Services:  map[string]types.ServiceRecord{"web": {Image: "nginx"}},
 			CreatedAt: time.Now(),
 		})
 
@@ -708,8 +708,8 @@ func TestDown(t *testing.T) {
 		// Deployment failed during deploy (1 task failed) but has completed tasks
 		srv5.store.Save(ctx, types.KeyDeployments+"deploy-err", &types.DeploymentRecord{
 			ID: "deploy-err", Name: "err-app", Status: types.StatusFailed,
-			Error: "1/5 tasks failed: failed to start container: name-store error",
-			Services: map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
+			Error:     "1/5 tasks failed: failed to start container: name-store error",
+			Services:  map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
 			CreatedAt: time.Now(),
 		})
 		srv5.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
@@ -1322,8 +1322,8 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 
 	// Deployment with multiple services and tasks
 	srv.store.Save(ctx, types.KeyDeployments+"deploy-multi", &types.DeploymentRecord{
-		ID:   "deploy-multi",
-		Name: "multi-app",
+		ID:     "deploy-multi",
+		Name:   "multi-app",
 		Status: types.StatusRunning,
 		Services: map[string]types.ServiceRecord{
 			"web": {Image: "nginx", Replicas: 1, Ports: []string{"80:80"}, Environment: []string{"ENV=prod"}, Command: []string{"nginx"}, DependsOn: []string{"db"}},
@@ -2174,7 +2174,7 @@ func TestGetStatus_GetNodeError(t *testing.T) {
 	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
 	memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
 		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
-		Services: map[string]types.ServiceRecord{"web": {Image: "nginx"}},
+		Services:  map[string]types.ServiceRecord{"web": {Image: "nginx"}},
 		CreatedAt: time.Now(),
 	})
 

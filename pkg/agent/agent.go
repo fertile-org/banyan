@@ -34,7 +34,7 @@ type PortProxy interface {
 
 // Options configures the Agent.
 type Options struct {
-	NodeName       string
+	AgentName      string
 	EngineEndpoint string
 	PublicKey      string // WireGuard public key (for pubkey auth)
 	WGPrivateKey   string // WireGuard private key (for overlay)
@@ -47,18 +47,18 @@ type Options struct {
 
 // Agent is the Banyan data-plane worker.
 type Agent struct {
-	opts            Options
-	client          *EngineClient
-	containers      *containerTracker
-	sessionToken    string
-	proxy           PortProxy
-	vpcEnabled      bool
-	overlayDriver   overlay.OverlayDriver
-	remoteBackends  map[string]ServiceBackend // key: containerName
-	dnsManager      *dns.Manager
-	dnsServer       *dns.Server
-	gatewayIP       string          // bridge gateway IP (e.g., "10.0.45.1")
-	registeredDNS   map[string]bool // tracked DNS hostnames for stale cleanup
+	opts             Options
+	client           *EngineClient
+	containers       *containerTracker
+	sessionToken     string
+	proxy            PortProxy
+	vpcEnabled       bool
+	overlayDriver    overlay.OverlayDriver
+	remoteBackends   map[string]ServiceBackend // key: containerName
+	dnsManager       *dns.Manager
+	dnsServer        *dns.Server
+	gatewayIP        string          // bridge gateway IP (e.g., "10.0.45.1")
+	registeredDNS    map[string]bool // tracked DNS hostnames for stale cleanup
 	connected        atomic.Bool     // true when registered and heartbeat is healthy
 	allocatedSubnet  string          // VPC subnet allocated by engine (e.g., "10.0.45.0/24")
 	metricsCollector *metrics.SystemCollector
@@ -147,7 +147,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Determine API address for this agent
 	apiAddr := a.opts.APIAddress
 	if apiAddr == "" {
-		apiAddr = a.opts.NodeName + ":" + a.opts.APIPort
+		apiAddr = a.opts.AgentName + ":" + a.opts.APIPort
 	}
 
 	// Detect data-plane host IP for overlay peer endpoint
@@ -158,11 +158,18 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	// Register node
-	registryURL, vpcConfig, activeContainers, err := client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey, hostIPStr)
+	registryURL, vpcConfig, activeContainers, err := client.Register(ctx, RegisterRequest{
+		Name:         a.opts.AgentName,
+		APIAddr:      apiAddr,
+		SessionToken: a.sessionToken,
+		Tags:         a.opts.Tags,
+		WGPublicKey:  a.opts.WGPublicKey,
+		HostIP:       hostIPStr,
+	})
 	if err != nil {
-		return fmt.Errorf("failed to register node: %w", err)
+		return fmt.Errorf("failed to register agent: %w", err)
 	}
-	a.logger().Info("Node registered", "node", a.opts.NodeName, "registry", registryURL)
+	a.logger().Info("Agent registered", "agent", a.opts.AgentName, "registry", registryURL)
 	a.connected.Store(true)
 
 	// Initialize VPC overlay networking after registration
@@ -202,7 +209,9 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	// Stop DNS server
 	if a.dnsServer != nil {
-		a.dnsServer.Stop()
+		if stopErr := a.dnsServer.Stop(); stopErr != nil {
+			a.logger().Warn("DNS server stop failed", "error", stopErr)
+		}
 	}
 	dnsGatewayIPAddr = ""
 
@@ -237,7 +246,7 @@ func (a *Agent) processTasks(ctx context.Context) {
 	if !a.connected.Load() {
 		return
 	}
-	tasks, err := a.client.PollTasks(ctx, a.opts.NodeName)
+	tasks, err := a.client.PollTasks(ctx, a.opts.AgentName)
 	if err != nil {
 		return
 	}
@@ -250,7 +259,9 @@ func (a *Agent) processTasks(ctx context.Context) {
 
 		// Remove proxy backends before stopping a container
 		if pbTask.Type == types.TaskTypeStopAndRemove && a.proxy != nil {
-			a.proxy.RemoveBackend(pbTask.ContainerName)
+			if removeErr := a.proxy.RemoveBackend(pbTask.ContainerName); removeErr != nil {
+				a.logger().Warn("Failed to remove proxy backend", "container", pbTask.ContainerName, "error", removeErr)
+			}
 		}
 
 		a.logger().Info("Executing task", "task_id", pbTask.Id, "type", pbTask.Type, "image", pbTask.Image)
@@ -324,7 +335,7 @@ func executeTask(ctx context.Context, task *types.TaskRecord) (*types.TaskResult
 func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
 	logging.Info("Pulling image", "image", task.Image)
 	if err := commandRunner(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
-		return nil, fmt.Errorf("failed to pull image %s: %v", task.Image, err)
+		return nil, fmt.Errorf("failed to pull image %s: %w", task.Image, err)
 	}
 
 	args := buildNerdctlRunArgs(task, vpcNetworkEnabled)
@@ -460,7 +471,7 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 			return
 		case <-ticker.C:
 			sysMetrics := a.metricsCollector.Collect()
-			peers, backends, err := a.client.Heartbeat(ctx, a.opts.NodeName, a.sessionToken, a.opts.Tags, sysMetrics)
+			peers, backends, err := a.client.Heartbeat(ctx, a.opts.AgentName, a.sessionToken, a.opts.Tags, sysMetrics)
 			if err != nil {
 				consecutiveFails++
 				if consecutiveFails < maxConsecutiveHeartbeatFails {
@@ -529,7 +540,7 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 		})
 	}
 
-	if err := a.client.ReportContainerHealth(ctx, a.opts.NodeName, statuses); err != nil {
+	if err := a.client.ReportContainerHealth(ctx, a.opts.AgentName, statuses); err != nil {
 		a.logger().Warn("Failed to report container health", "error", err)
 	}
 }
@@ -663,7 +674,7 @@ func (a *Agent) reconnect(ctx context.Context) {
 
 		apiAddr := a.opts.APIAddress
 		if apiAddr == "" {
-			apiAddr = a.opts.NodeName + ":" + a.opts.APIPort
+			apiAddr = a.opts.AgentName + ":" + a.opts.APIPort
 		}
 
 		reIP, _ := hostIPDetector()
@@ -672,7 +683,14 @@ func (a *Agent) reconnect(ctx context.Context) {
 			reHostIPStr = reIP.String()
 		}
 
-		_, vpcConfig, activeContainers, err := a.client.Register(ctx, a.opts.NodeName, apiAddr, a.sessionToken, a.opts.Tags, a.opts.WGPublicKey, reHostIPStr)
+		_, vpcConfig, activeContainers, err := a.client.Register(ctx, RegisterRequest{
+			Name:         a.opts.AgentName,
+			APIAddr:      apiAddr,
+			SessionToken: a.sessionToken,
+			Tags:         a.opts.Tags,
+			WGPublicKey:  a.opts.WGPublicKey,
+			HostIP:       reHostIPStr,
+		})
 		if err != nil {
 			if ctx.Err() != nil {
 				return
@@ -736,7 +754,7 @@ func (a *Agent) reconcileRemoteBackends(backends []ServiceBackend) {
 	// Build set of current remote backends (skip local)
 	current := make(map[string]ServiceBackend)
 	for _, b := range backends {
-		if b.AgentName == a.opts.NodeName {
+		if b.AgentName == a.opts.AgentName {
 			continue // skip local backends
 		}
 		current[b.ContainerName] = b

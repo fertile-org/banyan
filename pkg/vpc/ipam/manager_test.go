@@ -6,8 +6,8 @@ import (
 	"net"
 	"testing"
 
-	"github.com/fertile-org/banyan/pkg/vpc/ipam"
 	"github.com/fertile-org/banyan/pkg/storage"
+	"github.com/fertile-org/banyan/pkg/vpc/ipam"
 )
 
 func TestIPAMManager_AllocateHostSubnet(t *testing.T) {
@@ -192,7 +192,7 @@ func TestIPAMManager_ReleaseIP(t *testing.T) {
 		},
 		{
 			name:    "release allocated IP (ip1 was re-allocated in test case 1)",
-			ip:      ip1, // Was released in test case 1, then re-allocated in verify
+			ip:      ip1,   // Was released in test case 1, then re-allocated in verify
 			wantErr: false, // Should succeed since it's currently allocated
 		},
 	}

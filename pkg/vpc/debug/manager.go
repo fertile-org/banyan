@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/storage"
+	"github.com/fertile-org/banyan/pkg/vpc"
 )
 
 // Manager implements vpc.DebugManager interface

@@ -424,4 +424,3 @@ func TestRunDown_ClientConnectFails(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
-

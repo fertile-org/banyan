@@ -56,7 +56,7 @@ func (m *MemoryStore) persist() error {
 
 	// Ensure directory exists
 	dir := filepath.Dir(m.filePath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
 
@@ -65,7 +65,7 @@ func (m *MemoryStore) persist() error {
 		return err
 	}
 
-	return os.WriteFile(m.filePath, data, 0644)
+	return os.WriteFile(m.filePath, data, 0o600)
 }
 
 func (m *MemoryStore) Save(ctx context.Context, key string, value interface{}) error {

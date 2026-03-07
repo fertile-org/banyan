@@ -191,8 +191,8 @@ func setupCLITestConfig(t *testing.T, engineAddr string) {
 	cfg := types.BanyanConfig{
 		CLI: types.CLIConfig{
 			EngineHost:        "127.0.0.1",
-			EnginePort:        "", // will be parsed from addr
-			WGPublicKey:       "dGVzdC1wdWJsaWMta2V5",       // dummy key for test auth
+			EnginePort:        "",                             // will be parsed from addr
+			WGPublicKey:       "dGVzdC1wdWJsaWMta2V5",         // dummy key for test auth
 			EngineWGPublicKey: "dGVzdC1lbmdpbmUtd2cta2V5Cg==", // dummy engine WG key
 		},
 	}

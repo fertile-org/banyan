@@ -974,7 +974,7 @@ func TestSchedulePendingDeployment_SaveTaskError(t *testing.T) {
 
 	deployment := &types.DeploymentRecord{
 		ID: "deploy-1", Name: "app", Status: types.StatusPending,
-		Services: map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
+		Services:  map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
 		CreatedAt: time.Now(),
 	}
 	memStore.Save(ctx, types.KeyDeployments+"deploy-1", deployment)

@@ -57,14 +57,24 @@ type ActiveContainer struct {
 	TaskID        string
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey, hostIP string) (string, *VPCConfig, []ActiveContainer, error) {
+// RegisterRequest bundles the parameters for agent registration.
+type RegisterRequest struct {
+	Name         string
+	APIAddr      string
+	SessionToken string
+	Tags         []string
+	WGPublicKey  string
+	HostIP       string
+}
+
+func (c *EngineClient) Register(ctx context.Context, req RegisterRequest) (string, *VPCConfig, []ActiveContainer, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
-		AgentName:    name,
-		ApiAddress:   apiAddr,
-		SessionToken: sessionToken,
-		Tags:         tags,
-		WgPublicKey:  wgPublicKey,
-		HostIp:       hostIP,
+		AgentName:    req.Name,
+		ApiAddress:   req.APIAddr,
+		SessionToken: req.SessionToken,
+		Tags:         req.Tags,
+		WgPublicKey:  req.WGPublicKey,
+		HostIp:       req.HostIP,
 	})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("register failed: %w", err)

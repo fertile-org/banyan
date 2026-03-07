@@ -224,7 +224,16 @@ func defaultReclaimDNSPort(ip string, port int) error {
 	if killErr := syscall.Kill(pid, syscall.SIGKILL); killErr != nil {
 		return fmt.Errorf("kill PID %d: %w", pid, killErr)
 	}
-	time.Sleep(200 * time.Millisecond)
+
+	// Wait briefly for the kernel to release the UDP socket after SIGKILL.
+	// Poll /proc/<pid> existence instead of fixed sleep.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); err != nil {
+			return nil // Process is gone
+		}
+		time.Sleep(50 * time.Millisecond) //nolint:mnd // polling interval for process exit
+	}
 	return nil
 }
 
@@ -392,7 +401,7 @@ func defaultReadSysctl(path string) (string, error) {
 
 // defaultWriteSysctl writes a sysctl value to /proc/sys.
 func defaultWriteSysctl(path, value string) error {
-	return os.WriteFile(path, []byte(value), 0o644)
+	return os.WriteFile(path, []byte(value), 0o644) //nolint:gosec // sysctl pseudo-files in /proc/sys require world-readable permissions
 }
 
 // ensureSysctl checks that a sysctl value is set correctly.

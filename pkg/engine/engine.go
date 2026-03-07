@@ -21,12 +21,12 @@ import (
 
 // Options configures the Engine.
 type Options struct {
-	StoreBackend    string            // "etcd" only
-	StoreAddress    string            // resolved address for the store backend
+	StoreBackend    string // "etcd" only
+	StoreAddress    string // resolved address for the store backend
 	VPCCIDR         string
 	RegistryPort    string
 	GRPCPort        string
-	MetricsPort     string            // Prometheus /metrics HTTP port (default "9090")
+	MetricsPort     string // Prometheus /metrics HTTP port (default "9090")
 	DataDir         string
 	EtcdUsername    string            // etcd RBAC username
 	EtcdPassword    string            // etcd RBAC password
@@ -38,15 +38,15 @@ type Options struct {
 
 // Engine is the Banyan control plane.
 type Engine struct {
-	store           storage.StateStore
-	grpcServer      *engineGRPCServer
-	opts            Options
-	registryURL     string
-	metricsRegistry *metrics.EngineMetricsRegistry
+	store            storage.StateStore
+	grpcServer       *engineGRPCServer
+	opts             Options
+	registryURL      string
+	metricsRegistry  *metrics.EngineMetricsRegistry
 	metricsCollector *metrics.SystemCollector
-	events          EventLog
-	startedAt       time.Time
-	log             *logging.Logger
+	events           EventLog
+	startedAt        time.Time
+	log              *logging.Logger
 }
 
 // New creates a new Engine. It opens the store and sets up authentication.

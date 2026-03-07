@@ -345,7 +345,9 @@ func (s *EtcdStore) KeepAlive(ctx context.Context, key string, value interface{}
 					lease = newLease
 
 					// Re-save with new lease
-					s.client.Put(ctx, fullKey, string(data), clientv3.WithLease(lease.ID))
+					if _, putErr := s.client.Put(ctx, fullKey, string(data), clientv3.WithLease(lease.ID)); putErr != nil {
+						continue
+					}
 				}
 			}
 		}

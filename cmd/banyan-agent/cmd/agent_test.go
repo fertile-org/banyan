@@ -166,7 +166,7 @@ func TestRunAgentStatus_NotRunning_WithToken(t *testing.T) {
 	cfg := types.BanyanConfig{
 		Agent: types.AgentConfig{
 			EngineHost:  "127.0.0.1",
-			EnginePort:  "59999", // unreachable port
+			EnginePort:  "59999",                // unreachable port
 			WGPublicKey: "dGVzdC1wdWJsaWMta2V5", // dummy key for test auth
 		},
 	}

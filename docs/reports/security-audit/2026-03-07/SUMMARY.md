@@ -14,10 +14,9 @@ Serena MCP server used for codebase symbol analysis. Direct code reading for all
 
 | Status | Count | Details |
 |--------|-------|---------|
-| **FIXED** | 9 | CRIT-003: Auth enforced. HIGH-001: Custom pubkey auth removed (WireGuard). HIGH-002: Agent identity via tunnel IP. HIGH-003: Session tokens removed. HIGH-008: Agent name uniqueness via tunnel IP identity. HIGH-009: Audit logging interceptors. HIGH-011: Name validation (DNS-safe, underscores allowed). MED-001: All services bind to tunnel IP/localhost. MED-005: Panic recovery interceptors. |
-| **PARTIALLY FIXED** | 2 | CRIT-001, CRIT-002: Services bound to tunnel IP; defense-in-depth TLS gap remains |
+| **FIXED** | 12 | CRIT-001: WireGuard enforced (encrypted tunnel). CRIT-002: Registry bound to tunnel IP (WireGuard-protected). CRIT-003: Auth enforced. HIGH-001: Custom pubkey auth removed (WireGuard). HIGH-002: Agent identity via tunnel IP. HIGH-003: Session tokens removed. HIGH-005: Registry traffic encrypted by WireGuard. HIGH-008: Agent name uniqueness via tunnel IP identity. HIGH-009: Audit logging interceptors. HIGH-011: Name validation (DNS-safe, underscores allowed). MED-001: All services bind to tunnel IP/localhost. MED-005: Panic recovery interceptors. |
 | **WONTFIX** | 1 | MED-006: Error details kept for debuggability (WireGuard is the security boundary) |
-| **Open** | 15 | Remaining findings |
+| **Open** | 14 | Remaining findings |
 | **Total** | **27** | |
 
 ## Findings Summary

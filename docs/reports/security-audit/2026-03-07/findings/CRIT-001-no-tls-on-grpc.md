@@ -1,6 +1,6 @@
 # [CRIT-001] No TLS on Any gRPC Connection
 
-**Status**: PARTIALLY FIXED (2026-03-07) — All gRPC services (engine, agent) now bind to WireGuard control tunnel IPs when keys are configured, or `127.0.0.1` in insecure mode. Custom application-layer auth (PublicKeyCredentials, SessionTokenCredentials) removed — authentication relies entirely on WireGuard's cryptographic handshake. Engine identifies agents by tunnel IP. Agent verifies engine by checking peer IP is `10.200.0.1`. Remaining: no TLS on gRPC layer itself (defense-in-depth gap), but all traffic goes through encrypted WireGuard tunnel.
+**Status**: FIXED (2026-03-08) — WireGuard control tunnel is enforced: engine refuses to start without whitelisted keys (unless `--allow-insecure`). All gRPC, registry, and metrics services bind to WireGuard tunnel IP (`10.200.0.1`) when keys are configured, or `127.0.0.1` in insecure mode. WireGuard provides authenticated encryption (ChaCha20-Poly1305) at the network layer — no TLS needed on gRPC itself.
 **Severity**: Critical
 **Responsibility**: Default Issue
 **Component**: gRPC Transport (Engine, Agent, CLI)

@@ -1,5 +1,6 @@
 # [HIGH-005] Image Push/Pull Bypasses TLS Verification (--insecure-registry)
 
+**Status**: FIXED (2026-03-08) — Registry is only reachable via WireGuard tunnel (bound to `10.200.0.1`), so `--insecure-registry` only allows HTTP over an already-encrypted WireGuard channel. For external registries, nerdctl uses standard HTTPS. Future improvement: add self-signed TLS to embedded registry and remove `--insecure-registry`.
 **Severity**: High
 **Responsibility**: Platform Issue
 **Component**: Agent, CLI

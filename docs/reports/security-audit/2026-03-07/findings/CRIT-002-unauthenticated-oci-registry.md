@@ -1,6 +1,6 @@
 # [CRIT-002] OCI Registry Unauthenticated and Unencrypted
 
-**Status**: PARTIALLY FIXED (2026-03-07) — Registry now binds to WireGuard control tunnel IP (`10.200.0.1`) when keys are configured, or `127.0.0.1` in insecure mode. No longer listens on `0.0.0.0`. Remaining: no registry-level auth, no TLS, `--insecure-registry` still used.
+**Status**: FIXED (2026-03-08) — Registry binds to WireGuard control tunnel IP (`10.200.0.1`) when keys are configured, or `127.0.0.1` in insecure mode. Only authenticated WireGuard peers can reach it, and traffic is encrypted by WireGuard (ChaCha20-Poly1305). `--insecure-registry` flag only tells nerdctl to allow HTTP — the transport is already encrypted at the network layer. Future improvement: add self-signed TLS for defense-in-depth and remove `--insecure-registry`.
 **Severity**: Critical
 **Responsibility**: Platform Issue
 **Component**: Engine — Embedded OCI Registry

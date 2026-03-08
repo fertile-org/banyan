@@ -41,11 +41,17 @@ const (
 	cniBinDir = "/opt/cni/bin"
 )
 
-// iptablesHandle is the subset of go-iptables methods used for overlay forwarding.
+// iptablesHandle is the subset of go-iptables methods used for overlay forwarding
+// and deployment network isolation.
 type iptablesHandle interface {
 	Exists(table, chain string, rulespec ...string) (bool, error)
 	Insert(table, chain string, pos int, rulespec ...string) error
 	Delete(table, chain string, rulespec ...string) error
+	Append(table, chain string, rulespec ...string) error
+	NewChain(table, chain string) error
+	ClearChain(table, chain string) error
+	DeleteChain(table, chain string) error
+	ListChains(table string) ([]string, error)
 }
 
 // iptablesFactory creates an iptables handle. Extracted as a variable for test mocking.
@@ -53,10 +59,15 @@ var iptablesFactory = func() (iptablesHandle, error) {
 	return iptables.New()
 }
 
-// setupOverlayForwarding adds iptables FORWARD rules to allow cross-host
-// container-to-container traffic between the bridge and WireGuard interfaces.
-// Without these rules, the FORWARD chain's default DROP policy (set by containerd)
-// blocks direct TCP connections between containers on different hosts.
+// isolationChainName is the main iptables chain for deployment network isolation.
+const isolationChainName = "BANYAN-ISOLATION"
+
+// depChainPrefix is the prefix for per-deployment iptables chains.
+const depChainPrefix = "BN-DEP-"
+
+// setupOverlayForwarding creates the BANYAN-ISOLATION chain and adds jump rules
+// from the FORWARD chain for cross-host overlay traffic. The actual per-deployment
+// isolation rules are populated by reconcileNetworkIsolation().
 // Extracted as a variable for test mocking.
 var setupOverlayForwarding = defaultSetupOverlayForwarding
 
@@ -65,19 +76,183 @@ func defaultSetupOverlayForwarding() error {
 	if err != nil {
 		return fmt.Errorf("failed to init iptables: %w", err)
 	}
-	rules := [][]string{
-		{"-i", "banyan0", "-o", "banyan-wg", "-j", "ACCEPT"},
-		{"-i", "banyan-wg", "-o", "banyan0", "-j", "ACCEPT"},
+
+	// Create the isolation chain (idempotent)
+	if chainErr := ipt.NewChain("filter", isolationChainName); chainErr != nil {
+		// NewChain returns error if chain already exists — that's fine
+		chains, listErr := ipt.ListChains("filter")
+		if listErr != nil {
+			return fmt.Errorf("failed to list chains: %w", listErr)
+		}
+		found := false
+		for _, c := range chains {
+			if c == isolationChainName {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("failed to create chain %s: %w", isolationChainName, chainErr)
+		}
 	}
-	for _, rule := range rules {
+
+	// Add jump rules from FORWARD to BANYAN-ISOLATION for overlay traffic
+	jumpRules := [][]string{
+		{"-i", "banyan0", "-o", "banyan-wg", "-j", isolationChainName},
+		{"-i", "banyan-wg", "-o", "banyan0", "-j", isolationChainName},
+	}
+	for _, rule := range jumpRules {
 		exists, _ := ipt.Exists("filter", "FORWARD", rule...)
 		if !exists {
 			if insertErr := ipt.Insert("filter", "FORWARD", 1, rule...); insertErr != nil {
-				return fmt.Errorf("failed to add overlay FORWARD rule: %w", insertErr)
+				return fmt.Errorf("failed to add FORWARD jump rule: %w", insertErr)
 			}
 		}
 	}
 	return nil
+}
+
+// depChainName returns the iptables chain name for a deployment.
+// Truncates to fit the 28-character iptables chain name limit.
+func depChainName(deploymentName string) string {
+	maxLen := 28 - len(depChainPrefix) // 21 chars for deployment name
+	name := deploymentName
+	if len(name) > maxLen {
+		name = name[:maxLen]
+	}
+	return depChainPrefix + name
+}
+
+// reconcileNetworkIsolation rebuilds iptables rules for deployment-level
+// network isolation. Containers in the same deployment can communicate;
+// containers in different deployments are blocked on the overlay network.
+// Called from the heartbeat loop with the complete set of service backends.
+func (a *Agent) reconcileNetworkIsolation(ctx context.Context, backends []ServiceBackend) {
+	ipt, err := iptablesFactory()
+	if err != nil {
+		a.logger().Warn("Failed to init iptables for network isolation", "error", err)
+		return
+	}
+
+	// Group container IPs by deployment name
+	deploymentIPs := map[string][]string{} // deploymentName → []containerIP
+	for _, b := range backends {
+		if b.DeploymentName == "" || b.ContainerIP == "" {
+			continue
+		}
+		deploymentIPs[b.DeploymentName] = append(deploymentIPs[b.DeploymentName], b.ContainerIP)
+	}
+
+	// 1. Flush the isolation chain
+	if flushErr := ipt.ClearChain("filter", isolationChainName); flushErr != nil {
+		a.logger().Warn("Failed to flush isolation chain", "error", flushErr)
+		return
+	}
+
+	// 2. Delete old per-deployment chains
+	chains, listErr := ipt.ListChains("filter")
+	if listErr != nil {
+		a.logger().Warn("Failed to list chains for cleanup", "error", listErr)
+		return
+	}
+	for _, chain := range chains {
+		if strings.HasPrefix(chain, depChainPrefix) {
+			_ = ipt.ClearChain("filter", chain)
+			_ = ipt.DeleteChain("filter", chain)
+		}
+	}
+
+	// 3. Add conntrack rule for established connections
+	if appendErr := ipt.Append("filter", isolationChainName,
+		"-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT"); appendErr != nil {
+		a.logger().Warn("Failed to add conntrack rule", "error", appendErr)
+		return
+	}
+
+	// 4. Allow DNS to gateway IP
+	if a.gatewayIP != "" {
+		for _, proto := range []string{"udp", "tcp"} {
+			_ = ipt.Append("filter", isolationChainName,
+				"-d", a.gatewayIP, "-p", proto, "--dport", "53", "-j", "ACCEPT")
+		}
+	}
+
+	// 5. Create per-deployment chains and populate
+	for depName, ips := range deploymentIPs {
+		chainName := depChainName(depName)
+
+		// Create the deployment chain
+		if chainErr := ipt.NewChain("filter", chainName); chainErr != nil {
+			a.logger().Warn("Failed to create deployment chain", "chain", chainName, "error", chainErr)
+			continue
+		}
+
+		// Allow traffic to all IPs in the same deployment
+		for _, ip := range ips {
+			_ = ipt.Append("filter", chainName, "-d", ip, "-j", "ACCEPT")
+		}
+
+		// Default deny at end of deployment chain
+		_ = ipt.Append("filter", chainName, "-j", "DROP")
+
+		// Add source-based jump rules in the isolation chain
+		for _, ip := range ips {
+			_ = ipt.Append("filter", isolationChainName, "-s", ip, "-j", chainName)
+		}
+	}
+
+	// 6. Default deny at end of isolation chain (unknown sources)
+	_ = ipt.Append("filter", isolationChainName, "-j", "DROP")
+
+	a.logger().Debug("Network isolation reconciled", "deployments", len(deploymentIPs))
+}
+
+// addContainerToIsolation adds a newly created container's IP to the iptables
+// isolation rules immediately, without waiting for the next heartbeat cycle.
+// If the deployment chain already exists, the IP is appended. Otherwise, a new
+// deployment chain is created. The next reconcileNetworkIsolation call will
+// rebuild everything cleanly.
+func (a *Agent) addContainerToIsolation(ctx context.Context, containerIP, deploymentName string) {
+	ipt, err := iptablesFactory()
+	if err != nil {
+		a.logger().Warn("Failed to init iptables for immediate isolation", "error", err)
+		return
+	}
+
+	chainName := depChainName(deploymentName)
+
+	// Check if the deployment chain exists
+	chains, listErr := ipt.ListChains("filter")
+	if listErr != nil {
+		a.logger().Warn("Failed to list chains", "error", listErr)
+		return
+	}
+
+	chainExists := false
+	for _, c := range chains {
+		if c == chainName {
+			chainExists = true
+			break
+		}
+	}
+
+	if chainExists {
+		// Insert the allow rule before the final DROP (position matters — use Insert at pos 1)
+		_ = ipt.Insert("filter", chainName, 1, "-d", containerIP, "-j", "ACCEPT")
+	} else {
+		// Create a new deployment chain
+		if chainErr := ipt.NewChain("filter", chainName); chainErr != nil {
+			a.logger().Warn("Failed to create deployment chain", "chain", chainName, "error", chainErr)
+			return
+		}
+		_ = ipt.Append("filter", chainName, "-d", containerIP, "-j", "ACCEPT")
+		_ = ipt.Append("filter", chainName, "-j", "DROP")
+	}
+
+	// Add source rule in isolation chain (insert before final DROP)
+	_ = ipt.Insert("filter", isolationChainName, 1, "-s", containerIP, "-j", chainName)
+
+	a.logger().Debug("Container added to isolation immediately", "ip", containerIP, "deployment", deploymentName)
 }
 
 func defaultOverlayDriverFactory(wgPrivateKey, wgPublicKey string) overlay.OverlayDriver {

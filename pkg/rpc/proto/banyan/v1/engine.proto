@@ -125,6 +125,7 @@ message ServiceBackend {
   repeated string ports = 3;
   string agent_name = 4;
   string service_name = 5;
+  string deployment_name = 6;
 }
 
 message ReportContainerHealthResponse {}
@@ -148,6 +149,7 @@ message TaskRecord {
   string cpu_limit = 16;
   string memory_reservation = 17;
   ManifestHealthcheck healthcheck = 18;
+  string deployment_name = 19;
 }
 
 // --- CLI messages ---

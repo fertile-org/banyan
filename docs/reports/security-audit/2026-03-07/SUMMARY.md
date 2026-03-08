@@ -14,9 +14,9 @@ Serena MCP server used for codebase symbol analysis. Direct code reading for all
 
 | Status | Count | Details |
 |--------|-------|---------|
-| **FIXED** | 12 | CRIT-001: WireGuard enforced (encrypted tunnel). CRIT-002: Registry bound to tunnel IP (WireGuard-protected). CRIT-003: Auth enforced. HIGH-001: Custom pubkey auth removed (WireGuard). HIGH-002: Agent identity via tunnel IP. HIGH-003: Session tokens removed. HIGH-005: Registry traffic encrypted by WireGuard. HIGH-008: Agent name uniqueness via tunnel IP identity. HIGH-009: Audit logging interceptors. HIGH-011: Name validation (DNS-safe, underscores allowed). MED-001: All services bind to tunnel IP/localhost. MED-005: Panic recovery interceptors. |
-| **WONTFIX** | 1 | MED-006: Error details kept for debuggability (WireGuard is the security boundary) |
-| **Open** | 14 | Remaining findings |
+| **FIXED** | 13 | CRIT-001: WireGuard enforced (encrypted tunnel). CRIT-002: Registry bound to tunnel IP (WireGuard-protected). CRIT-003: Auth enforced. HIGH-001: Custom pubkey auth removed (WireGuard). HIGH-002: Agent identity via tunnel IP. HIGH-003: Session tokens removed. HIGH-005: Registry traffic encrypted by WireGuard. HIGH-007: Deployment network isolation via iptables (cross-agent). HIGH-008: Agent name uniqueness via tunnel IP identity. HIGH-009: Audit logging interceptors. HIGH-011: Name validation (DNS-safe, underscores allowed). MED-001: All services bind to tunnel IP/localhost. MED-005: Panic recovery interceptors. |
+| **WONTFIX** | 2 | HIGH-006: Env vars plaintext by design (secrets management in Milestone 10). MED-006: Error details kept for debuggability (WireGuard is the security boundary). |
+| **Open** | 12 | Remaining findings |
 | **Total** | **27** | |
 
 ## Findings Summary
@@ -138,4 +138,4 @@ These security controls are correctly implemented:
 
 **Audit Date**: 2026-03-07
 **Branch**: `feat/code-audit`
-**Status**: Complete — 27 findings: 3 Critical, 11 High, 9 Medium, 4 Low
+**Status**: Complete — 27 findings: 3 Critical, 11 High, 9 Medium, 4 Low (13 FIXED, 2 WONTFIX, 12 Open)

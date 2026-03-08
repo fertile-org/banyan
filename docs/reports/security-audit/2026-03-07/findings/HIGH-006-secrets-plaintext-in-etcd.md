@@ -1,5 +1,6 @@
 # [HIGH-006] Environment Variables (Secrets) Stored Plaintext in etcd
 
+**Status**: WONTFIX (by design) — Banyan stores environment variables as plaintext, matching Docker Compose behavior. A proper secrets management feature (encrypt at rest, inject into containers) is planned in [Milestone 10 — Advanced Security](/roadmap/#milestone-10--advanced-security).
 **Severity**: High
 **Responsibility**: Platform Issue
 **Component**: Storage — etcd

@@ -126,6 +126,7 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 			tasks = append(tasks, &TaskRecord{
 				ID:                fmt.Sprintf("%s-%s-%d", deployment.ID, svcName, i),
 				DeploymentID:      deployment.ID,
+				DeploymentName:    deployment.Name,
 				ServiceName:       svcName,
 				ReplicaIndex:      i,
 				AgentID:           agent.Name,

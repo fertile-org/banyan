@@ -1,40 +1,49 @@
 # [HIGH-007] No Deployment Network Isolation — Flat Overlay + Dead Security Code
 
+**Status**: FIXED (2026-03-08) — Deployment-level network isolation enforced via iptables. Each deployment gets its own iptables chain (`BN-DEP-<name>`). Containers within the same deployment can communicate; cross-deployment traffic is blocked by default. Rules are reconciled on every heartbeat cycle (~15s) using the complete set of service backends from the engine. Works cross-agent: each agent builds isolation rules from the cluster-wide backend list received via heartbeat.
 **Severity**: High
 **Responsibility**: Platform Issue
 **Component**: VPC Networking, Security Rules
 **File(s)**:
-- `pkg/vpc/overlay/wireguard.go:147-181` (single flat overlay)
-- `pkg/agent/vpc_networking.go:63-81` (permissive FORWARD rules)
-- `pkg/vpc/security/manager.go` (complete implementation, never called)
-- `pkg/vpc/security/iptables.go` (iptables rule translation, never called)
+- `pkg/agent/vpc_networking.go` — `setupOverlayForwarding()` creates `BANYAN-ISOLATION` chain with jump rules; `reconcileNetworkIsolation()` rebuilds per-deployment chains on each heartbeat
+- `pkg/agent/agent.go` — calls `reconcileNetworkIsolation()` from heartbeat loop
+- `pkg/engine/grpc_server.go` — `collectServiceBackends()` populates `DeploymentName` for each backend
+- `pkg/rpc/proto/banyan/v1/engine.proto` — `ServiceBackend.deployment_name` field
 
 ## Description
 
-All containers across all deployments share a single flat overlay network (`banyan` CNI network on `banyan0` bridge). The iptables FORWARD rules accept ALL traffic between bridge and WireGuard interfaces:
+All containers across all deployments share a single flat overlay network (`banyan` CNI network on `banyan0` bridge). Previously, the iptables FORWARD rules accepted ALL traffic between bridge and WireGuard interfaces with no isolation between deployments.
 
-```go
-// pkg/agent/vpc_networking.go:68-70
-{"-i", "banyan0", "-o", "banyan-wg", "-j", "ACCEPT"},
-{"-i", "banyan-wg", "-o", "banyan0", "-j", "ACCEPT"},
+## Fix
+
+Replaced blanket ACCEPT rules with deployment-scoped isolation:
+
+1. **`BANYAN-ISOLATION` chain** — Created during overlay setup, jumped to from FORWARD for `banyan0 ↔ banyan-wg` traffic
+2. **Per-deployment chains** (`BN-DEP-<name>`) — Created per deployment, allow traffic only to IPs within the same deployment
+3. **Default deny** — Unknown sources and cross-deployment destinations are DROPped
+4. **Conntrack** — Established/related connections are always allowed
+5. **DNS passthrough** — Containers can always reach the gateway IP for DNS resolution
+6. **Cross-agent support** — Each agent receives all backends cluster-wide via heartbeat, so isolation rules cover containers on any agent
+
+### Chain structure
+
+```
+FORWARD:
+  -i banyan0 -o banyan-wg -j BANYAN-ISOLATION
+  -i banyan-wg -o banyan0 -j BANYAN-ISOLATION
+
+BANYAN-ISOLATION:
+  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  -d <gateway_ip> -p udp --dport 53 -j ACCEPT
+  -d <gateway_ip> -p tcp --dport 53 -j ACCEPT
+  -s <ip> -j BN-DEP-<deployment>     (per container)
+  -j DROP                              (unknown source)
+
+BN-DEP-<deployment>:
+  -d <ip> -j ACCEPT                    (same deployment)
+  -j DROP                              (cross-deployment)
 ```
 
-A complete network security implementation exists in `pkg/vpc/security/` with:
-- Default-deny model (`AddDefaultDeny()`)
-- Per-network iptables chain management
-- Rule translation from security rules to iptables commands
+## Limitations
 
-**However, `SecurityManager.ApplyRules()` is never called from the agent or engine.** The security module is dead code.
-
-## Impact
-
-- **Who**: Any container in the cluster
-- **What they gain**: Unrestricted network access to every other container across all deployments
-- **Blast radius**: All deployments — a compromised container in deployment A can attack deployment B's database
-
-## Recommendation
-
-1. Wire `pkg/vpc/security/` into the agent lifecycle — call `ApplyRules()` when deployments are created/updated
-2. Apply default-deny between deployments
-3. Allow intra-deployment communication by default
-4. Allow users to define cross-deployment access rules in the manifest
+- **Same-host isolation**: Containers on the same bridge (`banyan0`) communicate at L2 without going through iptables FORWARD. Same-host, cross-deployment traffic is not isolated. This matches Docker's default behavior and can be improved later with `br_netfilter`.

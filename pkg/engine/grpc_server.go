@@ -406,6 +406,7 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 		pbTask := &banyanpb.TaskRecord{
 			Id:                task.ID,
 			DeploymentId:      task.DeploymentID,
+			DeploymentName:    task.DeploymentName,
 			ServiceName:       task.ServiceName,
 			ReplicaIndex:      int32(task.ReplicaIndex), //nolint:gosec // replica index is always small
 			AgentId:           task.AgentID,
@@ -1263,8 +1264,8 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 // collectServiceBackends gathers all running container backends across all agents.
 // Used for cross-host load balancing via heartbeat responses.
 func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyanpb.ServiceBackend {
-	// Build set of running deployment IDs — only include backends from active deployments
-	runningDeployments := map[string]bool{}
+	// Build map of running deployment IDs → names (only include backends from active deployments)
+	runningDeployments := map[string]string{} // deploymentID → deploymentName
 	deployKeys, err := s.store.List(ctx, types.KeyDeployments)
 	if err != nil {
 		return nil
@@ -1275,7 +1276,7 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 			continue
 		}
 		if d.Status == types.StatusRunning {
-			runningDeployments[d.ID] = true
+			runningDeployments[d.ID] = d.Name
 		}
 	}
 
@@ -1302,19 +1303,21 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 				continue
 			}
 			// Only include running containers from active deployments
+			depName, isRunning := runningDeployments[task.DeploymentID]
 			if task.Type != types.TaskTypeCreateAndStart ||
 				task.Status != types.StatusCompleted ||
 				task.ContainerStatus != types.StatusRunning ||
 				task.ContainerIP == "" ||
-				!runningDeployments[task.DeploymentID] {
+				!isRunning {
 				continue
 			}
 			backends = append(backends, &banyanpb.ServiceBackend{
-				ContainerName: task.ContainerName,
-				ContainerIp:   task.ContainerIP,
-				Ports:         task.Ports,
-				AgentName:     task.AgentID,
-				ServiceName:   task.ServiceName,
+				ContainerName:  task.ContainerName,
+				ContainerIp:    task.ContainerIP,
+				Ports:          task.Ports,
+				AgentName:      task.AgentID,
+				ServiceName:    task.ServiceName,
+				DeploymentName: depName,
 			})
 		}
 	}

@@ -130,11 +130,12 @@ func (c *EngineClient) Heartbeat(ctx context.Context, name string, tags []string
 	var backends []ServiceBackend
 	for _, b := range resp.ServiceBackends {
 		backends = append(backends, ServiceBackend{
-			ContainerName: b.ContainerName,
-			ContainerIP:   b.ContainerIp,
-			Ports:         b.Ports,
-			AgentName:     b.AgentName,
-			ServiceName:   b.ServiceName,
+			ContainerName:  b.ContainerName,
+			ContainerIP:    b.ContainerIp,
+			Ports:          b.Ports,
+			AgentName:      b.AgentName,
+			ServiceName:    b.ServiceName,
+			DeploymentName: b.DeploymentName,
 		})
 	}
 

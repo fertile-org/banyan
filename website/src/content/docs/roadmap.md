@@ -213,4 +213,5 @@ Service discovery, traffic policies, and encrypted communication across the clus
 - **Health-check-based routing**: Only route to healthy containers — health status is already tracked via `healthcheck:` in the manifest; next step is filtering backends by health status in HeartbeatResponse
 - **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
 - **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
+- **VPC peering**: Allow explicit cross-deployment communication — deployments are isolated by default (per-deployment iptables chains); VPC peering lets users define exceptions so specific services in one deployment can reach services in another (e.g., a shared database deployment)
 - **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions

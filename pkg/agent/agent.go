@@ -291,6 +291,11 @@ func (a *Agent) processTasks(ctx context.Context) {
 				hostname := task.ServiceName + ".internal"
 				a.dnsManager.RegisterHost(ctx, hostname, net.ParseIP(containerIP)) //nolint:errcheck // best-effort
 			}
+
+			// Add container to network isolation rules immediately (no wait for heartbeat)
+			if a.vpcEnabled && containerIP != "" && task.DeploymentName != "" {
+				a.addContainerToIsolation(ctx, containerIP, task.DeploymentName)
+			}
 		}
 
 		a.logger().Info("Task completed", "task_id", pbTask.Id, "container", pbTask.ContainerName)
@@ -302,6 +307,7 @@ func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
 	task := &types.TaskRecord{
 		ID:                pb.Id,
 		DeploymentID:      pb.DeploymentId,
+		DeploymentName:    pb.DeploymentName,
 		ServiceName:       pb.ServiceName,
 		ReplicaIndex:      int(pb.ReplicaIndex),
 		AgentID:           pb.AgentId,
@@ -578,6 +584,9 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 			if a.vpcEnabled && a.proxy != nil {
 				a.reconcileRemoteBackends(backends)
 			}
+			if a.vpcEnabled {
+				a.reconcileNetworkIsolation(ctx, backends)
+			}
 			if a.dnsManager != nil {
 				a.reconcileDNS(ctx, backends)
 			}
@@ -822,11 +831,12 @@ func (a *Agent) reconnect(ctx context.Context) {
 
 // ServiceBackend represents a container backend for cross-host load balancing.
 type ServiceBackend struct {
-	ContainerName string
-	ContainerIP   string
-	Ports         []string
-	AgentName     string
-	ServiceName   string
+	ContainerName  string
+	ContainerIP    string
+	Ports          []string
+	AgentName      string
+	ServiceName    string
+	DeploymentName string
 }
 
 // reconcileRemoteBackends adds/removes remote backends from the proxy

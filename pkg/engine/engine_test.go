@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
 )
@@ -127,6 +129,47 @@ func TestNewAndClose(t *testing.T) {
 	t.Run("close with nil store", func(t *testing.T) {
 		eng := &Engine{}
 		eng.Close() // Should not panic
+	})
+}
+
+func TestRunRequiresAuth(t *testing.T) {
+	t.Run("fails without whitelisted keys", func(t *testing.T) {
+		eng := &Engine{
+			store: storage.NewMemoryStore(),
+			opts:  Options{},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately — we only test the auth check
+
+		err := eng.Run(ctx)
+		if err == nil {
+			t.Fatal("expected error when running without whitelisted keys")
+		}
+		if !strings.Contains(err.Error(), "no whitelisted public keys configured") {
+			t.Errorf("unexpected error message: %v", err)
+		}
+	})
+
+	t.Run("allows insecure mode", func(t *testing.T) {
+		eng := &Engine{
+			store:            storage.NewMemoryStore(),
+			metricsRegistry:  metrics.NewEngineMetricsRegistry(),
+			metricsCollector: metrics.NewSystemCollector(),
+			events:           NewEventBuffer(10),
+			opts: Options{
+				AllowInsecure: true,
+				GRPCPort:      "0",
+				RegistryPort:  "0",
+			},
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel() // cancel immediately — we only test the auth check passes
+
+		err := eng.Run(ctx)
+		// The error should NOT be about authentication
+		if err != nil && strings.Contains(err.Error(), "no whitelisted public keys configured") {
+			t.Errorf("AllowInsecure should bypass auth check, got: %v", err)
+		}
 	})
 }
 
@@ -1220,7 +1263,7 @@ func TestStartRegistry(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Use port 0 to let OS assign a random port
-	lis, err := startRegistry(ctx, "0")
+	lis, err := startRegistry(ctx, "127.0.0.1", "0")
 	if err != nil {
 		t.Fatalf("startRegistry failed: %v", err)
 	}
@@ -1240,7 +1283,7 @@ func TestStartRegistry_InvalidPort(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	_, err := startRegistry(ctx, "99999")
+	_, err := startRegistry(ctx, "127.0.0.1", "99999")
 	if err == nil {
 		t.Fatal("expected error for invalid port")
 	}

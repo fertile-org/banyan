@@ -27,12 +27,13 @@ import (
 
 // Engine configuration flags.
 var (
-	engineVPCCIDR      string
-	engineDataDir      string
-	engineRegistryPort string
-	engineGRPCPort     string
-	engineStoreBackend string
-	engineStoreAddress string
+	engineVPCCIDR       string
+	engineDataDir       string
+	engineRegistryPort  string
+	engineGRPCPort      string
+	engineStoreBackend  string
+	engineStoreAddress  string
+	engineAllowInsecure bool
 )
 
 // configPath is the default path to the Banyan config file.
@@ -95,6 +96,7 @@ func init() {
 	startCmd.Flags().StringVar(&engineVPCCIDR, "vpc-cidr", "10.0.0.0/16", "VPC CIDR range")
 	startCmd.Flags().StringVar(&engineRegistryPort, "registry-port", "5000", "Embedded OCI registry port")
 	startCmd.Flags().StringVar(&engineGRPCPort, "grpc-port", "50051", "Engine gRPC port")
+	startCmd.Flags().BoolVar(&engineAllowInsecure, "allow-insecure", false, "Allow running without authentication (development only, NOT for production)")
 
 	// Status flags
 	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
@@ -485,19 +487,21 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	metricsPort := cfg.Engine.MetricsPort
 
 	eng, err := engine.New(&engine.Options{
-		StoreBackend:    storeBackend,
-		StoreAddress:    storeAddress,
-		VPCCIDR:         engineVPCCIDR,
-		RegistryPort:    engineRegistryPort,
-		GRPCPort:        engineGRPCPort,
-		MetricsPort:     metricsPort,
-		DataDir:         engineDataDir,
-		EtcdUsername:    cfg.Engine.EtcdUsername,
-		EtcdPassword:    cfg.Engine.EtcdPassword,
-		EtcdCertFile:    cfg.Engine.EtcdCertFile,
-		EtcdKeyFile:     cfg.Engine.EtcdKeyFile,
-		EtcdCAFile:      cfg.Engine.EtcdCAFile,
-		WhitelistedKeys: whitelistedKeys,
+		StoreBackend:        storeBackend,
+		StoreAddress:        storeAddress,
+		VPCCIDR:             engineVPCCIDR,
+		RegistryPort:        engineRegistryPort,
+		GRPCPort:            engineGRPCPort,
+		MetricsPort:         metricsPort,
+		DataDir:             engineDataDir,
+		EtcdUsername:        cfg.Engine.EtcdUsername,
+		EtcdPassword:        cfg.Engine.EtcdPassword,
+		EtcdCertFile:        cfg.Engine.EtcdCertFile,
+		EtcdKeyFile:         cfg.Engine.EtcdKeyFile,
+		EtcdCAFile:          cfg.Engine.EtcdCAFile,
+		WhitelistedKeys:     whitelistedKeys,
+		AllowInsecure:       engineAllowInsecure,
+		ControlTunnelActive: cfg.Engine.WGPrivateKeyFile != "",
 	})
 	if err != nil {
 		return err

@@ -6,6 +6,40 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestValidateName(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		wantErr bool
+	}{
+		{"valid simple", "web", false},
+		{"valid with hyphens", "my-api-server", false},
+		{"valid with numbers", "app1", false},
+		{"valid single char", "a", false},
+		{"valid all digits", "123", false},
+		{"empty", "", true},
+		{"uppercase", "MyApp", true},
+		{"starts with hyphen", "-web", true},
+		{"ends with hyphen", "web-", true},
+		{"contains dot", "web.server", true},
+		{"contains slash", "web/api", true},
+		{"contains space", "web api", true},
+		{"valid with underscore", "web_api", false},
+		{"contains null byte", "web\x00api", true},
+		{"too long", string(make([]byte, 64)), true},
+		{"max length 63", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", false},
+		{"path traversal", "../etc/passwd", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateName(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateName(%q) error = %v, wantErr %v", tt.input, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestGetReplicas(t *testing.T) {
 	t.Run("nil deploy returns 0", func(t *testing.T) {
 		svc := ManifestService{Image: "nginx"}

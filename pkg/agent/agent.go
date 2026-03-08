@@ -5,8 +5,6 @@ package agent
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
@@ -51,7 +49,6 @@ type Agent struct {
 	opts             Options
 	client           *EngineClient
 	containers       *containerTracker
-	sessionToken     string
 	proxy            PortProxy
 	vpcEnabled       bool
 	overlayDriver    overlay.OverlayDriver
@@ -86,17 +83,11 @@ var (
 	dnsGatewayIPAddr          string // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
 )
 
-// New creates a new Agent with a random session token.
+// New creates a new Agent.
 func New(opts *Options) (*Agent, error) {
-	tokenBytes := make([]byte, 32)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return nil, fmt.Errorf("failed to generate session token: %w", err)
-	}
-
 	return &Agent{
 		opts:           *opts,
 		containers:     &containerTracker{},
-		sessionToken:   hex.EncodeToString(tokenBytes),
 		remoteBackends: make(map[string]ServiceBackend),
 		registeredDNS:  make(map[string]bool),
 		log:            logging.New("agent"),
@@ -132,7 +123,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.opts.PublicKey == "" {
 		return fmt.Errorf("no authentication configured (missing WireGuard public key)")
 	}
-	client, err := NewEngineClient(a.opts.EngineEndpoint, a.opts.PublicKey)
+	client, err := NewEngineClient(a.opts.EngineEndpoint)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}
@@ -161,12 +152,11 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	// Register node
 	registryURL, vpcConfig, activeContainers, err := client.Register(ctx, RegisterRequest{
-		Name:         a.opts.AgentName,
-		APIAddr:      apiAddr,
-		SessionToken: a.sessionToken,
-		Tags:         a.opts.Tags,
-		WGPublicKey:  a.opts.WGPublicKey,
-		HostIP:       hostIPStr,
+		Name:        a.opts.AgentName,
+		APIAddr:     apiAddr,
+		Tags:        a.opts.Tags,
+		WGPublicKey: a.opts.WGPublicKey,
+		HostIP:      hostIPStr,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to register agent: %w", err)
@@ -205,7 +195,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.containerHealthLoop(ctx)
 
 	// Start agent gRPC server for log streaming
-	go startAgentGRPC(ctx, &NerdctlLogProvider{}, a.opts.APIPort, a.sessionToken)
+	// Bind to agent's tunnel IP so only control tunnel peers can reach it
+	agentTunnelIP := types.TunnelIPFromPublicKey(a.opts.PublicKey).String()
+	go startAgentGRPC(ctx, &NerdctlLogProvider{}, agentTunnelIP, a.opts.APIPort)
 
 	<-ctx.Done()
 
@@ -557,7 +549,7 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 			return
 		case <-ticker.C:
 			sysMetrics := a.metricsCollector.Collect()
-			peers, backends, err := a.client.Heartbeat(ctx, a.opts.AgentName, a.sessionToken, a.opts.Tags, sysMetrics)
+			peers, backends, err := a.client.Heartbeat(ctx, a.opts.AgentName, a.opts.Tags, sysMetrics)
 			if err != nil {
 				consecutiveFails++
 				if consecutiveFails < maxConsecutiveHeartbeatFails {
@@ -774,12 +766,11 @@ func (a *Agent) reconnect(ctx context.Context) {
 		}
 
 		_, vpcConfig, activeContainers, err := a.client.Register(ctx, RegisterRequest{
-			Name:         a.opts.AgentName,
-			APIAddr:      apiAddr,
-			SessionToken: a.sessionToken,
-			Tags:         a.opts.Tags,
-			WGPublicKey:  a.opts.WGPublicKey,
-			HostIP:       reHostIPStr,
+			Name:        a.opts.AgentName,
+			APIAddr:     apiAddr,
+			Tags:        a.opts.Tags,
+			WGPublicKey: a.opts.WGPublicKey,
+			HostIP:      reHostIPStr,
 		})
 		if err != nil {
 			if ctx.Err() != nil {

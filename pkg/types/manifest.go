@@ -1,6 +1,31 @@
 package types
 
-import "gopkg.in/yaml.v3"
+import (
+	"fmt"
+	"regexp"
+
+	"gopkg.in/yaml.v3"
+)
+
+// namePattern matches safe infrastructure names: lowercase alphanumeric with
+// hyphens and underscores, must start and end with alphanumeric.
+// Allows underscores for Docker Compose compatibility (e.g., my_service).
+var namePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9_-]*[a-z0-9])?$`)
+
+// ValidateName checks that a name is safe for use in DNS, etcd keys,
+// and container names. Returns an error if the name is invalid.
+func ValidateName(name string) error {
+	if name == "" {
+		return fmt.Errorf("name must not be empty")
+	}
+	if len(name) > 63 {
+		return fmt.Errorf("name %q too long: max 63 characters", name)
+	}
+	if !namePattern.MatchString(name) {
+		return fmt.Errorf("name %q is invalid: must be lowercase alphanumeric with hyphens or underscores, starting and ending with alphanumeric", name)
+	}
+	return nil
+}
 
 // BanyanManifest represents the banyan.yaml structure.
 type BanyanManifest struct {

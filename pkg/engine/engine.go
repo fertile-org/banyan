@@ -33,7 +33,9 @@ type Options struct {
 	EtcdCertFile    string            // client certificate for mTLS
 	EtcdKeyFile     string            // client key for mTLS
 	EtcdCAFile      string            // CA certificate for server verification
-	WhitelistedKeys map[string]string // publicKey → agentName
+	WhitelistedKeys    map[string]string // publicKey → agentName
+	AllowInsecure      bool              // allow running without authentication (development only)
+	ControlTunnelActive bool             // WireGuard control tunnel is set up and active
 }
 
 // Engine is the Banyan control plane.
@@ -105,8 +107,12 @@ func (e *Engine) logger() *logging.Logger {
 func (e *Engine) Run(ctx context.Context) error {
 	if len(e.opts.WhitelistedKeys) > 0 {
 		e.logger().Info("Public key authentication enabled", "whitelisted_keys", len(e.opts.WhitelistedKeys))
+	} else if e.opts.AllowInsecure {
+		e.logger().Warn("SECURITY WARNING: Running without authentication (--allow-insecure). Do NOT use in production.")
 	} else {
-		e.logger().Warn("No authentication configured (no whitelisted keys)")
+		return fmt.Errorf("no whitelisted public keys configured, cannot start without authentication. " +
+			"Add agent keys with: banyan-engine init\n" +
+			"Or use --allow-insecure for development only (NOT for production)")
 	}
 
 	// Initialize VPC overlay networking (subnet allocation + peer tracking)
@@ -125,36 +131,54 @@ func (e *Engine) Run(ctx context.Context) error {
 		e.logger().Info("VPC overlay networking enabled", "cidr", e.opts.VPCCIDR)
 	}
 
-	// Start embedded OCI registry
-	e.logger().Info("Starting OCI registry", "port", e.opts.RegistryPort)
-	registryListener, err := startRegistry(ctx, e.opts.RegistryPort)
+	// Start embedded OCI registry — bind to control tunnel IP when WireGuard
+	// tunnel is active, localhost otherwise.
+	registryBindAddr := "127.0.0.1"
+	if e.opts.ControlTunnelActive {
+		registryBindAddr = types.ControlTunnelEngineIP
+	}
+	e.logger().Info("Starting OCI registry", "bind", registryBindAddr, "port", e.opts.RegistryPort)
+	registryListener, err := startRegistry(ctx, registryBindAddr, e.opts.RegistryPort)
 	if err != nil {
 		return fmt.Errorf("failed to start registry: %w", err)
 	}
-	e.logger().Info("OCI registry listening", "port", e.opts.RegistryPort)
+	e.logger().Info("OCI registry listening", "bind", registryBindAddr, "port", e.opts.RegistryPort)
 
-	// Determine engine IP and store registry URL
-	engineIP, err := DetermineEngineIP()
-	if err != nil {
-		return fmt.Errorf("failed to determine engine IP: %w", err)
+	// Determine registry URL for agents to pull from
+	registryHost := registryBindAddr
+	if registryHost == "127.0.0.1" || registryHost == "0.0.0.0" {
+		// In insecure/local mode, determine the actual engine IP for agents
+		engineIP, ipErr := DetermineEngineIP()
+		if ipErr != nil {
+			return fmt.Errorf("failed to determine engine IP: %w", ipErr)
+		}
+		registryHost = engineIP
 	}
-	e.registryURL = fmt.Sprintf("%s:%s", engineIP, e.opts.RegistryPort)
+	e.registryURL = fmt.Sprintf("%s:%s", registryHost, e.opts.RegistryPort)
 	if saveErr := e.store.Save(ctx, types.KeyRegistry, e.registryURL); saveErr != nil {
 		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
 	e.logger().Info("Registry URL saved to store", "url", e.registryURL)
 	_ = registryListener
 
-	// Start Engine gRPC server
-	e.logger().Info("Starting gRPC server", "port", e.opts.GRPCPort)
+	// Start Engine gRPC server — bind to control tunnel IP when authenticated,
+	// localhost in insecure mode. This prevents the control plane from being
+	// exposed on public interfaces.
+	grpcBindAddr := "127.0.0.1"
+	if e.opts.ControlTunnelActive {
+		grpcBindAddr = types.ControlTunnelEngineIP
+	}
+	e.logger().Info("Starting gRPC server", "bind", grpcBindAddr, "port", e.opts.GRPCPort)
 	grpcSrv, err := startEngineGRPC(ctx, &grpcServerOptions{
 		Store:           e.store,
 		Port:            e.opts.GRPCPort,
+		BindAddr:        grpcBindAddr,
 		RegistryURL:     e.registryURL,
 		Allocator:       allocator,
 		PeerTracker:     peerTracker,
 		VPCCIDR:         e.opts.VPCCIDR,
 		WhitelistedKeys: e.opts.WhitelistedKeys,
+		AllowInsecure:   e.opts.AllowInsecure,
 		MetricsRegistry: e.metricsRegistry,
 		Events:          e.events,
 		StartedAt:       e.startedAt,
@@ -212,7 +236,12 @@ func (e *Engine) startMetricsHTTP(ctx context.Context, port string) error {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", e.metricsRegistry.Handler())
 
-	lis, err := net.Listen("tcp", ":"+port)
+	// Bind metrics to same address as gRPC (control tunnel or localhost)
+	metricsBindAddr := "127.0.0.1"
+	if e.opts.ControlTunnelActive {
+		metricsBindAddr = types.ControlTunnelEngineIP
+	}
+	lis, err := net.Listen("tcp", metricsBindAddr+":"+port)
 	if err != nil {
 		return fmt.Errorf("failed to listen on metrics port %s: %w", port, err)
 	}
@@ -759,11 +788,12 @@ func ListAvailableAgents(ctx context.Context, store storage.StateStore, deployme
 
 // --- Registry helpers ---
 
-func startRegistry(ctx context.Context, port string) (net.Listener, error) {
+func startRegistry(ctx context.Context, bindAddr, port string) (net.Listener, error) {
 	regLog := logging.New("engine.registry")
 	handler := registry.New(registry.Logger(regLog.StdLogger()))
 
-	listener, err := net.Listen("tcp", ":"+port)
+	listenAddr := bindAddr + ":" + port
+	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on port %s: %w", port, err)
 	}

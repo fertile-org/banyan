@@ -555,7 +555,7 @@ func TestNewAutoEngineClient(t *testing.T) {
 
 func TestNewEngineClient(t *testing.T) {
 	// NewEngineClient creates a lazy gRPC connection (no actual network needed)
-	client, err := NewEngineClient("localhost:50051", "test-pubkey-base64")
+	client, err := NewEngineClient("localhost:50051")
 	if err != nil {
 		t.Fatalf("NewEngineClient failed: %v", err)
 	}

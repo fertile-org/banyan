@@ -8,15 +8,15 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 )
 
 // streamAgentLogs connects to an agent's gRPC server and streams logs as an io.ReadCloser.
-func streamAgentLogs(ctx context.Context, agentAddr, sessionToken, containerName string, follow bool, tail int32) (io.ReadCloser, error) {
+// No application-layer auth is needed — the agent verifies the caller is the engine
+// by checking the peer IP matches the engine's control tunnel IP.
+func streamAgentLogs(ctx context.Context, agentAddr, containerName string, follow bool, tail int32) (io.ReadCloser, error) {
 	conn, err := grpc.NewClient(agentAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.SessionTokenCredentials{Token: sessionToken}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to agent at %s: %w", agentAddr, err)

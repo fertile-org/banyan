@@ -208,7 +208,7 @@ func setupFailingReportServer(t *testing.T) (*EngineClient, storage.StateStore, 
 
 func TestNewEngineClient(t *testing.T) {
 	// NewEngineClient creates a lazy gRPC connection (no actual network needed)
-	client, err := NewEngineClient("localhost:50051", "test-pubkey-base64")
+	client, err := NewEngineClient("localhost:50051")
 	if err != nil {
 		t.Fatalf("NewEngineClient failed: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestEngineClient_Register(t *testing.T) {
 	defer cleanup()
 
 	registryURL, vpcConfig, _, err := client.Register(context.Background(), RegisterRequest{
-		Name: "worker-1", APIAddr: "worker-1:50052", SessionToken: "token-abc",
+		Name: "worker-1", APIAddr: "worker-1:50052",
 	})
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
@@ -282,7 +282,7 @@ func TestEngineClient_Register_WithVPCConfig(t *testing.T) {
 	}
 
 	registryURL, vpcConfig, _, registerErr := client.Register(context.Background(), RegisterRequest{
-		Name: "worker-1", APIAddr: "worker-1:50052", SessionToken: "token-abc",
+		Name: "worker-1", APIAddr: "worker-1:50052",
 	})
 	if registerErr != nil {
 		t.Fatalf("Register failed: %v", registerErr)
@@ -341,7 +341,7 @@ func TestEngineClient_Heartbeat(t *testing.T) {
 	client, _, cleanup := setupEngineServer(t)
 	defer cleanup()
 
-	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil, metrics.SystemMetrics{})
+	peers, backends, err := client.Heartbeat(context.Background(), "worker-1", nil, metrics.SystemMetrics{})
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
@@ -394,7 +394,7 @@ func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
 		client: banyanpb.NewEngineServiceClient(conn),
 	}
 
-	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", "token-abc", nil, metrics.SystemMetrics{})
+	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", nil, metrics.SystemMetrics{})
 	if hbErr != nil {
 		t.Fatalf("Heartbeat failed: %v", hbErr)
 	}
@@ -517,14 +517,14 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("Register error", func(t *testing.T) {
-		_, _, _, err := client.Register(ctx, RegisterRequest{Name: "worker-1", APIAddr: "addr", SessionToken: "token"})
+		_, _, _, err := client.Register(ctx, RegisterRequest{Name: "worker-1", APIAddr: "addr"})
 		if err == nil {
 			t.Error("expected error from Register on stopped server")
 		}
 	})
 
 	t.Run("Heartbeat error", func(t *testing.T) {
-		_, _, err := client.Heartbeat(ctx, "worker-1", "token", nil, metrics.SystemMetrics{})
+		_, _, err := client.Heartbeat(ctx, "worker-1", nil, metrics.SystemMetrics{})
 		if err == nil {
 			t.Error("expected error from Heartbeat on stopped server")
 		}

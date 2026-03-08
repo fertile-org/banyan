@@ -502,7 +502,7 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		client, connErr := agent.NewEngineClient(agentEngineEndpoint, statusPubKey)
+		client, connErr := agent.NewEngineClient(agentEngineEndpoint)
 		if connErr != nil {
 			fmt.Printf("FAILED (%v)\n", connErr)
 		} else {

@@ -7,12 +7,11 @@
 package banyanpb
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -191,13 +190,15 @@ func (x *RegisterRequest) GetHostIp() string {
 }
 
 type RegisterResponse struct {
-	state            protoimpl.MessageState `protogen:"open.v1"`
-	RegistryUrl      string                 `protobuf:"bytes,1,opt,name=registry_url,json=registryUrl,proto3" json:"registry_url,omitempty"`
-	StoreEndpoints   []string               `protobuf:"bytes,2,rep,name=store_endpoints,json=storeEndpoints,proto3" json:"store_endpoints,omitempty"`       // DEPRECATED: was etcd endpoints for Flannel
-	VpcCidr          string                 `protobuf:"bytes,3,opt,name=vpc_cidr,json=vpcCidr,proto3" json:"vpc_cidr,omitempty"`                            // VPC network CIDR (e.g., "10.0.0.0/16")
-	AllocatedSubnet  string                 `protobuf:"bytes,4,opt,name=allocated_subnet,json=allocatedSubnet,proto3" json:"allocated_subnet,omitempty"`    // /24 subnet for this agent (e.g., "10.0.45.0/24")
-	OverlayType      string                 `protobuf:"bytes,5,opt,name=overlay_type,json=overlayType,proto3" json:"overlay_type,omitempty"`                // DEPRECATED: WireGuard is now the only overlay
-	ActiveContainers []*ActiveContainer     `protobuf:"bytes,6,rep,name=active_containers,json=activeContainers,proto3" json:"active_containers,omitempty"` // containers this agent should already be running
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	RegistryUrl string                 `protobuf:"bytes,1,opt,name=registry_url,json=registryUrl,proto3" json:"registry_url,omitempty"`
+	// Deprecated: Marked as deprecated in engine.proto.
+	StoreEndpoints  []string `protobuf:"bytes,2,rep,name=store_endpoints,json=storeEndpoints,proto3" json:"store_endpoints,omitempty"`    // was etcd endpoints for Flannel
+	VpcCidr         string   `protobuf:"bytes,3,opt,name=vpc_cidr,json=vpcCidr,proto3" json:"vpc_cidr,omitempty"`                         // VPC network CIDR (e.g., "10.0.0.0/16")
+	AllocatedSubnet string   `protobuf:"bytes,4,opt,name=allocated_subnet,json=allocatedSubnet,proto3" json:"allocated_subnet,omitempty"` // /24 subnet for this agent (e.g., "10.0.45.0/24")
+	// Deprecated: Marked as deprecated in engine.proto.
+	OverlayType      string             `protobuf:"bytes,5,opt,name=overlay_type,json=overlayType,proto3" json:"overlay_type,omitempty"`                // WireGuard is now the only overlay
+	ActiveContainers []*ActiveContainer `protobuf:"bytes,6,rep,name=active_containers,json=activeContainers,proto3" json:"active_containers,omitempty"` // containers this agent should already be running
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -239,6 +240,7 @@ func (x *RegisterResponse) GetRegistryUrl() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in engine.proto.
 func (x *RegisterResponse) GetStoreEndpoints() []string {
 	if x != nil {
 		return x.StoreEndpoints
@@ -260,6 +262,7 @@ func (x *RegisterResponse) GetAllocatedSubnet() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in engine.proto.
 func (x *RegisterResponse) GetOverlayType() string {
 	if x != nil {
 		return x.OverlayType
@@ -481,11 +484,12 @@ func (x *HeartbeatResponse) GetServiceBackends() []*ServiceBackend {
 }
 
 type VPCPeer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Subnet        string                 `protobuf:"bytes,1,opt,name=subnet,proto3" json:"subnet,omitempty"`                        // peer's allocated subnet
-	HostIp        string                 `protobuf:"bytes,2,opt,name=host_ip,json=hostIp,proto3" json:"host_ip,omitempty"`          // peer's reachable IP
-	VtepMac       string                 `protobuf:"bytes,3,opt,name=vtep_mac,json=vtepMac,proto3" json:"vtep_mac,omitempty"`       // DEPRECATED: VXLAN removed, WireGuard only
-	PublicKey     string                 `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // WireGuard public key
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Subnet string                 `protobuf:"bytes,1,opt,name=subnet,proto3" json:"subnet,omitempty"`               // peer's allocated subnet
+	HostIp string                 `protobuf:"bytes,2,opt,name=host_ip,json=hostIp,proto3" json:"host_ip,omitempty"` // peer's reachable IP
+	// Deprecated: Marked as deprecated in engine.proto.
+	VtepMac       string `protobuf:"bytes,3,opt,name=vtep_mac,json=vtepMac,proto3" json:"vtep_mac,omitempty"`       // VXLAN removed, WireGuard only
+	PublicKey     string `protobuf:"bytes,4,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // WireGuard public key
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -534,6 +538,7 @@ func (x *VPCPeer) GetHostIp() string {
 	return ""
 }
 
+// Deprecated: Marked as deprecated in engine.proto.
 func (x *VPCPeer) GetVtepMac() string {
 	if x != nil {
 		return x.VtepMac
@@ -921,14 +926,15 @@ func (x *ContainerStatus) GetHealthStatus() string {
 }
 
 type ServiceBackend struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ContainerName string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
-	ContainerIp   string                 `protobuf:"bytes,2,opt,name=container_ip,json=containerIp,proto3" json:"container_ip,omitempty"`
-	Ports         []string               `protobuf:"bytes,3,rep,name=ports,proto3" json:"ports,omitempty"`
-	AgentName     string                 `protobuf:"bytes,4,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
-	ServiceName   string                 `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	ContainerName  string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
+	ContainerIp    string                 `protobuf:"bytes,2,opt,name=container_ip,json=containerIp,proto3" json:"container_ip,omitempty"`
+	Ports          []string               `protobuf:"bytes,3,rep,name=ports,proto3" json:"ports,omitempty"`
+	AgentName      string                 `protobuf:"bytes,4,opt,name=agent_name,json=agentName,proto3" json:"agent_name,omitempty"`
+	ServiceName    string                 `protobuf:"bytes,5,opt,name=service_name,json=serviceName,proto3" json:"service_name,omitempty"`
+	DeploymentName string                 `protobuf:"bytes,6,opt,name=deployment_name,json=deploymentName,proto3" json:"deployment_name,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *ServiceBackend) Reset() {
@@ -996,6 +1002,13 @@ func (x *ServiceBackend) GetServiceName() string {
 	return ""
 }
 
+func (x *ServiceBackend) GetDeploymentName() string {
+	if x != nil {
+		return x.DeploymentName
+	}
+	return ""
+}
+
 type ReportContainerHealthResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1052,6 +1065,7 @@ type TaskRecord struct {
 	CpuLimit          string                 `protobuf:"bytes,16,opt,name=cpu_limit,json=cpuLimit,proto3" json:"cpu_limit,omitempty"`
 	MemoryReservation string                 `protobuf:"bytes,17,opt,name=memory_reservation,json=memoryReservation,proto3" json:"memory_reservation,omitempty"`
 	Healthcheck       *ManifestHealthcheck   `protobuf:"bytes,18,opt,name=healthcheck,proto3" json:"healthcheck,omitempty"`
+	DeploymentName    string                 `protobuf:"bytes,19,opt,name=deployment_name,json=deploymentName,proto3" json:"deployment_name,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1210,6 +1224,13 @@ func (x *TaskRecord) GetHealthcheck() *ManifestHealthcheck {
 		return x.Healthcheck
 	}
 	return nil
+}
+
+func (x *TaskRecord) GetDeploymentName() string {
+	if x != nil {
+		return x.DeploymentName
+	}
+	return ""
 }
 
 type DeployRPCRequest struct {
@@ -3232,13 +3253,13 @@ const file_engine_proto_rawDesc = "" +
 	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\x12\x12\n" +
 	"\x04tags\x18\x04 \x03(\tR\x04tags\x12\"\n" +
 	"\rwg_public_key\x18\x05 \x01(\tR\vwgPublicKey\x12\x17\n" +
-	"\ahost_ip\x18\x06 \x01(\tR\x06hostIp\"\x90\x02\n" +
+	"\ahost_ip\x18\x06 \x01(\tR\x06hostIp\"\x98\x02\n" +
 	"\x10RegisterResponse\x12!\n" +
-	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\x12'\n" +
-	"\x0fstore_endpoints\x18\x02 \x03(\tR\x0estoreEndpoints\x12\x19\n" +
+	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\x12+\n" +
+	"\x0fstore_endpoints\x18\x02 \x03(\tB\x02\x18\x01R\x0estoreEndpoints\x12\x19\n" +
 	"\bvpc_cidr\x18\x03 \x01(\tR\avpcCidr\x12)\n" +
-	"\x10allocated_subnet\x18\x04 \x01(\tR\x0fallocatedSubnet\x12!\n" +
-	"\foverlay_type\x18\x05 \x01(\tR\voverlayType\x12G\n" +
+	"\x10allocated_subnet\x18\x04 \x01(\tR\x0fallocatedSubnet\x12%\n" +
+	"\foverlay_type\x18\x05 \x01(\tB\x02\x18\x01R\voverlayType\x12G\n" +
 	"\x11active_containers\x18\x06 \x03(\v2\x1a.banyan.v1.ActiveContainerR\x10activeContainers\"\xd2\x01\n" +
 	"\x0fActiveContainer\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12!\n" +
@@ -3255,11 +3276,11 @@ const file_engine_proto_rawDesc = "" +
 	"\x0esystem_metrics\x18\x04 \x01(\v2\x18.banyan.v1.SystemMetricsR\rsystemMetrics\"\x8a\x01\n" +
 	"\x11HeartbeatResponse\x12/\n" +
 	"\tvpc_peers\x18\x01 \x03(\v2\x12.banyan.v1.VPCPeerR\bvpcPeers\x12D\n" +
-	"\x10service_backends\x18\x02 \x03(\v2\x19.banyan.v1.ServiceBackendR\x0fserviceBackends\"t\n" +
+	"\x10service_backends\x18\x02 \x03(\v2\x19.banyan.v1.ServiceBackendR\x0fserviceBackends\"x\n" +
 	"\aVPCPeer\x12\x16\n" +
 	"\x06subnet\x18\x01 \x01(\tR\x06subnet\x12\x17\n" +
-	"\ahost_ip\x18\x02 \x01(\tR\x06hostIp\x12\x19\n" +
-	"\bvtep_mac\x18\x03 \x01(\tR\avtepMac\x12\x1d\n" +
+	"\ahost_ip\x18\x02 \x01(\tR\x06hostIp\x12\x1d\n" +
+	"\bvtep_mac\x18\x03 \x01(\tB\x02\x18\x01R\avtepMac\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x04 \x01(\tR\tpublicKey\"1\n" +
 	"\x10PollTasksRequest\x12\x1d\n" +
@@ -3288,15 +3309,16 @@ const file_engine_proto_rawDesc = "" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x0e\n" +
 	"\x02ip\x18\x03 \x01(\tR\x02ip\x12#\n" +
-	"\rhealth_status\x18\x04 \x01(\tR\fhealthStatus\"\xb2\x01\n" +
+	"\rhealth_status\x18\x04 \x01(\tR\fhealthStatus\"\xdb\x01\n" +
 	"\x0eServiceBackend\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12!\n" +
 	"\fcontainer_ip\x18\x02 \x01(\tR\vcontainerIp\x12\x14\n" +
 	"\x05ports\x18\x03 \x03(\tR\x05ports\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x04 \x01(\tR\tagentName\x12!\n" +
-	"\fservice_name\x18\x05 \x01(\tR\vserviceName\"\x1f\n" +
-	"\x1dReportContainerHealthResponse\"\xca\x04\n" +
+	"\fservice_name\x18\x05 \x01(\tR\vserviceName\x12'\n" +
+	"\x0fdeployment_name\x18\x06 \x01(\tR\x0edeploymentName\"\x1f\n" +
+	"\x1dReportContainerHealthResponse\"\xf3\x04\n" +
 	"\n" +
 	"TaskRecord\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
@@ -3319,7 +3341,8 @@ const file_engine_proto_rawDesc = "" +
 	"\fmemory_limit\x18\x0f \x01(\tR\vmemoryLimit\x12\x1b\n" +
 	"\tcpu_limit\x18\x10 \x01(\tR\bcpuLimit\x12-\n" +
 	"\x12memory_reservation\x18\x11 \x01(\tR\x11memoryReservation\x12@\n" +
-	"\vhealthcheck\x18\x12 \x01(\v2\x1e.banyan.v1.ManifestHealthcheckR\vhealthcheck\"s\n" +
+	"\vhealthcheck\x18\x12 \x01(\v2\x1e.banyan.v1.ManifestHealthcheckR\vhealthcheck\x12'\n" +
+	"\x0fdeployment_name\x18\x13 \x01(\tR\x0edeploymentName\"s\n" +
 	"\x10DeployRPCRequest\x12/\n" +
 	"\bmanifest\x18\x01 \x01(\v2\x13.banyan.v1.ManifestR\bmanifest\x12\x1a\n" +
 	"\bservices\x18\x02 \x03(\tR\bservices\x12\x12\n" +

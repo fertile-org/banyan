@@ -398,7 +398,7 @@ func TestInitializeVPCNetworking(t *testing.T) {
 }
 
 func TestSetupOverlayForwarding(t *testing.T) {
-	t.Run("inserts FORWARD rules for overlay interfaces", func(t *testing.T) {
+	t.Run("creates isolation chain and jump rules", func(t *testing.T) {
 		mock := &mockIPTables{}
 
 		origFactory := iptablesFactory
@@ -410,21 +410,24 @@ func TestSetupOverlayForwarding(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 
-		// Should insert 2 rules (bridge→wg and wg→bridge)
+		// Should create the BANYAN-ISOLATION chain
+		if !mock.chains[isolationChainName] {
+			t.Errorf("expected chain %s to be created", isolationChainName)
+		}
+
+		// Should insert 2 jump rules (bridge→isolation and wg→isolation)
 		if len(mock.inserted) != 2 {
 			t.Fatalf("expected 2 Insert calls, got %d", len(mock.inserted))
 		}
-		// First rule: banyan0 → banyan-wg
-		if !containsAll(mock.inserted[0], "-i", "banyan0", "-o", "banyan-wg", "-j", "ACCEPT") {
+		if !containsAll(mock.inserted[0], "-i", "banyan0", "-o", "banyan-wg", "-j", isolationChainName) {
 			t.Errorf("unexpected first rule: %v", mock.inserted[0])
 		}
-		// Second rule: banyan-wg → banyan0
-		if !containsAll(mock.inserted[1], "-i", "banyan-wg", "-o", "banyan0", "-j", "ACCEPT") {
+		if !containsAll(mock.inserted[1], "-i", "banyan-wg", "-o", "banyan0", "-j", isolationChainName) {
 			t.Errorf("unexpected second rule: %v", mock.inserted[1])
 		}
 	})
 
-	t.Run("skips existing rules", func(t *testing.T) {
+	t.Run("skips existing jump rules", func(t *testing.T) {
 		mock := &mockIPTables{existsResult: true}
 
 		origFactory := iptablesFactory
@@ -442,11 +445,238 @@ func TestSetupOverlayForwarding(t *testing.T) {
 	})
 }
 
-// mockIPTables records iptables operations for testing overlay forwarding.
+func TestReconcileNetworkIsolation(t *testing.T) {
+	t.Run("creates per-deployment isolation rules", func(t *testing.T) {
+		mock := &mockIPTables{}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		a := &Agent{
+			opts:       Options{AgentName: "agent-1"},
+			vpcEnabled: true,
+			gatewayIP:  "10.0.1.1",
+		}
+
+		backends := []ServiceBackend{
+			{ContainerName: "web-1", ContainerIP: "10.0.1.2", DeploymentName: "myapp", AgentName: "agent-1"},
+			{ContainerName: "web-2", ContainerIP: "10.0.2.2", DeploymentName: "myapp", AgentName: "agent-2"},
+			{ContainerName: "db-1", ContainerIP: "10.0.1.3", DeploymentName: "other", AgentName: "agent-1"},
+		}
+
+		a.reconcileNetworkIsolation(context.Background(), backends)
+
+		// Should create deployment chains
+		depMyapp := depChainName("myapp")
+		depOther := depChainName("other")
+		if !mock.chains[depMyapp] {
+			t.Errorf("expected chain %s to be created", depMyapp)
+		}
+		if !mock.chains[depOther] {
+			t.Errorf("expected chain %s to be created", depOther)
+		}
+
+		// Verify isolation chain has conntrack rule
+		isoRules := mock.appended[isolationChainName]
+		if len(isoRules) == 0 {
+			t.Fatal("expected rules in isolation chain")
+		}
+		if !containsAll(isoRules[0], "-m", "conntrack", "--ctstate", "ESTABLISHED,RELATED", "-j", "ACCEPT") {
+			t.Errorf("first rule should be conntrack, got: %v", isoRules[0])
+		}
+
+		// Verify DNS rules for gateway
+		foundDNS := false
+		for _, rule := range isoRules {
+			if containsAll(rule, "-d", "10.0.1.1", "-p", "udp", "--dport", "53", "-j", "ACCEPT") {
+				foundDNS = true
+				break
+			}
+		}
+		if !foundDNS {
+			t.Error("expected DNS allow rule for gateway IP")
+		}
+
+		// Verify deployment chains have the right allow rules
+		myappRules := mock.appended[depMyapp]
+		foundWeb1 := false
+		foundWeb2 := false
+		for _, rule := range myappRules {
+			if containsAll(rule, "-d", "10.0.1.2", "-j", "ACCEPT") {
+				foundWeb1 = true
+			}
+			if containsAll(rule, "-d", "10.0.2.2", "-j", "ACCEPT") {
+				foundWeb2 = true
+			}
+		}
+		if !foundWeb1 || !foundWeb2 {
+			t.Errorf("expected both myapp IPs in deployment chain, web1=%v web2=%v", foundWeb1, foundWeb2)
+		}
+
+		// Verify deployment chain ends with DROP
+		lastMyapp := myappRules[len(myappRules)-1]
+		if !containsAll(lastMyapp, "-j", "DROP") {
+			t.Errorf("deployment chain should end with DROP, got: %v", lastMyapp)
+		}
+
+		// Verify isolation chain ends with DROP
+		lastIso := isoRules[len(isoRules)-1]
+		if !containsAll(lastIso, "-j", "DROP") {
+			t.Errorf("isolation chain should end with DROP, got: %v", lastIso)
+		}
+	})
+
+	t.Run("skips backends without deployment name", func(t *testing.T) {
+		mock := &mockIPTables{}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		a := &Agent{
+			opts:       Options{AgentName: "agent-1"},
+			vpcEnabled: true,
+		}
+
+		backends := []ServiceBackend{
+			{ContainerName: "web-1", ContainerIP: "10.0.1.2", DeploymentName: "", AgentName: "agent-1"},
+		}
+
+		a.reconcileNetworkIsolation(context.Background(), backends)
+
+		// No deployment chains should be created (only isolation chain rules)
+		for chain := range mock.chains {
+			if strings.HasPrefix(chain, depChainPrefix) {
+				t.Errorf("unexpected deployment chain created: %s", chain)
+			}
+		}
+	})
+
+	t.Run("handles empty backends", func(t *testing.T) {
+		mock := &mockIPTables{}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		a := &Agent{
+			opts:       Options{AgentName: "agent-1"},
+			vpcEnabled: true,
+		}
+
+		a.reconcileNetworkIsolation(context.Background(), nil)
+
+		// Should still have conntrack + DROP rules in isolation chain
+		isoRules := mock.appended[isolationChainName]
+		if len(isoRules) < 2 {
+			t.Fatalf("expected at least 2 rules in isolation chain, got %d", len(isoRules))
+		}
+	})
+}
+
+func TestDepChainName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"short name", "myapp", "BN-DEP-myapp"},
+		{"max length", "abcdefghijklmnopqrstu", "BN-DEP-abcdefghijklmnopqrstu"},
+		{"truncated", "abcdefghijklmnopqrstuvwxyz1234", "BN-DEP-abcdefghijklmnopqrstu"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := depChainName(tt.input)
+			if got != tt.expected {
+				t.Errorf("depChainName(%q) = %q, want %q", tt.input, got, tt.expected)
+			}
+			if len(got) > 28 {
+				t.Errorf("chain name %q exceeds 28 chars: %d", got, len(got))
+			}
+		})
+	}
+}
+
+func TestAddContainerToIsolation(t *testing.T) {
+	t.Run("creates new deployment chain when none exists", func(t *testing.T) {
+		mock := &mockIPTables{}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		a := &Agent{
+			opts:       Options{AgentName: "agent-1"},
+			vpcEnabled: true,
+		}
+
+		a.addContainerToIsolation(context.Background(), "10.0.1.5", "myapp")
+
+		chainName := depChainName("myapp")
+
+		// Should create the deployment chain
+		if !mock.chains[chainName] {
+			t.Errorf("expected chain %s to be created", chainName)
+		}
+
+		// Should have allow + DROP in deployment chain
+		depRules := mock.appended[chainName]
+		if len(depRules) != 2 {
+			t.Fatalf("expected 2 rules in deployment chain, got %d", len(depRules))
+		}
+		if !containsAll(depRules[0], "-d", "10.0.1.5", "-j", "ACCEPT") {
+			t.Errorf("expected allow rule, got: %v", depRules[0])
+		}
+		if !containsAll(depRules[1], "-j", "DROP") {
+			t.Errorf("expected DROP rule, got: %v", depRules[1])
+		}
+
+		// Should insert source rule in isolation chain
+		if len(mock.inserted) != 1 {
+			t.Fatalf("expected 1 insert in isolation chain, got %d", len(mock.inserted))
+		}
+		if !containsAll(mock.inserted[0], "-s", "10.0.1.5", "-j", chainName) {
+			t.Errorf("expected source jump rule, got: %v", mock.inserted[0])
+		}
+	})
+
+	t.Run("appends to existing deployment chain", func(t *testing.T) {
+		mock := &mockIPTables{
+			chains: map[string]bool{depChainName("myapp"): true},
+		}
+
+		origFactory := iptablesFactory
+		t.Cleanup(func() { iptablesFactory = origFactory })
+		iptablesFactory = func() (iptablesHandle, error) { return mock, nil }
+
+		a := &Agent{
+			opts:       Options{AgentName: "agent-1"},
+			vpcEnabled: true,
+		}
+
+		a.addContainerToIsolation(context.Background(), "10.0.1.6", "myapp")
+
+		// Should insert allow rule (not append — before the DROP)
+		if len(mock.inserted) != 2 { // 1 for dep chain + 1 for isolation chain
+			t.Fatalf("expected 2 inserts, got %d", len(mock.inserted))
+		}
+
+		// First insert: allow rule in deployment chain
+		if !containsAll(mock.inserted[0], "-d", "10.0.1.6", "-j", "ACCEPT") {
+			t.Errorf("expected allow rule in dep chain, got: %v", mock.inserted[0])
+		}
+	})
+}
+
+// mockIPTables records iptables operations for testing overlay forwarding and network isolation.
 type mockIPTables struct {
 	existsResult bool
 	inserted     [][]string
+	appended     map[string][][]string // chain → list of appended rules
+	chains       map[string]bool       // tracks created chains
 	insertErr    error
+	appendErr    error
 }
 
 func (m *mockIPTables) Exists(table, chain string, rulespec ...string) (bool, error) {
@@ -463,6 +693,46 @@ func (m *mockIPTables) Insert(table, chain string, pos int, rulespec ...string) 
 
 func (m *mockIPTables) Delete(table, chain string, rulespec ...string) error {
 	return nil
+}
+
+func (m *mockIPTables) Append(table, chain string, rulespec ...string) error {
+	if m.appendErr != nil {
+		return m.appendErr
+	}
+	if m.appended == nil {
+		m.appended = map[string][][]string{}
+	}
+	m.appended[chain] = append(m.appended[chain], rulespec)
+	return nil
+}
+
+func (m *mockIPTables) NewChain(table, chain string) error {
+	if m.chains == nil {
+		m.chains = map[string]bool{}
+	}
+	m.chains[chain] = true
+	return nil
+}
+
+func (m *mockIPTables) ClearChain(table, chain string) error {
+	return nil
+}
+
+func (m *mockIPTables) DeleteChain(table, chain string) error {
+	if m.chains != nil {
+		delete(m.chains, chain)
+	}
+	return nil
+}
+
+func (m *mockIPTables) ListChains(table string) ([]string, error) {
+	result := []string{"INPUT", "FORWARD", "OUTPUT"}
+	if m.chains != nil {
+		for c := range m.chains {
+			result = append(result, c)
+		}
+	}
+	return result, nil
 }
 
 // containsAll checks if all target strings are found in the slice.

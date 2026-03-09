@@ -259,10 +259,10 @@ done
 if [ -n "$ENVFILE_API_CONTAINER" ]; then
     # Test 1: REDIS_HOST from .env file is set
     REDIS_HOST_VAL=$(docker exec "$ENVFILE_API_WORKER" nerdctl exec "$ENVFILE_API_CONTAINER" printenv REDIS_HOST 2>/dev/null) || REDIS_HOST_VAL=""
-    if [ "$REDIS_HOST_VAL" = "db.internal" ]; then
-        log_test_pass "env_file: REDIS_HOST=db.internal set from .env file"
+    if [ "$REDIS_HOST_VAL" = "db.e2e-test-app.internal" ]; then
+        log_test_pass "env_file: REDIS_HOST=db.e2e-test-app.internal set from .env file"
     else
-        log_test_fail "env_file: REDIS_HOST expected 'db.internal', got '${REDIS_HOST_VAL}'"
+        log_test_fail "env_file: REDIS_HOST expected 'db.e2e-test-app.internal', got '${REDIS_HOST_VAL}'"
     fi
 
     # Test 2: APP_MODE from .env file is set (second variable in file)
@@ -479,22 +479,22 @@ if [ -n "$API_CONTAINER" ] && [ -n "$DB_CONTAINER" ]; then
         fi
     fi
 
-    # Test 1: DNS resolution from API container → db.internal
-    log_info "Test: DNS resolution db.internal from API container"
-    if docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db.internal 2>/dev/null | grep -q "0% packet loss"; then
-        log_test_pass "DNS: API container can ping db.internal"
+    # Test 1: DNS resolution from API container → db.e2e-test-app.internal
+    log_info "Test: DNS resolution db.e2e-test-app.internal from API container"
+    if docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db.e2e-test-app.internal 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "DNS: API container can ping db.e2e-test-app.internal"
     else
-        log_test_fail "DNS: API container cannot ping db.internal"
-        docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db.internal 2>&1 || true
+        log_test_fail "DNS: API container cannot ping db.e2e-test-app.internal"
+        docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db.e2e-test-app.internal 2>&1 || true
     fi
 
-    # Test 2: DNS resolution from DB container → api.internal
-    log_info "Test: DNS resolution api.internal from DB container"
-    if docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" ping -c 2 -W 5 api.internal 2>/dev/null | grep -q "0% packet loss"; then
-        log_test_pass "DNS: DB container can ping api.internal"
+    # Test 2: DNS resolution from DB container → api.e2e-test-app.internal
+    log_info "Test: DNS resolution api.e2e-test-app.internal from DB container"
+    if docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" ping -c 2 -W 5 api.e2e-test-app.internal 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "DNS: DB container can ping api.e2e-test-app.internal"
     else
-        log_test_fail "DNS: DB container cannot ping api.internal"
-        docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" ping -c 2 -W 5 api.internal 2>&1 || true
+        log_test_fail "DNS: DB container cannot ping api.e2e-test-app.internal"
+        docker exec "$DB_WORKER" nerdctl exec "$DB_CONTAINER" ping -c 2 -W 5 api.e2e-test-app.internal 2>&1 || true
     fi
 
     # Test 3: dns-search domain — plain 'db' should resolve via search domain 'internal'
@@ -505,7 +505,7 @@ if [ -n "$API_CONTAINER" ] && [ -n "$DB_CONTAINER" ]; then
     if docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db 2>/dev/null | grep -q "0% packet loss"; then
         log_test_pass "DNS search: API container can ping 'db' (via dns-search internal)"
     else
-        log_warn "DNS search: plain 'db' not resolvable (dns-search may not work with musl libc). Use 'db.internal' instead."
+        log_warn "DNS search: plain 'db' not resolvable (dns-search may not work with musl libc). Use 'db.e2e-test-app.internal' instead."
         docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" ping -c 2 -W 5 db 2>&1 || true
     fi
 
@@ -521,8 +521,8 @@ if [ -n "$API_CONTAINER" ] && [ -n "$DB_CONTAINER" ]; then
         else
             log_test_fail "App-level DNS: API /db returned '$DB_RESPONSE' (expected PONG)"
             # Debug: check DNS resolution and Redis connectivity directly
-            echo "  Debug: DNS resolution of db.internal from API container:"
-            docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" nslookup db.internal 2>&1 | head -10 || true
+            echo "  Debug: DNS resolution of db.e2e-test-app.internal from API container:"
+            docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" nslookup db.e2e-test-app.internal 2>&1 | head -10 || true
             echo "  Debug: Full error from API /db endpoint (via Node.js):"
             docker exec "$API_WORKER" nerdctl exec "$API_CONTAINER" node -e "
               const http = require('http');
@@ -681,11 +681,11 @@ done
 if [ -n "$POST_API_CONTAINER" ]; then
     # Wait for DNS to propagate for new containers
     sleep 15
-    if docker exec "$POST_API_WORKER" nerdctl exec "$POST_API_CONTAINER" ping -c 2 -W 5 db.internal 2>/dev/null | grep -q "0% packet loss"; then
-        log_test_pass "Post-redeploy DNS: API container can ping db.internal"
+    if docker exec "$POST_API_WORKER" nerdctl exec "$POST_API_CONTAINER" ping -c 2 -W 5 db.e2e-test-app.internal 2>/dev/null | grep -q "0% packet loss"; then
+        log_test_pass "Post-redeploy DNS: API container can ping db.e2e-test-app.internal"
     else
-        log_test_fail "Post-redeploy DNS: API container cannot ping db.internal"
-        docker exec "$POST_API_WORKER" nerdctl exec "$POST_API_CONTAINER" ping -c 2 -W 5 db.internal 2>&1 || true
+        log_test_fail "Post-redeploy DNS: API container cannot ping db.e2e-test-app.internal"
+        docker exec "$POST_API_WORKER" nerdctl exec "$POST_API_CONTAINER" ping -c 2 -W 5 db.e2e-test-app.internal 2>&1 || true
     fi
 else
     log_warn "Skipping post-redeploy DNS test (no API container found)"

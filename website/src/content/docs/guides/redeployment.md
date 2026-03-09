@@ -143,7 +143,7 @@ During a blue-green deploy, new containers get a deployment-ID prefix to avoid n
 Per-service deploys reuse the original naming pattern (`my-app-web-0`) since old containers are stopped before new ones start.
 
 :::note
-Container names may change after a blue-green redeployment. If you reference container names in scripts or environment variables (e.g., `DB_HOST=my-app-db-0`), use the service's DNS name or update references after redeployment. This is a known limitation being tracked for improvement.
+Container names may change after a blue-green redeployment. Always use the service DNS name (e.g., `DB_HOST=db.my-app.internal`) instead of container names in environment variables. DNS names are stable across redeployments.
 :::
 
 ## Strategy comparison

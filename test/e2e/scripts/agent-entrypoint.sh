@@ -53,12 +53,9 @@ while [ ! -f /tmp/keys-exchange/engine-ready ]; do
     sleep 1
 done
 
-# 7. Wait for engine gRPC to be reachable from this container
-echo "Waiting for engine gRPC at ${ENGINE_HOST}:${ENGINE_GRPC_PORT}..."
-until nc -z "${ENGINE_HOST}" "${ENGINE_GRPC_PORT}" 2>/dev/null; do
-    sleep 1
-done
-echo "Engine is ready!"
+# 7. Engine is ready (gRPC binds to WireGuard tunnel IP, not Docker network)
+# The agent will connect through its WireGuard tunnel to 10.200.0.1
+echo "Engine is ready (tunnel-based connectivity)."
 
 # 8. Start containerd in background
 echo "Starting containerd..."

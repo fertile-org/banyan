@@ -55,10 +55,10 @@ Thumbs.db
 *.log
 logs/
 
-# Environment variables
-.env
-.env.local
-.env.*.local
+# Environment variables (root only — allow .env in subdirectories like test/e2e)
+/.env
+/.env.local
+/.env.*.local
 
 # Temporary files
 tmp/

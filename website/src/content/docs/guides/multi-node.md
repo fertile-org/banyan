@@ -149,7 +149,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=db
+      - DB_HOST=db.my-app.internal
       - DB_PORT=5432
     depends_on:
       - db

@@ -143,7 +143,7 @@ func setupTestServer(t *testing.T) (banyanpb.EngineServiceClient, *engineGRPCSer
 }
 
 func TestRegister(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t)
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -160,11 +160,6 @@ func TestRegister(t *testing.T) {
 		if resp.RegistryUrl != "localhost:5000" {
 			t.Errorf("expected registry_url 'localhost:5000', got %q", resp.RegistryUrl)
 		}
-
-		// Verify session token was stored
-		if tok := srv.GetSessionToken("worker-1"); tok != "token-abc" {
-			t.Errorf("expected session token 'token-abc', got %q", tok)
-		}
 	})
 
 	t.Run("missing agent name", func(t *testing.T) {
@@ -179,21 +174,10 @@ func TestRegister(t *testing.T) {
 		}
 	})
 
-	t.Run("missing session token", func(t *testing.T) {
-		_, err := client.Register(ctx, &banyanpb.RegisterRequest{
-			AgentName: "worker-2",
-		})
-		if err == nil {
-			t.Fatal("expected error for missing session_token")
-		}
-		if status.Code(err) != codes.InvalidArgument {
-			t.Errorf("expected InvalidArgument, got %v", status.Code(err))
-		}
-	})
 }
 
 func TestHeartbeat(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t)
+	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
 
 	ctx := context.Background()
@@ -205,16 +189,12 @@ func TestHeartbeat(t *testing.T) {
 		SessionToken: "old-token",
 	})
 
-	t.Run("updates session token", func(t *testing.T) {
+	t.Run("successful heartbeat", func(t *testing.T) {
 		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
-			AgentName:    "worker-1",
-			SessionToken: "new-token",
+			AgentName: "worker-1",
 		})
 		if err != nil {
 			t.Fatalf("Heartbeat failed: %v", err)
-		}
-		if tok := srv.GetSessionToken("worker-1"); tok != "new-token" {
-			t.Errorf("expected session token 'new-token', got %q", tok)
 		}
 	})
 
@@ -464,47 +444,51 @@ func TestDeploy(t *testing.T) {
 	})
 }
 
-func TestGetSessionToken(t *testing.T) {
-	store := storage.NewMemoryStore()
-	srv := &engineGRPCServer{store: store}
-
-	t.Run("not found returns empty", func(t *testing.T) {
-		tok := srv.GetSessionToken("nonexistent")
-		if tok != "" {
-			t.Errorf("expected empty token, got %q", tok)
-		}
-	})
-
-	t.Run("returns stored token", func(t *testing.T) {
-		srv.sessions.Store("agent-1", "token-xyz")
-		tok := srv.GetSessionToken("agent-1")
-		if tok != "token-xyz" {
-			t.Errorf("expected token-xyz, got %q", tok)
-		}
-	})
-}
-
 func TestHeartbeat_NewNode(t *testing.T) {
 	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
 	ctx := context.Background()
 
-	// Heartbeat for a node that doesn't exist yet — should create it
+	// Pre-register the agent (heartbeat requires prior registration per MED-009)
+	srv.store.Save(ctx, types.KeyNodes+"new-agent", &types.NodeRecord{
+		Name:   "new-agent",
+		Status: "pending",
+	})
+
+	// Heartbeat should update the registered node
 	_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName:    "new-agent",
 		SessionToken: "token-new",
 	})
 	if err != nil {
-		t.Fatalf("Heartbeat for new node failed: %v", err)
+		t.Fatalf("Heartbeat for registered node failed: %v", err)
 	}
 
-	// Verify node was created
+	// Verify node was updated to ready
 	var node types.NodeRecord
 	if getErr := srv.store.Get(ctx, types.KeyNodes+"new-agent", &node); getErr != nil {
-		t.Fatalf("expected node to be created: %v", getErr)
+		t.Fatalf("expected node to exist: %v", getErr)
 	}
 	if node.Status != "ready" {
 		t.Errorf("expected status ready, got %s", node.Status)
+	}
+}
+
+func TestHeartbeat_UnregisteredAgent(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Heartbeat for a node that hasn't registered — should be rejected
+	_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+		AgentName:    "unknown-agent",
+		SessionToken: "token-new",
+	})
+	if err == nil {
+		t.Fatal("expected error for unregistered agent")
+	}
+	if status.Code(err) != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", status.Code(err))
 	}
 }
 
@@ -1446,34 +1430,6 @@ func TestReportTaskResult_NilResult(t *testing.T) {
 	}
 }
 
-func TestHeartbeat_EmptySessionToken(t *testing.T) {
-	client, srv, cleanup := setupTestServer(t)
-	defer cleanup()
-
-	ctx := context.Background()
-
-	// Register an agent first
-	client.Register(ctx, &banyanpb.RegisterRequest{
-		AgentName:    "agent-keep-token",
-		ApiAddress:   "agent-keep-token:9090",
-		SessionToken: "original-token",
-	})
-
-	// Heartbeat with empty session token should not overwrite the existing token
-	_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
-		AgentName:    "agent-keep-token",
-		SessionToken: "",
-	})
-	if err != nil {
-		t.Fatalf("Heartbeat failed: %v", err)
-	}
-
-	// Session token should remain unchanged
-	if tok := srv.GetSessionToken("agent-keep-token"); tok != "original-token" {
-		t.Errorf("expected session token 'original-token', got %q", tok)
-	}
-}
-
 func TestDeploy_WithBuildAndDeploy(t *testing.T) {
 	client, srv, cleanup := setupTestServer(t)
 	defer cleanup()
@@ -1863,6 +1819,10 @@ func TestAgentHostIP(t *testing.T) {
 
 func TestHeartbeat_SaveError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
+	// Pre-register the agent so Get succeeds (MED-009 check passes)
+	memStore.Save(context.Background(), types.KeyNodes+"agent-1", &types.NodeRecord{
+		Name: "agent-1", Status: "ready",
+	})
 	store := &errorStore{MemoryStore: memStore, saveErr: true}
 	srv := &engineGRPCServer{store: store}
 
@@ -2251,7 +2211,7 @@ func TestStreamAgentLogs_StreamLogsError(t *testing.T) {
 	cleanup() // stop immediately — Stop() is synchronous
 
 	ctx := context.Background()
-	_, err := streamAgentLogs(ctx, agentAddr, "token", "container", false, 10)
+	_, err := streamAgentLogs(ctx, agentAddr, "container", false, 10)
 	if err == nil {
 		t.Fatal("expected error when agent server is stopped")
 	}
@@ -2817,14 +2777,12 @@ func TestGetLogs_SuccessProxyWithFollow(t *testing.T) {
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 	})
 
-	// Store a session token for the agent
 	lis := bufconn.Listen(bufSize)
 	grpcSrv := grpc.NewServer()
 	engineSrv := &engineGRPCServer{
 		store:       store,
 		registryURL: "localhost:5000",
 	}
-	engineSrv.sessions.Store("agent-follow", "session-token-123")
 	banyanpb.RegisterEngineServiceServer(grpcSrv, engineSrv)
 
 	go func() {
@@ -4267,6 +4225,53 @@ func TestCollectServiceBackends_EdgeCases(t *testing.T) {
 		backends := srv.collectServiceBackends(ctx)
 		if len(backends) != 0 {
 			t.Errorf("expected 0 backends (container exited), got %d", len(backends))
+		}
+	})
+}
+
+func TestRateLimiter(t *testing.T) {
+	t.Run("allows requests within limit", func(t *testing.T) {
+		rl := newRateLimiter(5, time.Minute)
+		for i := 0; i < 5; i++ {
+			if !rl.allow("10.0.0.1") {
+				t.Fatalf("request %d should be allowed", i+1)
+			}
+		}
+	})
+
+	t.Run("blocks requests over limit", func(t *testing.T) {
+		rl := newRateLimiter(3, time.Minute)
+		for i := 0; i < 3; i++ {
+			rl.allow("10.0.0.1")
+		}
+		if rl.allow("10.0.0.1") {
+			t.Error("4th request should be blocked")
+		}
+	})
+
+	t.Run("separate limits per IP", func(t *testing.T) {
+		rl := newRateLimiter(2, time.Minute)
+		rl.allow("10.0.0.1")
+		rl.allow("10.0.0.1")
+		// IP 1 is at limit, IP 2 should still be allowed
+		if !rl.allow("10.0.0.2") {
+			t.Error("different IP should be allowed")
+		}
+		if rl.allow("10.0.0.1") {
+			t.Error("first IP should be blocked")
+		}
+	})
+
+	t.Run("expired entries are cleaned up", func(t *testing.T) {
+		rl := newRateLimiter(2, 10*time.Millisecond)
+		rl.allow("10.0.0.1")
+		rl.allow("10.0.0.1")
+		if rl.allow("10.0.0.1") {
+			t.Error("should be blocked before window expires")
+		}
+		time.Sleep(15 * time.Millisecond)
+		if !rl.allow("10.0.0.1") {
+			t.Error("should be allowed after window expires")
 		}
 	})
 }

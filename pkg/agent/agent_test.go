@@ -102,19 +102,13 @@ func TestContainerTracker(t *testing.T) {
 }
 
 func TestNew(t *testing.T) {
-	t.Run("creates agent with session token", func(t *testing.T) {
+	t.Run("creates agent with options", func(t *testing.T) {
 		a, err := New(&Options{
 			AgentName:       "worker-1",
 			EngineEndpoint: "localhost:50051",
 		})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
-		}
-		if a.sessionToken == "" {
-			t.Error("expected non-empty session token")
-		}
-		if len(a.sessionToken) != 64 { // 32 bytes hex-encoded
-			t.Errorf("expected 64-char hex token, got %d chars", len(a.sessionToken))
 		}
 		if a.opts.AgentName != "worker-1" {
 			t.Errorf("expected agent name 'worker-1', got %q", a.opts.AgentName)
@@ -161,8 +155,16 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 		if len(args) != 7 {
 			t.Fatalf("expected 7 args, got %d: %v", len(args), args)
 		}
-		if args[4] != "-e" || args[5] != "FOO=bar" {
-			t.Errorf("expected -e FOO=bar, got %s %s", args[4], args[5])
+		// Check -e FOO=bar is present
+		envFound := false
+		for i, arg := range args {
+			if arg == "-e" && i+1 < len(args) && args[i+1] == "FOO=bar" {
+				envFound = true
+				break
+			}
+		}
+		if !envFound {
+			t.Errorf("expected -e FOO=bar in args: %v", args)
 		}
 		// Verify no -p flags
 		for i, arg := range args {
@@ -1497,7 +1499,6 @@ func TestReconnect_ReRegistersSuccessfully(t *testing.T) {
 	a := &Agent{
 		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
-		sessionToken: "test-token",
 	}
 
 	// reconnect should succeed immediately since server is healthy
@@ -1514,7 +1515,6 @@ func TestReconnect_RespectsContextCancellation(t *testing.T) {
 	a := &Agent{
 		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
-		sessionToken: "test-token",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -1553,7 +1553,6 @@ func TestReconnect_RetriesOnRegisterFailure(t *testing.T) {
 	a := &Agent{
 		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
-		sessionToken: "test-token",
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -1584,7 +1583,6 @@ func TestAgentHeartbeat_TriggersReconnectAfterConsecutiveFailures(t *testing.T) 
 	a := &Agent{
 		opts:         Options{AgentName: "worker-1", EngineEndpoint: "bufnet", APIPort: "50052"},
 		client:       client,
-		sessionToken: "test-token",
 		containers:   &containerTracker{},
 	}
 	a.connected.Store(true)
@@ -1592,7 +1590,7 @@ func TestAgentHeartbeat_TriggersReconnectAfterConsecutiveFailures(t *testing.T) 
 	// Simulate the heartbeat loop's failure detection logic directly
 	consecutiveFails := 0
 	for i := 0; i < maxConsecutiveHeartbeatFails; i++ {
-		_, _, err := a.client.Heartbeat(context.Background(), a.opts.AgentName, a.sessionToken, a.opts.Tags, metrics.SystemMetrics{})
+		_, _, err := a.client.Heartbeat(context.Background(), a.opts.AgentName, a.opts.Tags, metrics.SystemMetrics{})
 		if err != nil {
 			consecutiveFails++
 		}

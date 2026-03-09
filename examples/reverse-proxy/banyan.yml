@@ -15,7 +15,7 @@ services:
       - --from
       - example.com
       - --to
-      - api:8080
+      - api.my-app.internal:8080
     deploy:
       placement:
         node: gateway-*
@@ -30,7 +30,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=db
+      - DB_HOST=db.my-app.internal
       - DB_PORT=5432
     depends_on:
       - db

@@ -27,12 +27,13 @@ import (
 
 // Engine configuration flags.
 var (
-	engineVPCCIDR      string
-	engineDataDir      string
-	engineRegistryPort string
-	engineGRPCPort     string
-	engineStoreBackend string
-	engineStoreAddress string
+	engineVPCCIDR       string
+	engineDataDir       string
+	engineRegistryPort  string
+	engineGRPCPort      string
+	engineStoreBackend  string
+	engineStoreAddress  string
+	engineAllowInsecure bool
 )
 
 // configPath is the default path to the Banyan config file.
@@ -95,6 +96,7 @@ func init() {
 	startCmd.Flags().StringVar(&engineVPCCIDR, "vpc-cidr", "10.0.0.0/16", "VPC CIDR range")
 	startCmd.Flags().StringVar(&engineRegistryPort, "registry-port", "5000", "Embedded OCI registry port")
 	startCmd.Flags().StringVar(&engineGRPCPort, "grpc-port", "50051", "Engine gRPC port")
+	startCmd.Flags().BoolVar(&engineAllowInsecure, "allow-insecure", false, "Allow running without authentication (development only, NOT for production)")
 
 	// Status flags
 	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
@@ -125,7 +127,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(styleInfo.Render("\nCreating data directories..."))
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
 		} else {
 			fmt.Printf("  %s %s\n", styleOK.Render("[OK]"), dir)
@@ -181,7 +183,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	if whitelistedKeysDir == "" {
 		whitelistedKeysDir = types.DefaultWhitelistedKeysDir
 	}
-	if err := os.MkdirAll(whitelistedKeysDir, 0o755); err != nil {
+	if err := os.MkdirAll(whitelistedKeysDir, 0o700); err != nil {
 		fmt.Printf("  %s Failed to create whitelisted keys directory: %v\n", styleWarn.Render("[WARN]"), err)
 	} else {
 		fmt.Printf("  %s Whitelisted keys directory: %s\n", styleOK.Render("[OK]"), whitelistedKeysDir)
@@ -485,19 +487,21 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	metricsPort := cfg.Engine.MetricsPort
 
 	eng, err := engine.New(&engine.Options{
-		StoreBackend:    storeBackend,
-		StoreAddress:    storeAddress,
-		VPCCIDR:         engineVPCCIDR,
-		RegistryPort:    engineRegistryPort,
-		GRPCPort:        engineGRPCPort,
-		MetricsPort:     metricsPort,
-		DataDir:         engineDataDir,
-		EtcdUsername:    cfg.Engine.EtcdUsername,
-		EtcdPassword:    cfg.Engine.EtcdPassword,
-		EtcdCertFile:    cfg.Engine.EtcdCertFile,
-		EtcdKeyFile:     cfg.Engine.EtcdKeyFile,
-		EtcdCAFile:      cfg.Engine.EtcdCAFile,
-		WhitelistedKeys: whitelistedKeys,
+		StoreBackend:        storeBackend,
+		StoreAddress:        storeAddress,
+		VPCCIDR:             engineVPCCIDR,
+		RegistryPort:        engineRegistryPort,
+		GRPCPort:            engineGRPCPort,
+		MetricsPort:         metricsPort,
+		DataDir:             engineDataDir,
+		EtcdUsername:        cfg.Engine.EtcdUsername,
+		EtcdPassword:        cfg.Engine.EtcdPassword,
+		EtcdCertFile:        cfg.Engine.EtcdCertFile,
+		EtcdKeyFile:         cfg.Engine.EtcdKeyFile,
+		EtcdCAFile:          cfg.Engine.EtcdCAFile,
+		WhitelistedKeys:     whitelistedKeys,
+		AllowInsecure:       engineAllowInsecure,
+		ControlTunnelActive: cfg.Engine.WGPrivateKeyFile != "",
 	})
 	if err != nil {
 		return err
@@ -540,7 +544,7 @@ const managedEtcdListenURL = "http://127.0.0.1:2379"
 // startManagedEtcd starts an etcd process using the system-installed etcd binary.
 // It waits for etcd to become healthy before returning.
 func startManagedEtcd(dataDir string) (*exec.Cmd, error) {
-	if err := os.MkdirAll(dataDir, 0o755); err != nil {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
 		return nil, fmt.Errorf("create etcd data dir: %w", err)
 	}
 
@@ -719,7 +723,7 @@ func runEngineSystemSetup() error {
 	fmt.Print("  Creating /etc/banyan/ directories... ")
 	configDirs := []string{"/etc/banyan", "/etc/banyan/keys", "/etc/banyan/whitelisted-keys"}
 	for _, dir := range configDirs {
-		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+		if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 			fmt.Println("[FAIL]")
 			return fmt.Errorf("create %s: %w", dir, mkErr)
 		}

@@ -621,10 +621,10 @@ func TestCollectDeploymentTasks(t *testing.T) {
 
 // errorStateStore is a StateStore that can inject errors for specific operations.
 type errorStateStore struct {
+	listError    error
 	data         map[string]any
-	listError    error           // if set, List returns this error
-	listErrorFor string          // if set, List returns listError only for this prefix
-	getErrorKeys map[string]bool // keys for which Get returns an error
+	getErrorKeys map[string]bool
+	listErrorFor string
 }
 
 func (m *errorStateStore) Save(_ context.Context, key string, value any) error {

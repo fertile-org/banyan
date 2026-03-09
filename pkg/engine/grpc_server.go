@@ -21,31 +21,75 @@ import (
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
+// rateLimiter provides per-IP request rate limiting.
+type rateLimiter struct {
+	mu       sync.Mutex
+	requests map[string][]time.Time // IP → timestamps of recent requests
+	limit    int                    // max requests per window
+	window   time.Duration          // sliding window duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+// allow returns true if the request from the given IP is within rate limits.
+func (rl *rateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Trim old entries
+	timestamps := rl.requests[ip]
+	start := 0
+	for start < len(timestamps) && timestamps[start].Before(cutoff) {
+		start++
+	}
+	timestamps = timestamps[start:]
+
+	if len(timestamps) >= rl.limit {
+		rl.requests[ip] = timestamps
+		return false
+	}
+
+	rl.requests[ip] = append(timestamps, now)
+	return true
+}
+
 // engineGRPCServer implements the EngineService gRPC server.
 type engineGRPCServer struct {
 	banyanpb.UnimplementedEngineServiceServer
-	store           storage.StateStore
-	sessions        sync.Map // map[agentName]sessionToken
-	registryURL     string
-	whitelistedKeys map[string]string        // publicKey → agentName
-	allocator       *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
-	peerTracker     *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
-	vpcCIDR         string                   // VPC network CIDR (e.g., "10.0.0.0/16")
-	metricsRegistry *metrics.EngineMetricsRegistry
-	events          EventLog
-	startedAt       time.Time
-	log             *logging.Logger
+	store            storage.StateStore
+	registryURL      string
+	whitelistedKeys  map[string]string        // publicKey → agentName
+	tunnelIPToAgent  map[string]string        // tunnelIP → agentName (reverse map for identity)
+	allocator        *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
+	peerTracker      *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
+	vpcCIDR          string                   // VPC network CIDR (e.g., "10.0.0.0/16")
+	metricsRegistry  *metrics.EngineMetricsRegistry
+	events           EventLog
+	limiter          *rateLimiter
+	startedAt        time.Time
+	log              *logging.Logger
 }
 
 // grpcServerOptions configures the engine gRPC server.
 type grpcServerOptions struct {
 	Store           storage.StateStore
 	Port            string
+	BindAddr        string // address to bind to (default: control tunnel IP or 127.0.0.1)
 	RegistryURL     string
 	Allocator       *overlay.SubnetAllocator
 	PeerTracker     *overlay.PeerTracker
 	VPCCIDR         string
 	WhitelistedKeys map[string]string // publicKey → agentName
+	AllowInsecure   bool              // allow running without authentication
 	MetricsRegistry *metrics.EngineMetricsRegistry
 	Events          EventLog
 	StartedAt       time.Time
@@ -61,34 +105,55 @@ func (s *engineGRPCServer) logger() *logging.Logger {
 
 // startEngineGRPC starts the gRPC server for agent communication.
 func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCServer, error) {
-	lis, err := net.Listen("tcp", ":"+opts.Port)
+	bindAddr := opts.BindAddr
+	if bindAddr == "" {
+		bindAddr = "127.0.0.1"
+	}
+	listenAddr := bindAddr + ":" + opts.Port
+	lis, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return nil, fmt.Errorf("failed to listen on gRPC port %s: %w", opts.Port, err)
+		return nil, fmt.Errorf("failed to listen on gRPC %s: %w", listenAddr, err)
+	}
+
+	// Build reverse map: tunnel IP → agent name (for caller identity from WireGuard)
+	tunnelIPMap := make(map[string]string, len(opts.WhitelistedKeys))
+	for pubKey, agentName := range opts.WhitelistedKeys {
+		tunnelIP := types.TunnelIPFromPublicKey(pubKey)
+		tunnelIPMap[tunnelIP.String()] = agentName
 	}
 
 	engineSrv := &engineGRPCServer{
 		store:           opts.Store,
 		registryURL:     opts.RegistryURL,
 		whitelistedKeys: opts.WhitelistedKeys,
+		tunnelIPToAgent: tunnelIPMap,
 		allocator:       opts.Allocator,
 		peerTracker:     opts.PeerTracker,
 		vpcCIDR:         opts.VPCCIDR,
 		metricsRegistry: opts.MetricsRegistry,
 		events:          opts.Events,
+		limiter:         newRateLimiter(100, time.Minute), // 100 requests/min per IP
 		startedAt:       opts.StartedAt,
 		log:             logging.New("engine"),
 	}
 
-	var srv *grpc.Server
-	if len(opts.WhitelistedKeys) > 0 {
-		validator := &banyanrpc.PublicKeyValidator{AllowedKeys: opts.WhitelistedKeys}
-		srv = grpc.NewServer(
-			grpc.UnaryInterceptor(banyanrpc.NewPublicKeyAuthInterceptor(validator)),
-			grpc.StreamInterceptor(banyanrpc.NewPublicKeyAuthStreamInterceptor(validator)),
-		)
-	} else {
-		// No auth — warn at startup but allow (development/testing)
-		srv = grpc.NewServer()
+	// WireGuard provides authentication at the network layer.
+	// No application-layer auth interceptors needed — only peers with
+	// whitelisted WireGuard keys can reach the tunnel IP.
+	// Add audit logging, rate limiting, and panic recovery interceptors.
+	srv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(
+			engineSrv.panicRecoveryInterceptor(),
+			engineSrv.rateLimitInterceptor(),
+			engineSrv.auditLogInterceptor(),
+		),
+		grpc.ChainStreamInterceptor(
+			engineSrv.panicRecoveryStreamInterceptor(),
+			engineSrv.auditLogStreamInterceptor(),
+		),
+	)
+	if opts.AllowInsecure {
+		engineSrv.logger().Warn("gRPC server running WITHOUT authentication (--allow-insecure)")
 	}
 
 	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
@@ -107,24 +172,114 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 	return engineSrv, nil
 }
 
-// GetSessionToken returns the session token for a given agent name.
-func (s *engineGRPCServer) GetSessionToken(agentName string) string {
-	if v, ok := s.sessions.Load(agentName); ok {
-		return v.(string)
+// agentNameFromContext resolves the agent name from the gRPC peer's tunnel IP.
+func (s *engineGRPCServer) agentNameFromContext(ctx context.Context) string {
+	ip, err := banyanrpc.PeerIPFromContext(ctx)
+	if err != nil {
+		return ""
 	}
-	return ""
+	return s.tunnelIPToAgent[ip]
+}
+
+// panicRecoveryInterceptor returns a unary interceptor that recovers from panics in handlers.
+func (s *engineGRPCServer) panicRecoveryInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp interface{}, err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger().Error("Panic in gRPC handler",
+					"method", info.FullMethod, "panic", r)
+				err = status.Errorf(codes.Internal, "internal server error")
+			}
+		}()
+		return handler(ctx, req)
+	}
+}
+
+// panicRecoveryStreamInterceptor returns a stream interceptor that recovers from panics.
+func (s *engineGRPCServer) panicRecoveryStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				s.logger().Error("Panic in stream gRPC handler",
+					"method", info.FullMethod, "panic", r)
+				err = status.Errorf(codes.Internal, "internal server error")
+			}
+		}()
+		return handler(srv, ss)
+	}
+}
+
+// rateLimitInterceptor returns a unary interceptor that enforces per-IP rate limiting.
+func (s *engineGRPCServer) rateLimitInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		peerIP, _ := banyanrpc.PeerIPFromContext(ctx)
+		if peerIP != "" && !s.limiter.allow(peerIP) {
+			s.logger().Warn("Rate limited", "peer_ip", peerIP, "method", info.FullMethod)
+			return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded — try again later")
+		}
+		return handler(ctx, req)
+	}
+}
+
+// auditLogInterceptor returns a unary interceptor that logs all RPC calls with peer identity.
+func (s *engineGRPCServer) auditLogInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		peerIP, _ := banyanrpc.PeerIPFromContext(ctx)
+		agent := s.tunnelIPToAgent[peerIP]
+
+		// Log unknown peers at warn level (potential unauthorized access)
+		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" {
+			s.logger().Warn("RPC from unknown peer",
+				"method", info.FullMethod, "peer_ip", peerIP)
+		}
+
+		resp, err := handler(ctx, req)
+		if err != nil {
+			s.logger().Debug("RPC failed",
+				"method", info.FullMethod, "peer_ip", peerIP, "agent", agent, "error", err)
+		}
+		return resp, err
+	}
+}
+
+// auditLogStreamInterceptor returns a stream interceptor that logs stream RPC calls with peer identity.
+func (s *engineGRPCServer) auditLogStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		peerIP, _ := banyanrpc.PeerIPFromContext(ss.Context())
+		agent := s.tunnelIPToAgent[peerIP]
+
+		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" {
+			s.logger().Warn("Stream RPC from unknown peer",
+				"method", info.FullMethod, "peer_ip", peerIP)
+		}
+
+		err := handler(srv, ss)
+		if err != nil {
+			s.logger().Debug("Stream RPC failed",
+				"method", info.FullMethod, "peer_ip", peerIP, "agent", agent, "error", err)
+		}
+		return err
+	}
 }
 
 func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
 	if req.AgentName == "" {
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
-	if req.SessionToken == "" {
-		return nil, status.Error(codes.InvalidArgument, "session_token is required")
+	if err := types.ValidateName(req.AgentName); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid agent name: %v", err)
 	}
 
-	// Store session token
-	s.sessions.Store(req.AgentName, req.SessionToken)
+	// Enforce agent identity: claimed name must match WireGuard tunnel IP identity.
+	if len(s.tunnelIPToAgent) > 0 {
+		resolvedName := s.agentNameFromContext(ctx)
+		if resolvedName != "" && resolvedName != req.AgentName {
+			s.logger().Warn("Agent name mismatch",
+				"claimed", req.AgentName, "resolved", resolvedName)
+			return nil, status.Errorf(codes.PermissionDenied,
+				"agent name %q does not match tunnel identity %q", req.AgentName, resolvedName)
+		}
+	}
 
 	// Create node record in store
 	node := &types.NodeRecord{
@@ -219,19 +374,10 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
 
-	// Update session token (engine restart resilience)
-	if req.SessionToken != "" {
-		s.sessions.Store(req.AgentName, req.SessionToken)
-	}
-
-	// Update node record in store
+	// Update node record in store — reject heartbeats from unregistered agents
 	var node types.NodeRecord
 	if err := s.store.Get(ctx, types.KeyNodes+req.AgentName, &node); err != nil {
-		// Node not found, create it
-		node = types.NodeRecord{
-			Name:      req.AgentName,
-			CreatedAt: time.Now(),
-		}
+		return nil, status.Errorf(codes.NotFound, "agent %q is not registered — call Register first", req.AgentName)
 	}
 	node.LastSeen = time.Now()
 	node.Status = "ready"
@@ -313,6 +459,7 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 		pbTask := &banyanpb.TaskRecord{
 			Id:                task.ID,
 			DeploymentId:      task.DeploymentID,
+			DeploymentName:    task.DeploymentName,
 			ServiceName:       task.ServiceName,
 			ReplicaIndex:      int32(task.ReplicaIndex), //nolint:gosec // replica index is always small
 			AgentId:           task.AgentID,
@@ -482,13 +629,30 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 	if req.Manifest == nil || req.Manifest.Name == "" {
 		return nil, status.Error(codes.InvalidArgument, "manifest must have a name")
 	}
+	if err := types.ValidateName(req.Manifest.Name); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid app name: %v", err)
+	}
 	if len(req.Manifest.Services) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "manifest must define at least one service")
 	}
 
 	for name, svc := range req.Manifest.Services {
+		if err := types.ValidateName(name); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid service name %q: %v", name, err)
+		}
 		if svc.Image == "" && svc.Build == nil {
 			return nil, status.Errorf(codes.InvalidArgument, "service %q must have either 'image' or 'build'", name)
+		}
+		for _, port := range svc.Ports {
+			if err := types.ValidatePort(port); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "service %q: %v", name, err)
+			}
+		}
+		if svc.Deploy != nil && svc.Deploy.Replicas > types.MaxReplicas {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: replicas %d exceeds maximum (%d)", name, svc.Deploy.Replicas, types.MaxReplicas)
+		}
+		if err := types.ValidateRestartPolicy(svc.Restart); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: %v", name, err)
 		}
 	}
 
@@ -555,7 +719,7 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 	if len(req.Services) == 0 {
 		count, teardownErr := teardownDeployment(ctx, s.store, deployment, deploymentKey)
 		if teardownErr != nil {
-			return nil, status.Errorf(codes.Internal, "%v", teardownErr)
+			return nil, status.Errorf(codes.Internal, "failed to teardown deployment: %v", teardownErr)
 		}
 		s.emitEvent("deployment.stopped", fmt.Sprintf("Deployment %s stopped (%d tasks)", req.Name, count), "info")
 		return &banyanpb.DownRPCResponse{TaskCount: int32(count)}, nil //nolint:gosec // task count is always small
@@ -657,12 +821,12 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 		services := make(map[string]*banyanpb.ServiceInfo, len(record.Services))
 		for name, svc := range record.Services {
 			services[name] = &banyanpb.ServiceInfo{
-				Image:       svc.Image,
-				Replicas:    int32(svc.Replicas), //nolint:gosec // replica count is always small
-				Ports:       svc.Ports,
-				Environment: svc.Environment,
-				Command:     svc.Command,
-				DependsOn:   svc.DependsOn,
+				Image:     svc.Image,
+				Replicas:  int32(svc.Replicas), //nolint:gosec // replica count is always small
+				Ports:     svc.Ports,
+				Command:   svc.Command,
+				DependsOn: svc.DependsOn,
+				// Environment intentionally omitted — may contain secrets
 			}
 		}
 
@@ -680,7 +844,6 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 				Image:                  allTasks[i].Image,
 				ContainerName:          allTasks[i].ContainerName,
 				Ports:                  allTasks[i].Ports,
-				Environment:            allTasks[i].Environment,
 				Command:                allTasks[i].Command,
 				ContainerStatus:        allTasks[i].ContainerStatus,
 				HealthStatus:           allTasks[i].HealthStatus,
@@ -688,6 +851,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 				CreatedAtUnix:          allTasks[i].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[i].UpdatedAt.Unix(),
 				Error:                  allTasks[i].Error,
+				// Environment intentionally omitted — may contain secrets
 			})
 		}
 
@@ -729,9 +893,8 @@ func (s *engineGRPCServer) GetLogs(req *banyanpb.GetLogsRequest, stream grpc.Ser
 		return status.Errorf(codes.Unavailable, "container %s is on node %s but agent API is not available", req.ContainerName, task.AgentID)
 	}
 
-	// Stream logs from agent via gRPC
-	sessionToken := s.GetSessionToken(task.AgentID)
-	reader, err := streamAgentLogs(ctx, node.APIAddress, sessionToken, req.ContainerName, req.Follow, req.Tail)
+	// Stream logs from agent via gRPC (no auth needed — agent verifies engine IP)
+	reader, err := streamAgentLogs(ctx, node.APIAddress, req.ContainerName, req.Follow, req.Tail)
 	if err != nil {
 		return status.Errorf(codes.Unavailable, "failed to connect to agent: %v", err)
 	}
@@ -1165,8 +1328,8 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 // collectServiceBackends gathers all running container backends across all agents.
 // Used for cross-host load balancing via heartbeat responses.
 func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyanpb.ServiceBackend {
-	// Build set of running deployment IDs — only include backends from active deployments
-	runningDeployments := map[string]bool{}
+	// Build map of running deployment IDs → names (only include backends from active deployments)
+	runningDeployments := map[string]string{} // deploymentID → deploymentName
 	deployKeys, err := s.store.List(ctx, types.KeyDeployments)
 	if err != nil {
 		return nil
@@ -1177,7 +1340,7 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 			continue
 		}
 		if d.Status == types.StatusRunning {
-			runningDeployments[d.ID] = true
+			runningDeployments[d.ID] = d.Name
 		}
 	}
 
@@ -1204,19 +1367,21 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 				continue
 			}
 			// Only include running containers from active deployments
+			depName, isRunning := runningDeployments[task.DeploymentID]
 			if task.Type != types.TaskTypeCreateAndStart ||
 				task.Status != types.StatusCompleted ||
 				task.ContainerStatus != types.StatusRunning ||
 				task.ContainerIP == "" ||
-				!runningDeployments[task.DeploymentID] {
+				!isRunning {
 				continue
 			}
 			backends = append(backends, &banyanpb.ServiceBackend{
-				ContainerName: task.ContainerName,
-				ContainerIp:   task.ContainerIP,
-				Ports:         task.Ports,
-				AgentName:     task.AgentID,
-				ServiceName:   task.ServiceName,
+				ContainerName:  task.ContainerName,
+				ContainerIp:    task.ContainerIP,
+				Ports:          task.Ports,
+				AgentName:      task.AgentID,
+				ServiceName:    task.ServiceName,
+				DeploymentName: depName,
 			})
 		}
 	}
@@ -1418,12 +1583,12 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 		services := make(map[string]*banyanpb.ServiceInfo, len(record.Services))
 		for name, svc := range record.Services {
 			services[name] = &banyanpb.ServiceInfo{
-				Image:       svc.Image,
-				Replicas:    int32(svc.Replicas), //nolint:gosec // replica count is always small
-				Ports:       svc.Ports,
-				Environment: svc.Environment,
-				Command:     svc.Command,
-				DependsOn:   svc.DependsOn,
+				Image:     svc.Image,
+				Replicas:  int32(svc.Replicas), //nolint:gosec // replica count is always small
+				Ports:     svc.Ports,
+				Command:   svc.Command,
+				DependsOn: svc.DependsOn,
+				// Environment intentionally omitted — may contain secrets
 			}
 		}
 
@@ -1440,7 +1605,6 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				Image:                  allTasks[j].Image,
 				ContainerName:          allTasks[j].ContainerName,
 				Ports:                  allTasks[j].Ports,
-				Environment:            allTasks[j].Environment,
 				Command:                allTasks[j].Command,
 				ContainerStatus:        allTasks[j].ContainerStatus,
 				HealthStatus:           allTasks[j].HealthStatus,
@@ -1448,6 +1612,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				CreatedAtUnix:          allTasks[j].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[j].UpdatedAt.Unix(),
 				Error:                  allTasks[j].Error,
+				// Environment intentionally omitted — may contain secrets
 			})
 		}
 

@@ -8,7 +8,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/fertile-org/banyan/pkg/metrics"
-	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 )
 
@@ -18,11 +17,12 @@ type EngineClient struct {
 	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient dials the engine gRPC server with public key credentials.
-func NewEngineClient(engineAddr, publicKey string) (*EngineClient, error) {
+// NewEngineClient dials the engine gRPC server.
+// Authentication is handled by WireGuard at the network layer — only peers
+// with whitelisted keys can reach the engine's control tunnel IP.
+func NewEngineClient(engineAddr string) (*EngineClient, error) {
 	conn, err := grpc.NewClient(engineAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PublicKeyCredentials{PublicKey: publicKey}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
@@ -57,14 +57,22 @@ type ActiveContainer struct {
 	TaskID        string
 }
 
-func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken string, tags []string, wgPublicKey, hostIP string) (string, *VPCConfig, []ActiveContainer, error) {
+// RegisterRequest bundles the parameters for agent registration.
+type RegisterRequest struct {
+	Name        string
+	APIAddr     string
+	Tags        []string
+	WGPublicKey string
+	HostIP      string
+}
+
+func (c *EngineClient) Register(ctx context.Context, req RegisterRequest) (string, *VPCConfig, []ActiveContainer, error) {
 	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
-		AgentName:    name,
-		ApiAddress:   apiAddr,
-		SessionToken: sessionToken,
-		Tags:         tags,
-		WgPublicKey:  wgPublicKey,
-		HostIp:       hostIP,
+		AgentName:   req.Name,
+		ApiAddress:  req.APIAddr,
+		Tags:        req.Tags,
+		WgPublicKey: req.WGPublicKey,
+		HostIp:      req.HostIP,
 	})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("register failed: %w", err)
@@ -93,11 +101,10 @@ func (c *EngineClient) Register(ctx context.Context, name, apiAddr, sessionToken
 	return resp.RegistryUrl, vpcConfig, activeContainers, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string, tags []string, sysMetrics metrics.SystemMetrics) ([]VPCPeer, []ServiceBackend, error) {
+func (c *EngineClient) Heartbeat(ctx context.Context, name string, tags []string, sysMetrics metrics.SystemMetrics) ([]VPCPeer, []ServiceBackend, error) {
 	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
-		AgentName:    name,
-		SessionToken: sessionToken,
-		Tags:         tags,
+		AgentName: name,
+		Tags:      tags,
 		SystemMetrics: &banyanpb.SystemMetrics{
 			CpuUsageRatio:    sysMetrics.CPUUsageRatio,
 			MemoryUsedBytes:  sysMetrics.MemoryUsedBytes,
@@ -123,11 +130,12 @@ func (c *EngineClient) Heartbeat(ctx context.Context, name, sessionToken string,
 	var backends []ServiceBackend
 	for _, b := range resp.ServiceBackends {
 		backends = append(backends, ServiceBackend{
-			ContainerName: b.ContainerName,
-			ContainerIP:   b.ContainerIp,
-			Ports:         b.Ports,
-			AgentName:     b.AgentName,
-			ServiceName:   b.ServiceName,
+			ContainerName:  b.ContainerName,
+			ContainerIP:    b.ContainerIp,
+			Ports:          b.Ports,
+			AgentName:      b.AgentName,
+			ServiceName:    b.ServiceName,
+			DeploymentName: b.DeploymentName,
 		})
 	}
 

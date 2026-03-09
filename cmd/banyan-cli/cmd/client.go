@@ -9,7 +9,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
-	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
@@ -21,11 +20,11 @@ type EngineClient struct {
 	client banyanpb.EngineServiceClient
 }
 
-// NewEngineClient creates a new engine gRPC client with public key auth.
-func NewEngineClient(engineAddr, publicKey string) (*EngineClient, error) {
+// NewEngineClient creates a new engine gRPC client.
+// Authentication is handled by WireGuard at the network layer.
+func NewEngineClient(engineAddr string) (*EngineClient, error) {
 	conn, err := grpc.NewClient(engineAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithPerRPCCredentials(&banyanrpc.PublicKeyCredentials{PublicKey: publicKey}),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
@@ -67,7 +66,7 @@ func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
 		port = cfg.CLI.EnginePort
 	}
 	tunnelAddr := controlTunnelEngineIP + ":" + port
-	return NewEngineClient(tunnelAddr, cfg.CLI.WGPublicKey)
+	return NewEngineClient(tunnelAddr)
 }
 
 // Close closes the gRPC connection.

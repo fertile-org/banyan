@@ -40,7 +40,7 @@ cat > /etc/banyan/banyan.yaml <<EOF
 agent:
     engine_host: ${ENGINE_HOST}
     engine_port: "${ENGINE_GRPC_PORT}"
-    node_name: ${NODE_NAME}
+    agent_name: ${NODE_NAME}
     wg_private_key_file: /etc/banyan/keys/agent.key
     wg_public_key: ${AGENT_PUB_KEY}
     engine_wg_public_key: ${ENGINE_WG_PUB_KEY}
@@ -53,12 +53,9 @@ while [ ! -f /tmp/keys-exchange/engine-ready ]; do
     sleep 1
 done
 
-# 7. Wait for engine gRPC to be reachable from this container
-echo "Waiting for engine gRPC at ${ENGINE_HOST}:${ENGINE_GRPC_PORT}..."
-until nc -z "${ENGINE_HOST}" "${ENGINE_GRPC_PORT}" 2>/dev/null; do
-    sleep 1
-done
-echo "Engine is ready!"
+# 7. Engine is ready (gRPC binds to WireGuard tunnel IP, not Docker network)
+# The agent will connect through its WireGuard tunnel to 10.200.0.1
+echo "Engine is ready (tunnel-based connectivity)."
 
 # 8. Start containerd in background
 echo "Starting containerd..."
@@ -67,4 +64,4 @@ sleep 2
 
 # 9. Start agent
 echo "Starting agent..."
-exec banyan-agent start --node-name "$NODE_NAME"
+exec banyan-agent start --agent-name "$NODE_NAME"

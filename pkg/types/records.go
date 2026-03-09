@@ -81,6 +81,7 @@ type TaskRecord struct {
 	Result             *TaskResultRecord    `json:"result,omitempty"`
 	Healthcheck        *ManifestHealthcheck `json:"healthcheck,omitempty"`
 	DeploymentID       string               `json:"deployment_id"`
+	DeploymentName     string               `json:"deployment_name,omitempty"`
 	ContainerName      string               `json:"container_name"`
 	ContainerIP        string               `json:"container_ip,omitempty"`
 	Error              string               `json:"error,omitempty"`

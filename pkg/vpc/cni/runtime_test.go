@@ -6,9 +6,9 @@ import (
 	"os"
 	"testing"
 
+	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/vpc"
 	"github.com/fertile-org/banyan/pkg/vpc/cni"
-	"github.com/fertile-org/banyan/pkg/storage"
 )
 
 func TestCNIRuntime_AddToNetwork(t *testing.T) {

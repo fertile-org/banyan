@@ -17,9 +17,9 @@ This is the most critical step. Good documentation cannot fix bad UX. If you enc
 
 1. **Too many steps for a simple outcome** — If a user needs more than 3 commands to accomplish a basic task, flag it: *"This feature requires X steps to do Y. Consider: [suggested simplification]"*
 
-2. **Inconsistent CLI patterns** — If a command behaves differently from similar commands, or flags aren't consistent across binaries, flag it: *"banyan-agent uses --node-name but banyan-cli uses --name for a similar concept. This will confuse users."*
+2. **Inconsistent CLI patterns** — If a command behaves differently from similar commands, or flags aren't consistent across binaries, flag it: *"banyan-agent uses --agent-name but banyan-cli uses --name for a similar concept. This will confuse users."*
 
-3. **Missing sensible defaults** — If a user must provide configuration that could have an obvious default, flag it: *"Users must specify --node-name every time they start the agent, but the hostname is a perfectly good default. This adds friction."*
+3. **Missing sensible defaults** — If a user must provide configuration that could have an obvious default, flag it: *"Users must specify --agent-name every time they start the agent, but the hostname is a perfectly good default. This adds friction."*
 
 4. **Error messages that don't help** — If an error doesn't tell the user what to do next, flag it: *"When auth fails, the error says 'Unauthenticated' but doesn't suggest running 'banyan-cli auth'. Users will be stuck."*
 

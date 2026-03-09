@@ -20,18 +20,53 @@ type agentGRPCServer struct {
 	logProvider types.LogProvider
 }
 
-// startAgentGRPC starts the agent's gRPC server for log streaming.
-func startAgentGRPC(ctx context.Context, logProvider types.LogProvider, port, sessionToken string) {
-	log := logging.New("agent.grpc")
-	lis, err := net.Listen("tcp", ":"+port)
+// engineIPAuthInterceptor returns a unary interceptor that verifies
+// the caller is the engine by checking the peer IP matches the control tunnel engine IP.
+func engineIPAuthInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if err := verifyEngineIP(ctx); err != nil {
+			return nil, err
+		}
+		return handler(ctx, req)
+	}
+}
+
+// engineIPAuthStreamInterceptor returns a stream interceptor that verifies
+// the caller is the engine by checking the peer IP.
+func engineIPAuthStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		if err := verifyEngineIP(ss.Context()); err != nil {
+			return err
+		}
+		return handler(srv, ss)
+	}
+}
+
+func verifyEngineIP(ctx context.Context) error {
+	ip, err := banyanrpc.PeerIPFromContext(ctx)
 	if err != nil {
-		log.Error("Failed to listen", "port", port, "error", err)
+		return err
+	}
+	if ip != types.ControlTunnelEngineIP {
+		return status.Errorf(codes.PermissionDenied, "only the engine can connect to the agent gRPC server")
+	}
+	return nil
+}
+
+// startAgentGRPC starts the agent's gRPC server for log streaming.
+// It binds to the agent's tunnel IP and verifies callers are the engine.
+func startAgentGRPC(ctx context.Context, logProvider types.LogProvider, bindAddr, port string) {
+	log := logging.New("agent.grpc")
+	listenAddr := bindAddr + ":" + port
+	lis, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		log.Error("Failed to listen", "addr", listenAddr, "error", err)
 		return
 	}
 
 	srv := grpc.NewServer(
-		grpc.UnaryInterceptor(banyanrpc.SessionTokenAuthInterceptor(func() string { return sessionToken })),
-		grpc.StreamInterceptor(banyanrpc.SessionTokenAuthStreamInterceptor(func() string { return sessionToken })),
+		grpc.UnaryInterceptor(engineIPAuthInterceptor()),
+		grpc.StreamInterceptor(engineIPAuthStreamInterceptor()),
 	)
 
 	agentSrv := &agentGRPCServer{logProvider: logProvider}
@@ -48,7 +83,7 @@ func startAgentGRPC(ctx context.Context, logProvider types.LogProvider, port, se
 		srv.GracefulStop()
 	}()
 
-	log.Info("gRPC server listening", "port", port)
+	log.Info("gRPC server listening", "addr", listenAddr)
 }
 
 func (s *agentGRPCServer) StreamLogs(req *banyanpb.StreamLogsRequest, stream banyanpb.AgentService_StreamLogsServer) error {

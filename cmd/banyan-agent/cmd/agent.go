@@ -28,7 +28,7 @@ import (
 var (
 	agentEngineEndpoint string
 	agentDataDir        string
-	agentNodeName       string
+	agentNameFlag       string
 	agentPidFile        string
 	agentAPIPort        string
 	agentAPIAddress     string
@@ -86,7 +86,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&agentDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
 	startCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "localhost:50051", "Engine gRPC endpoint")
-	startCmd.Flags().StringVar(&agentNodeName, "node-name", "", "Node name (defaults to hostname)")
+	startCmd.Flags().StringVar(&agentNameFlag, "agent-name", "", "Agent name (defaults to hostname)")
 	startCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
 	startCmd.Flags().StringVar(&agentAPIPort, "api-port", "50052", "Agent gRPC server port")
 	startCmd.Flags().StringVar(&agentAPIAddress, "api-address", "", "Agent API address override (e.g. 192.168.1.10:50052)")
@@ -119,7 +119,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(styleInfo.Render("\nCreating data directories..."))
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
 		} else {
 			fmt.Printf("  %s %s\n", styleOK.Render("[OK]"), dir)
@@ -183,7 +183,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		existingCfg.Agent.WGPublicKey = ""
 		existingCfg.Agent.EngineHost = ""
 		existingCfg.Agent.EnginePort = ""
-		existingCfg.Agent.NodeName = ""
+		existingCfg.Agent.AgentName = ""
 		existingCfg.Agent.EngineWGPublicKey = ""
 		existingCfg.Agent.Tags = nil
 	}
@@ -220,7 +220,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	if enginePort == "" {
 		enginePort = "50051"
 	}
-	nodeName := existingCfg.Agent.NodeName
+	nodeName := existingCfg.Agent.AgentName
 	if nodeName == "" {
 		nodeName = hostname
 	}
@@ -237,8 +237,8 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 				Title("Engine gRPC port").
 				Value(&enginePort),
 			huh.NewInput().
-				Title("Node name").
-				Description("Unique name for this agent node").
+				Title("Agent name").
+				Description("Unique name for this agent").
 				Value(&nodeName),
 			huh.NewInput().
 				Title("Engine WireGuard public key").
@@ -264,7 +264,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 
 	existingCfg.Agent.EngineHost = engineHost
 	existingCfg.Agent.EnginePort = enginePort
-	existingCfg.Agent.NodeName = nodeName
+	existingCfg.Agent.AgentName = nodeName
 	existingCfg.Agent.EngineWGPublicKey = engineWGPubKey
 	existingCfg.Agent.Tags = parseTags(tagsInput)
 
@@ -277,7 +277,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 
 	// --- Display next steps for public key auth ---
 	if existingCfg.Agent.WGPublicKey != "" {
-		keyFileName := existingCfg.Agent.NodeName
+		keyFileName := existingCfg.Agent.AgentName
 		if keyFileName == "" {
 			keyFileName, _ = os.Hostname()
 		}
@@ -328,10 +328,10 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		log.Warn("Failed to load config", "error", cfgErr)
 	}
 
-	// Get node name: flag > config > hostname
-	nodeName := agentNodeName
+	// Get agent name: flag > config > hostname
+	nodeName := agentNameFlag
 	if nodeName == "" {
-		nodeName = cfg.Agent.NodeName
+		nodeName = cfg.Agent.AgentName
 	}
 	if nodeName == "" {
 		hostname, err := os.Hostname()
@@ -340,7 +340,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		}
 		nodeName = hostname
 	}
-	log.Info("Node name resolved", "name", nodeName)
+	log.Info("Agent name resolved", "name", nodeName)
 
 	// Resolve engine endpoint: explicit flag > config file > error
 	if !cmd.Flags().Changed("engine") {
@@ -371,7 +371,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 
 	// Write PID file
 	pidDir := filepath.Dir(agentPidFile)
-	if mkdirErr := os.MkdirAll(pidDir, 0o755); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(pidDir, 0o700); mkdirErr != nil {
 		return fmt.Errorf("failed to create PID directory: %w", mkdirErr)
 	}
 	if writeErr := os.WriteFile(agentPidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); writeErr != nil {
@@ -418,7 +418,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 
 	a, err := agent.New(&agent.Options{
-		NodeName:       nodeName,
+		AgentName:      nodeName,
 		EngineEndpoint: agentEngineEndpoint,
 		PublicKey:      publicKey,
 		WGPrivateKey:   agentWGPrivateKey,
@@ -502,7 +502,7 @@ func runAgentStatus(cmd *cobra.Command, args []string) error {
 	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		client, connErr := agent.NewEngineClient(agentEngineEndpoint, statusPubKey)
+		client, connErr := agent.NewEngineClient(agentEngineEndpoint)
 		if connErr != nil {
 			fmt.Printf("FAILED (%v)\n", connErr)
 		} else {
@@ -565,7 +565,7 @@ func runAgentSystemSetup() error {
 	fmt.Print("  Creating /etc/banyan/ directories... ")
 	configDirs := []string{"/etc/banyan", "/etc/banyan/keys"}
 	for _, dir := range configDirs {
-		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+		if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 			fmt.Println("[FAIL]")
 			return fmt.Errorf("create %s: %w", dir, mkErr)
 		}

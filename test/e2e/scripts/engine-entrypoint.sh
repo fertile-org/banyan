@@ -89,8 +89,9 @@ ENGINE_PID=$!
 trap "kill -TERM $ENGINE_PID 2>/dev/null; wait $ENGINE_PID 2>/dev/null; exit" SIGTERM SIGINT
 
 # 8. Wait for gRPC to be ready, then signal workers
+# gRPC binds to the WireGuard tunnel IP (10.200.0.1), not localhost
 echo "Waiting for engine gRPC to be ready..."
-until nc -z 127.0.0.1 50051 2>/dev/null; do
+until nc -z 10.200.0.1 50051 2>/dev/null; do
     sleep 1
 done
 touch /tmp/keys-exchange/engine-ready

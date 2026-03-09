@@ -1,6 +1,6 @@
 # Banyan E2E Test Application
 # Realistic multi-service app: API server with replicas + database
-# API connects to Redis via DNS name "db.internal" (resolved by agent-local DNS server)
+# API connects to Redis via DNS name "db.e2e-test-app.internal" (resolved by agent-local DNS server)
 
 name: e2e-test-app
 

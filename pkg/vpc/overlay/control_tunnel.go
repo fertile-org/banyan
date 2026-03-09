@@ -3,6 +3,8 @@ package overlay
 import (
 	"fmt"
 	"net"
+
+	"github.com/fertile-org/banyan/pkg/logging"
 )
 
 const (
@@ -15,8 +17,12 @@ const (
 // If the interface already exists, it is removed and recreated.
 func SetupControlTunnel(wgOps WireGuardOps, linkOps LinkOperations, iface, privateKey string, myIP net.IP, listenPort int) error {
 	// Clean up any existing interface from a previous init
-	if exists, _ := linkOps.LinkExists(iface); exists {
-		_ = linkOps.DeleteLink(iface)
+	if exists, existsErr := linkOps.LinkExists(iface); existsErr != nil {
+		logging.New("overlay").Warn("Failed to check interface existence", "iface", iface, "error", existsErr)
+	} else if exists {
+		if delErr := linkOps.DeleteLink(iface); delErr != nil {
+			logging.New("overlay").Warn("Failed to delete stale interface", "iface", iface, "error", delErr)
+		}
 	}
 
 	// Create WireGuard interface

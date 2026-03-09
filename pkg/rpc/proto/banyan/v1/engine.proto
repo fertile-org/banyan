@@ -47,10 +47,10 @@ message RegisterRequest {
 
 message RegisterResponse {
   string registry_url = 1;
-  repeated string store_endpoints = 2;  // DEPRECATED: was etcd endpoints for Flannel
+  repeated string store_endpoints = 2 [deprecated = true];  // was etcd endpoints for Flannel
   string vpc_cidr = 3;                  // VPC network CIDR (e.g., "10.0.0.0/16")
   string allocated_subnet = 4;          // /24 subnet for this agent (e.g., "10.0.45.0/24")
-  string overlay_type = 5;             // DEPRECATED: WireGuard is now the only overlay
+  string overlay_type = 5 [deprecated = true];  // WireGuard is now the only overlay
   repeated ActiveContainer active_containers = 6;  // containers this agent should already be running
 }
 
@@ -80,7 +80,7 @@ message HeartbeatResponse {
 message VPCPeer {
   string subnet = 1;                    // peer's allocated subnet
   string host_ip = 2;                   // peer's reachable IP
-  string vtep_mac = 3;                  // DEPRECATED: VXLAN removed, WireGuard only
+  string vtep_mac = 3 [deprecated = true];  // VXLAN removed, WireGuard only
   string public_key = 4;               // WireGuard public key
 }
 
@@ -125,6 +125,7 @@ message ServiceBackend {
   repeated string ports = 3;
   string agent_name = 4;
   string service_name = 5;
+  string deployment_name = 6;
 }
 
 message ReportContainerHealthResponse {}
@@ -148,6 +149,7 @@ message TaskRecord {
   string cpu_limit = 16;
   string memory_reservation = 17;
   ManifestHealthcheck healthcheck = 18;
+  string deployment_name = 19;
 }
 
 // --- CLI messages ---

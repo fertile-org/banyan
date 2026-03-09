@@ -87,10 +87,16 @@ func validateManifest(manifest types.BanyanManifest) error {
 	if manifest.Name == "" {
 		return fmt.Errorf("manifest must have a name")
 	}
+	if err := types.ValidateName(manifest.Name); err != nil {
+		return fmt.Errorf("invalid app name: %w", err)
+	}
 	if len(manifest.Services) == 0 {
 		return fmt.Errorf("manifest must define at least one service")
 	}
 	for name, svc := range manifest.Services { //nolint:gocritic // map iteration
+		if err := types.ValidateName(name); err != nil {
+			return fmt.Errorf("invalid service name %q: %w", name, err)
+		}
 		if svc.Image == "" && svc.Build == nil {
 			return fmt.Errorf("service %q must have either 'image' or 'build'", name)
 		}

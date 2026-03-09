@@ -11,7 +11,7 @@ import (
 // SubnetAllocator assigns /24 subnets to agents from a VPC CIDR.
 type SubnetAllocator struct {
 	vpcCIDR   *net.IPNet
-	subnetLen int // prefix length for allocated subnets (default 24)
+	subnetLen int                   // prefix length for allocated subnets (default 24)
 	allocated map[string]*net.IPNet // agentName → subnet
 	used      map[string]bool       // subnet string → true (for fast conflict check)
 	mu        sync.Mutex

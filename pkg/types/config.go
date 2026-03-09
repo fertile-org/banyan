@@ -109,7 +109,7 @@ func LoadConfig(path string) (BanyanConfig, error) {
 // SaveConfig writes the Banyan config to disk with 0600 permissions.
 func SaveConfig(path string, cfg *BanyanConfig) error {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("failed to create config directory: %w", err)
 	}
 

@@ -79,7 +79,7 @@ Built-in overlay networking and cross-host load balancing without external depen
 - Peer discovery via heartbeat RPC (15s convergence)
 - iptables DNAT proxy on each agent for port forwarding to container backends
 - Cross-host load balancing: every agent aware of all service backends cluster-wide, probability-based DNAT rules distribute traffic across all replicas regardless of which agent they run on
-- Service DNS: agent-local DNS server on bridge gateway IP resolves `<service>.internal` to container IPs, with `--dns-search internal` enabling short names (e.g., `ping db` from any container)
+- Service DNS: agent-local DNS server on bridge gateway IP resolves `<service>.<app-name>.internal` to container IPs (e.g., `db.my-app.internal`). Short names (e.g., `db`) also work when there's no conflict across deployments.
 
 ---
 

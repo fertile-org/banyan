@@ -1,6 +1,7 @@
 # [MED-002] Managed etcd Insecure Defaults
 
 **Severity**: Medium
+**Status**: FIXED
 **Responsibility**: Default Issue
 **Component**: Engine — etcd
 **File(s)**:
@@ -26,3 +27,7 @@ Mitigating factor: managed etcd binds to `127.0.0.1` only (good), and config fil
 1. Create data directories with `0o700`
 2. Default the init wizard's etcd security to "TLS" (not "None")
 3. Document that managed etcd is single-user only
+
+## Fix
+
+Changed the etcd data directory permissions from `0755` to `0700` in `cmd/banyan-engine/cmd/engine.go`. This prevents other local users from reading raw etcd data files containing deployment records.

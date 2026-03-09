@@ -14,9 +14,9 @@ Serena MCP server used for codebase symbol analysis. Direct code reading for all
 
 | Status | Count | Details |
 |--------|-------|---------|
-| **FIXED** | 13 | CRIT-001: WireGuard enforced (encrypted tunnel). CRIT-002: Registry bound to tunnel IP (WireGuard-protected). CRIT-003: Auth enforced. HIGH-001: Custom pubkey auth removed (WireGuard). HIGH-002: Agent identity via tunnel IP. HIGH-003: Session tokens removed. HIGH-005: Registry traffic encrypted by WireGuard. HIGH-007: Deployment network isolation via iptables (cross-agent). HIGH-008: Agent name uniqueness via tunnel IP identity. HIGH-009: Audit logging interceptors. HIGH-011: Name validation (DNS-safe, underscores allowed). MED-001: All services bind to tunnel IP/localhost. MED-005: Panic recovery interceptors. |
-| **WONTFIX** | 2 | HIGH-006: Env vars plaintext by design (secrets management in Milestone 10). MED-006: Error details kept for debuggability (WireGuard is the security boundary). |
-| **Open** | 12 | Remaining findings |
+| **FIXED** | 23 | CRIT-001: WireGuard enforced (encrypted tunnel). CRIT-002: Registry bound to tunnel IP (WireGuard-protected). CRIT-003: Auth enforced. HIGH-001: Custom pubkey auth removed (WireGuard). HIGH-002: Agent identity via tunnel IP. HIGH-003: Session tokens removed. HIGH-004: Per-IP rate limiting (100 req/min). HIGH-005: Registry traffic encrypted by WireGuard. HIGH-007: Deployment network isolation via iptables (cross-agent). HIGH-008: Agent name uniqueness via tunnel IP identity. HIGH-009: Audit logging interceptors. HIGH-010: SHA-256 checksum verification in install script. HIGH-011: Name validation (DNS-safe, underscores allowed). MED-001: All services bind to tunnel IP/localhost. MED-002: etcd data dir permissions 0700. MED-003: Port/restart/service manifest validation. MED-005: Panic recovery interceptors. MED-007: Deployment-scoped DNS namespacing. MED-008: Env vars removed from status/dashboard RPCs. MED-009: Heartbeat rejects unregistered agents. LOW-001: Config/data dirs 0700. LOW-002: Pubkey auth removed (WireGuard handles identity). LOW-003: Install script security note + checksum verification. |
+| **WONTFIX** | 4 | HIGH-006: Env vars plaintext by design (secrets management in Milestone 10). MED-004: Container hardening — containerd applies default seccomp/caps; forcing --cap-drop ALL breaks standard images. MED-006: Error details kept for debuggability (WireGuard is the security boundary). LOW-004: Defense-in-depth (read-only rootfs, PID ns) — opt-in via manifest, not platform default. |
+| **Open** | 0 | — |
 | **Total** | **27** | |
 
 ## Findings Summary
@@ -138,4 +138,4 @@ These security controls are correctly implemented:
 
 **Audit Date**: 2026-03-07
 **Branch**: `feat/code-audit`
-**Status**: Complete — 27 findings: 3 Critical, 11 High, 9 Medium, 4 Low (13 FIXED, 2 WONTFIX, 12 Open)
+**Status**: Complete — 27 findings: 3 Critical, 11 High, 9 Medium, 4 Low (23 FIXED, 4 WONTFIX, 0 Open)

@@ -1,6 +1,7 @@
 # [LOW-004] No Read-Only Root Filesystem or PID Namespace Enforcement
 
 **Severity**: Low
+**Status**: WONTFIX
 **Responsibility**: Mitigation Gap
 **Component**: Agent — Container Execution
 **File(s)**:
@@ -19,3 +20,7 @@ Mitigating factor: These are defense-in-depth measures. The current defaults are
 ## Recommendation
 
 Document these as optional hardening steps. Consider adding manifest fields for `read_only: true` and verifying PID namespace isolation is maintained in future changes.
+
+## Fix
+
+WONTFIX — These are defense-in-depth measures. Containerd already applies default seccomp profiles and isolated PID namespaces. Forcing `--cap-drop ALL` breaks standard images (redis, node, postgres). Read-only root filesystem (`--read-only`) is application-specific and would break most containers. These should be opt-in via manifest fields, not platform defaults.

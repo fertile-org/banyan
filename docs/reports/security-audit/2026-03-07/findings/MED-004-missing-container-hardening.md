@@ -1,6 +1,7 @@
 # [MED-004] Missing Container Hardening Defaults
 
 **Severity**: Medium
+**Status**: WONTFIX
 **Responsibility**: Default Issue
 **Component**: Agent — Container Execution
 **File(s)**:
@@ -26,3 +27,7 @@ Mitigating factors: containerd applies a default seccomp profile, and the manife
 2. Add a default memory limit (e.g., 512MB) when none is specified
 3. Add an explicit `--security-opt seccomp=default` to enforce the profile
 4. If `privileged` or `cap_add` manifest fields are added in the future, validate them against an allowlist
+
+## Fix
+
+WONTFIX — Containerd already applies a restricted default capability set and default seccomp profile to all containers. Adding `--cap-drop ALL` breaks standard images (redis, node, postgres) that need capabilities like CHOWN, SETUID, SETGID, NET_RAW. Forcing a default memory limit causes cgroup errors in nested container environments. Resource limits and capability dropping should be opt-in via the manifest's `deploy.resources` field, not forced by the platform.

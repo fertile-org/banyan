@@ -155,8 +155,16 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 		if len(args) != 7 {
 			t.Fatalf("expected 7 args, got %d: %v", len(args), args)
 		}
-		if args[4] != "-e" || args[5] != "FOO=bar" {
-			t.Errorf("expected -e FOO=bar, got %s %s", args[4], args[5])
+		// Check -e FOO=bar is present
+		envFound := false
+		for i, arg := range args {
+			if arg == "-e" && i+1 < len(args) && args[i+1] == "FOO=bar" {
+				envFound = true
+				break
+			}
+		}
+		if !envFound {
+			t.Errorf("expected -e FOO=bar in args: %v", args)
 		}
 		// Verify no -p flags
 		for i, arg := range args {

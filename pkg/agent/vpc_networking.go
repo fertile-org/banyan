@@ -524,23 +524,54 @@ func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error
 }
 
 // reconcileDNS updates the DNS manager with the current set of service backends.
-// It removes stale hostnames and rebuilds all desired entries for clean state.
+// DNS entries are scoped by deployment: each service registers as
+// <service>.<deployment>.internal (fully qualified). The short name
+// <service>.internal only resolves within the same deployment to prevent
+// cross-deployment service name collisions.
 func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 	if a.dnsManager == nil {
 		return
 	}
 
 	// Build desired: hostname → set of IPs
+	// Register both deployment-scoped and short names
 	desired := map[string]map[string]bool{}
 	for _, b := range backends {
 		if b.ServiceName == "" || b.ContainerIP == "" {
 			continue
 		}
-		hostname := b.ServiceName + ".internal"
-		if desired[hostname] == nil {
-			desired[hostname] = map[string]bool{}
+
+		// Always register the deployment-scoped name: <service>.<deployment>.internal
+		if b.DeploymentName != "" {
+			fqdn := b.ServiceName + "." + b.DeploymentName + ".internal"
+			if desired[fqdn] == nil {
+				desired[fqdn] = map[string]bool{}
+			}
+			desired[fqdn][b.ContainerIP] = true
 		}
-		desired[hostname][b.ContainerIP] = true
+
+		// Register the short name <service>.internal only if there's no conflict
+		// (i.e., all backends with this service name belong to the same deployment)
+		shortName := b.ServiceName + ".internal"
+		if desired[shortName] == nil {
+			desired[shortName] = map[string]bool{}
+		}
+		desired[shortName][b.ContainerIP] = true
+	}
+
+	// Check for short name conflicts: if multiple deployments have the same
+	// service name, remove the short name entry (only FQDN should resolve)
+	shortNameDeployment := map[string]string{} // serviceName → deploymentName
+	for _, b := range backends {
+		if b.ServiceName == "" || b.DeploymentName == "" {
+			continue
+		}
+		if prev, ok := shortNameDeployment[b.ServiceName]; ok && prev != b.DeploymentName {
+			// Conflict: multiple deployments use the same service name
+			delete(desired, b.ServiceName+".internal")
+		} else {
+			shortNameDeployment[b.ServiceName] = b.DeploymentName
+		}
 	}
 
 	// Remove stale hostnames (in registeredDNS but not in desired)

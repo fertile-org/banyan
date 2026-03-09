@@ -1,6 +1,7 @@
 # [HIGH-010] Install Script Has No Checksum Verification
 
 **Severity**: High
+**Status**: FIXED
 **Responsibility**: Mitigation Gap
 **Component**: Install Script
 **File(s)**:
@@ -28,3 +29,7 @@ While HTTPS is used (positive) and versions are pinned (positive), there is no v
    echo "$expected_sha256  $tmp" | sha256sum --check --strict
    ```
 3. For dependencies, use the official checksum files published by each project (etcd, nerdctl, etc.)
+
+## Fix
+
+Added a `verify_checksum()` function in `install.sh` that downloads SHA-256 checksum files from the release and verifies downloaded binaries against them before installation. All binary downloads now go through checksum verification.

@@ -1,6 +1,7 @@
 # [LOW-001] Config/Data Directories World-Readable (0755)
 
 **Severity**: Low
+**Status**: FIXED
 **Responsibility**: Default Issue
 **Component**: Config, Engine
 **File(s)**:
@@ -17,3 +18,7 @@ Mitigating factor: file contents are not readable (0600). The risk is limited to
 ## Recommendation
 
 Use `0o700` for directories that contain sensitive files.
+
+## Fix
+
+Changed all directory creation calls from `0755` to `0700` in `cmd/banyan-engine/cmd/engine.go`, `cmd/banyan-agent/cmd/agent.go`, and `pkg/types/config.go`. Config and data directories are now only accessible by the owning user.

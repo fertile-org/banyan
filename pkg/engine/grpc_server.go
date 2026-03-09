@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -20,6 +21,47 @@ import (
 	"github.com/fertile-org/banyan/pkg/vpc/overlay"
 )
 
+// rateLimiter provides per-IP request rate limiting.
+type rateLimiter struct {
+	mu       sync.Mutex
+	requests map[string][]time.Time // IP → timestamps of recent requests
+	limit    int                    // max requests per window
+	window   time.Duration          // sliding window duration
+}
+
+func newRateLimiter(limit int, window time.Duration) *rateLimiter {
+	return &rateLimiter{
+		requests: make(map[string][]time.Time),
+		limit:    limit,
+		window:   window,
+	}
+}
+
+// allow returns true if the request from the given IP is within rate limits.
+func (rl *rateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+
+	// Trim old entries
+	timestamps := rl.requests[ip]
+	start := 0
+	for start < len(timestamps) && timestamps[start].Before(cutoff) {
+		start++
+	}
+	timestamps = timestamps[start:]
+
+	if len(timestamps) >= rl.limit {
+		rl.requests[ip] = timestamps
+		return false
+	}
+
+	rl.requests[ip] = append(timestamps, now)
+	return true
+}
+
 // engineGRPCServer implements the EngineService gRPC server.
 type engineGRPCServer struct {
 	banyanpb.UnimplementedEngineServiceServer
@@ -32,6 +74,7 @@ type engineGRPCServer struct {
 	vpcCIDR          string                   // VPC network CIDR (e.g., "10.0.0.0/16")
 	metricsRegistry  *metrics.EngineMetricsRegistry
 	events           EventLog
+	limiter          *rateLimiter
 	startedAt        time.Time
 	log              *logging.Logger
 }
@@ -89,6 +132,7 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		vpcCIDR:         opts.VPCCIDR,
 		metricsRegistry: opts.MetricsRegistry,
 		events:          opts.Events,
+		limiter:         newRateLimiter(100, time.Minute), // 100 requests/min per IP
 		startedAt:       opts.StartedAt,
 		log:             logging.New("engine"),
 	}
@@ -96,10 +140,11 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 	// WireGuard provides authentication at the network layer.
 	// No application-layer auth interceptors needed — only peers with
 	// whitelisted WireGuard keys can reach the tunnel IP.
-	// Add audit logging interceptor for security visibility.
+	// Add audit logging, rate limiting, and panic recovery interceptors.
 	srv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(
 			engineSrv.panicRecoveryInterceptor(),
+			engineSrv.rateLimitInterceptor(),
 			engineSrv.auditLogInterceptor(),
 		),
 		grpc.ChainStreamInterceptor(
@@ -161,6 +206,18 @@ func (s *engineGRPCServer) panicRecoveryStreamInterceptor() grpc.StreamServerInt
 			}
 		}()
 		return handler(srv, ss)
+	}
+}
+
+// rateLimitInterceptor returns a unary interceptor that enforces per-IP rate limiting.
+func (s *engineGRPCServer) rateLimitInterceptor() grpc.UnaryServerInterceptor {
+	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
+		peerIP, _ := banyanrpc.PeerIPFromContext(ctx)
+		if peerIP != "" && !s.limiter.allow(peerIP) {
+			s.logger().Warn("Rate limited", "peer_ip", peerIP, "method", info.FullMethod)
+			return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded — try again later")
+		}
+		return handler(ctx, req)
 	}
 }
 
@@ -317,14 +374,10 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
 
-	// Update node record in store
+	// Update node record in store — reject heartbeats from unregistered agents
 	var node types.NodeRecord
 	if err := s.store.Get(ctx, types.KeyNodes+req.AgentName, &node); err != nil {
-		// Node not found, create it
-		node = types.NodeRecord{
-			Name:      req.AgentName,
-			CreatedAt: time.Now(),
-		}
+		return nil, status.Errorf(codes.NotFound, "agent %q is not registered — call Register first", req.AgentName)
 	}
 	node.LastSeen = time.Now()
 	node.Status = "ready"
@@ -590,6 +643,17 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 		if svc.Image == "" && svc.Build == nil {
 			return nil, status.Errorf(codes.InvalidArgument, "service %q must have either 'image' or 'build'", name)
 		}
+		for _, port := range svc.Ports {
+			if err := types.ValidatePort(port); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "service %q: %v", name, err)
+			}
+		}
+		if svc.Deploy != nil && svc.Deploy.Replicas > types.MaxReplicas {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: replicas %d exceeds maximum (%d)", name, svc.Deploy.Replicas, types.MaxReplicas)
+		}
+		if err := types.ValidateRestartPolicy(svc.Restart); err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: %v", name, err)
+		}
 	}
 
 	// Convert proto manifest to types
@@ -757,12 +821,12 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 		services := make(map[string]*banyanpb.ServiceInfo, len(record.Services))
 		for name, svc := range record.Services {
 			services[name] = &banyanpb.ServiceInfo{
-				Image:       svc.Image,
-				Replicas:    int32(svc.Replicas), //nolint:gosec // replica count is always small
-				Ports:       svc.Ports,
-				Environment: svc.Environment,
-				Command:     svc.Command,
-				DependsOn:   svc.DependsOn,
+				Image:     svc.Image,
+				Replicas:  int32(svc.Replicas), //nolint:gosec // replica count is always small
+				Ports:     svc.Ports,
+				Command:   svc.Command,
+				DependsOn: svc.DependsOn,
+				// Environment intentionally omitted — may contain secrets
 			}
 		}
 
@@ -780,7 +844,6 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 				Image:                  allTasks[i].Image,
 				ContainerName:          allTasks[i].ContainerName,
 				Ports:                  allTasks[i].Ports,
-				Environment:            allTasks[i].Environment,
 				Command:                allTasks[i].Command,
 				ContainerStatus:        allTasks[i].ContainerStatus,
 				HealthStatus:           allTasks[i].HealthStatus,
@@ -788,6 +851,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 				CreatedAtUnix:          allTasks[i].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[i].UpdatedAt.Unix(),
 				Error:                  allTasks[i].Error,
+				// Environment intentionally omitted — may contain secrets
 			})
 		}
 
@@ -1519,12 +1583,12 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 		services := make(map[string]*banyanpb.ServiceInfo, len(record.Services))
 		for name, svc := range record.Services {
 			services[name] = &banyanpb.ServiceInfo{
-				Image:       svc.Image,
-				Replicas:    int32(svc.Replicas), //nolint:gosec // replica count is always small
-				Ports:       svc.Ports,
-				Environment: svc.Environment,
-				Command:     svc.Command,
-				DependsOn:   svc.DependsOn,
+				Image:     svc.Image,
+				Replicas:  int32(svc.Replicas), //nolint:gosec // replica count is always small
+				Ports:     svc.Ports,
+				Command:   svc.Command,
+				DependsOn: svc.DependsOn,
+				// Environment intentionally omitted — may contain secrets
 			}
 		}
 
@@ -1541,7 +1605,6 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				Image:                  allTasks[j].Image,
 				ContainerName:          allTasks[j].ContainerName,
 				Ports:                  allTasks[j].Ports,
-				Environment:            allTasks[j].Environment,
 				Command:                allTasks[j].Command,
 				ContainerStatus:        allTasks[j].ContainerStatus,
 				HealthStatus:           allTasks[j].HealthStatus,
@@ -1549,6 +1612,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				CreatedAtUnix:          allTasks[j].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[j].UpdatedAt.Unix(),
 				Error:                  allTasks[j].Error,
+				// Environment intentionally omitted — may contain secrets
 			})
 		}
 

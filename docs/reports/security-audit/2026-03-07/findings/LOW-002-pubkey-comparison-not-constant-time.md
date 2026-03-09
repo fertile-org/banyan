@@ -1,6 +1,7 @@
 # [LOW-002] Public Key Validation Not Constant-Time
 
 **Severity**: Low
+**Status**: FIXED
 **Responsibility**: Mitigation Gap
 **Component**: Authentication
 **File(s)**:
@@ -17,3 +18,7 @@ Mitigating factor: public keys are public by nature (they are shared openly in W
 ## Recommendation
 
 For consistency, iterate over allowed keys using `subtle.ConstantTimeCompare`. Low priority given that public keys are not secrets.
+
+## Fix
+
+The custom public key authentication mechanism has been removed entirely. WireGuard now handles identity verification at the tunnel layer, so there is no public key comparison code remaining in the application.

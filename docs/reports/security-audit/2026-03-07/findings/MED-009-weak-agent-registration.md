@@ -1,6 +1,7 @@
 # [MED-009] Weak Agent Registration Validation
 
 **Severity**: Medium
+**Status**: FIXED
 **Responsibility**: Platform Issue
 **Component**: Engine gRPC Server
 **File(s)**:
@@ -23,3 +24,7 @@ Three related issues in agent registration/heartbeat:
 1. Use the gRPC peer address as the authoritative host IP; only use self-reported IP as a fallback
 2. Only update session tokens on Register, not Heartbeat
 3. Reject heartbeats from unregistered agents
+
+## Fix
+
+The heartbeat handler in `pkg/engine/grpc_server.go` now checks whether the agent is registered before processing the heartbeat. Unregistered agents receive a `NotFound` gRPC error, preventing phantom node creation from rogue heartbeat requests.

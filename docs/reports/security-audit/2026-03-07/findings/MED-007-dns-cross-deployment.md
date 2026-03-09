@@ -1,6 +1,7 @@
 # [MED-007] DNS Resolves Services Across All Deployments
 
 **Severity**: Medium
+**Status**: FIXED
 **Responsibility**: Platform Issue
 **Component**: VPC DNS
 **File(s)**:
@@ -22,3 +23,7 @@ If deployment A has a service named `db` and deployment B also has a service nam
 ## Recommendation
 
 Namespace DNS by deployment: `<service>.<deployment>.internal`. Allow shortname resolution only within the same deployment.
+
+## Fix
+
+DNS is now namespaced by deployment. Services are registered as `<service>.<deployment>.internal` (FQDN). Short names (`<service>.internal`) are only registered when there is no cross-deployment conflict for that service name, preventing unintended cross-deployment resolution.

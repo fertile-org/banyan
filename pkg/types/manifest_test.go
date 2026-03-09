@@ -40,6 +40,122 @@ func TestValidateName(t *testing.T) {
 	}
 }
 
+func TestValidatePort(t *testing.T) {
+	tests := []struct {
+		name    string
+		port    string
+		wantErr bool
+	}{
+		{"valid 80:80", "80:80", false},
+		{"valid 8080:80", "8080:80", false},
+		{"valid with tcp", "80:80/tcp", false},
+		{"valid with udp", "53:53/udp", false},
+		{"valid high port", "65535:65535", false},
+		{"valid port 1", "1:1", false},
+		{"missing colon", "8080", true},
+		{"port 0", "0:80", true},
+		{"port 65536", "65536:80", true},
+		{"negative port", "-1:80", true},
+		{"non-numeric", "abc:80", true},
+		{"empty host", ":80", true},
+		{"empty container", "80:", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidatePort(tt.port)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidatePort(%q) error = %v, wantErr %v", tt.port, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateRestartPolicy(t *testing.T) {
+	tests := []struct {
+		name    string
+		policy  string
+		wantErr bool
+	}{
+		{"empty (omitted)", "", false},
+		{"no", "no", false},
+		{"always", "always", false},
+		{"unless-stopped", "unless-stopped", false},
+		{"on-failure", "on-failure", false},
+		{"on-failure:3", "on-failure:3", false},
+		{"on-failure:0", "on-failure:0", false},
+		{"invalid", "restart-always", true},
+		{"on-failure:abc", "on-failure:abc", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateRestartPolicy(tt.policy)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateRestartPolicy(%q) error = %v, wantErr %v", tt.policy, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateService(t *testing.T) {
+	t.Run("valid service with image", func(t *testing.T) {
+		err := ValidateService("web", &ManifestService{Image: "nginx:alpine"})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("valid service with build", func(t *testing.T) {
+		err := ValidateService("api", &ManifestService{Build: &ManifestBuild{Context: "."}})
+		if err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("invalid name", func(t *testing.T) {
+		err := ValidateService("MY_APP", &ManifestService{Image: "nginx"})
+		if err == nil {
+			t.Error("expected error for uppercase name")
+		}
+	})
+
+	t.Run("no image or build", func(t *testing.T) {
+		err := ValidateService("web", &ManifestService{})
+		if err == nil {
+			t.Error("expected error for missing image and build")
+		}
+	})
+
+	t.Run("invalid port", func(t *testing.T) {
+		err := ValidateService("web", &ManifestService{
+			Image: "nginx",
+			Ports: []string{"99999:80"},
+		})
+		if err == nil {
+			t.Error("expected error for invalid port")
+		}
+	})
+
+	t.Run("replicas exceed max", func(t *testing.T) {
+		err := ValidateService("web", &ManifestService{
+			Image:  "nginx",
+			Deploy: &ManifestDeploy{Replicas: MaxReplicas + 1},
+		})
+		if err == nil {
+			t.Error("expected error for too many replicas")
+		}
+	})
+
+	t.Run("invalid restart policy", func(t *testing.T) {
+		err := ValidateService("web", &ManifestService{
+			Image:   "nginx",
+			Restart: "invalid-policy",
+		})
+		if err == nil {
+			t.Error("expected error for invalid restart policy")
+		}
+	})
+}
+
 func TestGetReplicas(t *testing.T) {
 	t.Run("nil deploy returns 0", func(t *testing.T) {
 		svc := ManifestService{Image: "nginx"}

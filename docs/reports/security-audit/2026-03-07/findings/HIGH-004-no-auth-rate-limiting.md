@@ -1,6 +1,7 @@
 # [HIGH-004] No Rate Limiting on Authentication Endpoints
 
 **Severity**: High
+**Status**: FIXED
 **Responsibility**: Mitigation Gap
 **Component**: Authentication
 **File(s)**:
@@ -20,3 +21,7 @@ Neither the auth interceptors nor the gRPC server configuration include any rate
 ## Recommendation
 
 Add per-IP rate limiting on the gRPC auth interceptor. After N failed attempts (e.g., 10), block the IP for a cooldown period (e.g., 60 seconds). Log rate-limited IPs.
+
+## Fix
+
+Added a per-IP sliding window rate limiter (100 requests/minute) as a gRPC unary interceptor in `pkg/engine/grpc_server.go`. Requests exceeding the limit are rejected with a gRPC `ResourceExhausted` status code before reaching any handler logic.

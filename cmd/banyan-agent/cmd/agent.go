@@ -119,7 +119,7 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 
 	fmt.Println(styleInfo.Render("\nCreating data directories..."))
 	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
 			fmt.Printf("  %s %s: %v\n", styleWarn.Render("[WARN]"), dir, err)
 		} else {
 			fmt.Printf("  %s %s\n", styleOK.Render("[OK]"), dir)
@@ -371,7 +371,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 
 	// Write PID file
 	pidDir := filepath.Dir(agentPidFile)
-	if mkdirErr := os.MkdirAll(pidDir, 0o755); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(pidDir, 0o700); mkdirErr != nil {
 		return fmt.Errorf("failed to create PID directory: %w", mkdirErr)
 	}
 	if writeErr := os.WriteFile(agentPidFile, []byte(strconv.Itoa(os.Getpid())), 0o600); writeErr != nil {
@@ -565,7 +565,7 @@ func runAgentSystemSetup() error {
 	fmt.Print("  Creating /etc/banyan/ directories... ")
 	configDirs := []string{"/etc/banyan", "/etc/banyan/keys"}
 	for _, dir := range configDirs {
-		if mkErr := os.MkdirAll(dir, 0o755); mkErr != nil {
+		if mkErr := os.MkdirAll(dir, 0o700); mkErr != nil {
 			fmt.Println("[FAIL]")
 			return fmt.Errorf("create %s: %w", dir, mkErr)
 		}

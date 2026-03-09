@@ -1,6 +1,7 @@
 # [MED-003] Insufficient Manifest Input Validation
 
 **Severity**: Medium
+**Status**: FIXED
 **Responsibility**: Mitigation Gap
 **Component**: CLI, Engine, Types
 **File(s)**:
@@ -34,3 +35,7 @@ func (m *Manifest) Validate() error {
     // Env keys: ^[A-Za-z_][A-Za-z0-9_]*$
 }
 ```
+
+## Fix
+
+Added `ValidatePort()`, `ValidateRestartPolicy()`, and `ValidateService()` functions in `pkg/types/manifest.go` that check port format/ranges (1-65535), restart policy values, and overall service configuration. These validators are called from the Deploy handler in `pkg/engine/grpc_server.go` to reject invalid manifests before task distribution.

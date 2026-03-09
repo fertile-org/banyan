@@ -8,6 +8,11 @@ set -euo pipefail
 #   curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role engine
 #   curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role agent
 #
+# Security: Review this script before running. For manual installation, see the docs.
+#   curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh -o install.sh
+#   less install.sh
+#   sudo bash install.sh
+#
 # Options:
 #   --role engine|agent|all   Components to install (default: all)
 #   --version VERSION         Banyan version to install (default: latest)
@@ -99,11 +104,29 @@ get_latest_version() {
     echo "$version"
 }
 
+verify_checksum() {
+    local file=$1
+    local expected=$2
+
+    if [ -z "$expected" ]; then
+        warn "No checksum available — skipping verification"
+        return 0
+    fi
+
+    local actual
+    actual=$(sha256sum "$file" | awk '{print $1}')
+    if [ "$actual" != "$expected" ]; then
+        return 1
+    fi
+    return 0
+}
+
 install_binary() {
     local name=$1
     info "Installing ${name} ${BANYAN_VERSION}..."
 
     local url="https://github.com/${REPO}/releases/download/${BANYAN_VERSION}/${name}-linux-${ARCH}"
+    local checksum_url="https://github.com/${REPO}/releases/download/${BANYAN_VERSION}/checksums.txt"
     local tmp
     tmp=$(mktemp)
 
@@ -111,6 +134,26 @@ install_binary() {
         rm -f "$tmp"
         fatal "Failed to download ${name} from ${url}"
     fi
+
+    # Verify SHA-256 checksum if checksums.txt is published
+    local checksums_tmp
+    checksums_tmp=$(mktemp)
+    if curl -fsSL "$checksum_url" -o "$checksums_tmp" 2>/dev/null; then
+        local expected
+        expected=$(grep "${name}-linux-${ARCH}" "$checksums_tmp" | awk '{print $1}')
+        if [ -n "$expected" ]; then
+            if ! verify_checksum "$tmp" "$expected"; then
+                rm -f "$tmp" "$checksums_tmp"
+                fatal "Checksum verification failed for ${name} — expected ${expected}"
+            fi
+            info "Checksum verified for ${name}"
+        else
+            warn "No checksum entry for ${name}-linux-${ARCH} in checksums.txt"
+        fi
+    else
+        warn "checksums.txt not available — skipping verification"
+    fi
+    rm -f "$checksums_tmp"
 
     chmod +x "$tmp"
     mv "$tmp" "${INSTALL_DIR}/${name}"

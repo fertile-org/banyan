@@ -288,6 +288,12 @@ func (a *Agent) processTasks(ctx context.Context) {
 
 			// Register local container in DNS immediately (no wait for heartbeat)
 			if a.dnsManager != nil && task.ServiceName != "" && containerIP != "" {
+				// Register deployment-scoped FQDN
+				if task.DeploymentName != "" {
+					fqdn := task.ServiceName + "." + task.DeploymentName + ".internal"
+					a.dnsManager.RegisterHost(ctx, fqdn, net.ParseIP(containerIP)) //nolint:errcheck // best-effort
+				}
+				// Register short name (will be cleaned up if conflicting in reconcileDNS)
 				hostname := task.ServiceName + ".internal"
 				a.dnsManager.RegisterHost(ctx, hostname, net.ParseIP(containerIP)) //nolint:errcheck // best-effort
 			}

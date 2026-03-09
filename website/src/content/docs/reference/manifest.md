@@ -144,7 +144,7 @@ services:
   caddy:
     image: caddy:latest
     restart: unless-stopped
-    command: caddy reverse-proxy --from example.com --to api:8080
+    command: caddy reverse-proxy --from example.com --to api.my-app.internal:8080
     deploy:
       placement:
         node: gateway-*
@@ -166,7 +166,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DB_HOST=db
+      - DB_HOST=db.my-app.internal
       - DB_PORT=5432
     depends_on:
       - db
@@ -190,7 +190,34 @@ services:
       - POSTGRES_DB=app
 ```
 
-This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, `healthcheck:` for container health monitoring, and service DNS (`api:8080`, `db`) for cross-service communication. During blue-green redeployments, Banyan waits for healthchecks to pass before tearing down old containers.
+This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, `healthcheck:` for container health monitoring, and service DNS (`api.my-app.internal:8080`, `db.my-app.internal`) for cross-service communication. During blue-green redeployments, Banyan waits for healthchecks to pass before tearing down old containers.
+
+### Service DNS
+
+Banyan provides built-in DNS for service discovery. Every service gets a DNS name that other containers can use to connect to it.
+
+**Two forms are available:**
+
+| Form | Example | When to use |
+|------|---------|-------------|
+| **Full name** (recommended) | `db.my-app.internal` | Always works. Use this in production. |
+| **Short name** | `db` | Convenience shorthand. Works only when no other deployment has a service with the same name. |
+
+The full DNS name follows the pattern `<service>.<app-name>.internal`, where `<app-name>` is the `name:` field in your manifest.
+
+:::tip[Use the full name]
+Always use `<service>.<app-name>.internal` in environment variables and configuration. The short form (`db`) is convenient for quick testing, but can break if you run multiple deployments with services that share a name (e.g., two apps both have a `db` service).
+:::
+
+```yaml
+# Recommended — always works
+environment:
+  - DB_HOST=db.my-app.internal
+
+# Also works, but fragile with multiple deployments
+environment:
+  - DB_HOST=db
+```
 
 ### Build from source
 

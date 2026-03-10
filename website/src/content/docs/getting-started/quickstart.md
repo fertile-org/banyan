@@ -214,7 +214,7 @@ sudo banyan-engine stop
 ## What just happened
 
 1. The **CLI** sent your manifest to the **Engine**.
-2. The **Engine** scheduled containers across available **Agents** using round-robin.
+2. The **Engine** scheduled containers across available **Agents** — placing each task on the worker with the most available memory.
 3. The **Agent** pulled images and started containers using containerd.
 4. The CLI waited until all containers reported healthy, then showed success.
 

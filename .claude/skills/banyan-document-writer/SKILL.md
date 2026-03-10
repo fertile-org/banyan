@@ -349,9 +349,9 @@ Before documenting any feature, verify its implementation status:
 | VPC networking | Done | Document fully |
 | Blue-green redeployment | Done | Document fully |
 | Per-service deployment | Done | Document fully |
-| Prometheus metrics | Planned (M5) | Mention on roadmap only |
-| CLI terminal dashboard | Planned (M5) | Mention on roadmap only |
-| Resource-aware scheduling | Planned (M6) | Mention on roadmap only |
+| Prometheus metrics | Done | Document fully |
+| CLI terminal dashboard | Done | Document fully |
+| Resource-aware scheduling | Done | Document fully |
 | Multi-engine HA | Planned (M7) | Don't document |
 | Auto-scaling | Planned (M8) | Don't document |
 | Volumes | Not planned yet | Note as limitation |

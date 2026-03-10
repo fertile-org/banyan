@@ -121,6 +121,8 @@ See [CLI Reference — dashboard](/reference/cli/#dashboard) for details.
 
 ## Milestone 5 — Production Readiness
 
+Status: **Done**
+
 Deploy with confidence: environment files for configuration, systemd services for reliability.
 
 - **`env_file` support**: Reference `.env` files in the manifest (`env_file: .env` or `env_file: [.env, .env.local]`), matching Docker Compose syntax
@@ -130,16 +132,18 @@ Deploy with confidence: environment files for configuration, systemd services fo
 
 ---
 
-## Milestone 6 — Health-Based Scheduling and Resource Requests
+## Milestone 6 — Resource-Aware Scheduling
+
+Status: **Done**
 
 Smarter task distribution based on node resources instead of simple round-robin.
 
-- Agent reports node resource usage (CPU, memory, disk) to Engine via etcd
-- Engine selects the node with the most available resources when scheduling
-- Resource requests in banyan.yaml: services can declare CPU and memory requirements (e.g., `cpus: 2`, `memory: 4g`)
-- **Default resource requests**: Services without explicit requirements get sensible defaults (512MB RAM, 1 CPU)
-- Engine validates that target node has sufficient resources before assigning a task
-- Engine rejects deployments that exceed total cluster capacity
+- **Agent resource reporting**: Agents report CPU, memory, and disk usage to the engine via heartbeat (stored on NodeRecord in etcd)
+- **Resource-aware scheduling**: Engine selects the agent with the most available memory when assigning tasks, tracking batch allocations to prevent piling tasks on one node
+- **Resource requests in manifest**: Services can declare CPU and memory requirements via `deploy.resources` (e.g., `memory: 512m`, `cpus: "0.5"`)
+- **Default resource requests**: Services without explicit requirements default to 512MB RAM and 1 CPU core for scheduling purposes
+- **Cluster capacity validation**: Engine rejects deployments whose total resource requests exceed total cluster capacity
+- **Graceful fallback**: When agents haven't reported metrics yet (e.g., first heartbeat pending), scheduling falls back to round-robin
 
 ---
 

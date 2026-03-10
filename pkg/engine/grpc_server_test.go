@@ -3794,6 +3794,121 @@ func TestHeartbeat_UpdatesAgentMetrics(t *testing.T) {
 	}
 }
 
+func TestHeartbeat_MetricsBoundsChecking(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register agent
+	_, err := client.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName:    "worker-bounds",
+		ApiAddress:   "worker-bounds:9090",
+		SessionToken: "token-bounds",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	t.Run("valid metrics stored", func(t *testing.T) {
+		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 8 * 1024 * 1024 * 1024, // 8 GB
+				MemoryUsedBytes:  2 * 1024 * 1024 * 1024,  // 2 GB
+				CpuCores:         4,
+				CpuUsageRatio:    0.5,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		var node types.NodeRecord
+		if err := srv.store.Get(ctx, types.KeyNodes+"worker-bounds", &node); err != nil {
+			t.Fatalf("Get node failed: %v", err)
+		}
+		if node.MemoryTotalBytes != 8*1024*1024*1024 {
+			t.Errorf("MemoryTotalBytes = %d, want %d", node.MemoryTotalBytes, 8*1024*1024*1024)
+		}
+		if node.MemoryUsedBytes != 2*1024*1024*1024 {
+			t.Errorf("MemoryUsedBytes = %d, want %d", node.MemoryUsedBytes, 2*1024*1024*1024)
+		}
+		if node.CPUCores != 4 {
+			t.Errorf("CPUCores = %d, want 4", node.CPUCores)
+		}
+		if node.CPUUsageRatio != 0.5 {
+			t.Errorf("CPUUsageRatio = %f, want 0.5", node.CPUUsageRatio)
+		}
+	})
+
+	t.Run("excessive memory rejected", func(t *testing.T) {
+		// First set known good values
+		_, _ = client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 8 * 1024 * 1024 * 1024,
+				MemoryUsedBytes:  1 * 1024 * 1024 * 1024,
+				CpuCores:         4,
+				CpuUsageRatio:    0.25,
+			},
+		})
+
+		// Send bogus metrics — should not update memory/cpu fields
+		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 1<<63 + 1, // exceeds 64 TB cap
+				MemoryUsedBytes:  1 << 62,
+				CpuCores:         9999,        // exceeds 1024 cap
+				CpuUsageRatio:    5.0,         // exceeds 1.0 cap
+			},
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		var node types.NodeRecord
+		if err := srv.store.Get(ctx, types.KeyNodes+"worker-bounds", &node); err != nil {
+			t.Fatalf("Get node failed: %v", err)
+		}
+		// Fields should retain previous good values
+		if node.MemoryTotalBytes != 8*1024*1024*1024 {
+			t.Errorf("MemoryTotalBytes = %d, want previous value %d (bogus value should be rejected)", node.MemoryTotalBytes, 8*1024*1024*1024)
+		}
+		if node.CPUCores != 4 {
+			t.Errorf("CPUCores = %d, want previous value 4 (bogus value should be rejected)", node.CPUCores)
+		}
+		if node.CPUUsageRatio != 0.25 {
+			t.Errorf("CPUUsageRatio = %f, want previous value 0.25 (bogus value should be rejected)", node.CPUUsageRatio)
+		}
+	})
+
+	t.Run("used memory capped at total", func(t *testing.T) {
+		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 4 * 1024 * 1024 * 1024, // 4 GB
+				MemoryUsedBytes:  8 * 1024 * 1024 * 1024,  // 8 GB (> total, should be capped)
+				CpuCores:         2,
+				CpuUsageRatio:    0.9,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		var node types.NodeRecord
+		if err := srv.store.Get(ctx, types.KeyNodes+"worker-bounds", &node); err != nil {
+			t.Fatalf("Get node failed: %v", err)
+		}
+		if node.MemoryUsedBytes != 4*1024*1024*1024 {
+			t.Errorf("MemoryUsedBytes = %d, want %d (should be capped at total)", node.MemoryUsedBytes, 4*1024*1024*1024)
+		}
+	})
+}
+
 func TestReconcileDeploymentStatus(t *testing.T) {
 	t.Run("marks deployment stopped when all containers dead", func(t *testing.T) {
 		store := storage.NewMemoryStore()

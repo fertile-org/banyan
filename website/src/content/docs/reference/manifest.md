@@ -24,7 +24,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Env files | `env_file:` | `env_file:` | Same (string or list of paths) |
 | Restart | `restart:` | `restart:` | Same |
 | Entrypoint | `entrypoint:` | `entrypoint:` | Same |
-| Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus) |
+| Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus). Also used for scheduling decisions. |
 | Healthcheck | `healthcheck:` | `healthcheck:` | Same (test, interval, timeout, retries, start_period, disable) |
 | Volumes | `volumes:` | -- | Planned |
 | Networks | `networks:` | -- | Managed automatically |
@@ -90,9 +90,9 @@ services:
 | `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
 | `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
 | `deploy.placement.node` | string | No | -- | Glob pattern to pin this service to specific nodes. Supports `*`, `?`, and `[abc]`. Example: `gateway-*` matches `gateway-1`, `gateway-2`. |
-| `deploy.resources.limits.memory` | string | No | -- | Memory limit (e.g., `512m`, `1g`). Container is killed if it exceeds this. |
+| `deploy.resources.limits.memory` | string | No | -- | Memory limit (e.g., `512m`, `1g`). Container is killed if it exceeds this. Also used for scheduling if no reservation is set. |
 | `deploy.resources.limits.cpus` | string | No | -- | CPU limit (e.g., `"0.5"`, `"2"`). Fractional cores allowed. |
-| `deploy.resources.reservations.memory` | string | No | -- | Soft memory limit (e.g., `256m`). Used as a reservation hint. |
+| `deploy.resources.reservations.memory` | string | No | -- | Memory reservation (e.g., `256m`). Used by the scheduler to decide which worker runs this service. Takes priority over `limits.memory` for scheduling. |
 | `restart` | string | No | `no` | Restart policy: `no`, `always`, `unless-stopped`, `on-failure`, or `on-failure:N`. |
 | `entrypoint` | string or list | No | -- | Override the container's ENTRYPOINT. Supports string or list form. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
@@ -332,6 +332,32 @@ services:
 The short form (`["db"]`) is equivalent to `{db: {condition: service_started}}`.
 
 During [per-service deploys](/guides/redeployment/#dependency-validation), Banyan validates that all dependencies are either already running or included in the same deploy command.
+
+### Resource-aware scheduling
+
+Banyan uses `deploy.resources` to decide where to place containers. Each task goes to the worker with the most available memory.
+
+**How the scheduler picks a worker:**
+
+1. Workers report CPU, memory, and disk usage to the engine every heartbeat.
+2. For each container, the scheduler picks the worker with the most available memory (total − used − already-scheduled-in-this-deployment).
+3. If no worker has reported metrics yet (e.g., during the first few seconds after startup), scheduling falls back to round-robin.
+
+**What counts as the resource request:**
+
+| Manifest field | Scheduling behavior |
+|---|---|
+| `reservations.memory` set | Scheduler uses the reservation value |
+| Only `limits.memory` set | Scheduler uses the limit value |
+| Neither set | Scheduler assumes **512 MB** per service |
+
+CPU values are tracked but memory is the primary scheduling dimension.
+
+**Cluster capacity validation:** Before scheduling, the engine checks that the total resource requests for the deployment don't exceed the total cluster memory. If they do, the deployment fails immediately with a clear error message instead of partially scheduling.
+
+:::tip
+For most workloads, you don't need to set `deploy.resources` at all. The defaults (512 MB, 1 CPU per service) work well for typical web services. Add explicit resources when you have services with significantly different needs — a memory-heavy database alongside lightweight API workers, for example.
+:::
 
 ## Validation
 

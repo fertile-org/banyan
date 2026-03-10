@@ -899,3 +899,258 @@ func assertSliceEqual(t *testing.T, expected, got []string) {
 		}
 	}
 }
+
+func TestBuildTasksForDeployment_RoundRobin(t *testing.T) {
+	// When agents have no metrics, scheduling falls back to round-robin
+	deployment := &DeploymentRecord{
+		ID:   "deploy-1",
+		Name: "my-app",
+		Services: map[string]ServiceRecord{
+			"web": {Image: "nginx", Replicas: 3},
+		},
+	}
+	agents := []NodeRecord{
+		{Name: "agent-1"},
+		{Name: "agent-2"},
+	}
+
+	tasks, err := BuildTasksForDeployment(deployment, agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(tasks))
+	}
+
+	// Round-robin: agent-1, agent-2, agent-1
+	expected := []string{"agent-1", "agent-2", "agent-1"}
+	for i, task := range tasks {
+		if task.AgentID != expected[i] {
+			t.Errorf("task %d: expected agent %q, got %q", i, expected[i], task.AgentID)
+		}
+	}
+}
+
+func TestBuildTasksForDeployment_ResourceAware(t *testing.T) {
+	// When agents have metrics, scheduling picks the agent with most available memory
+	deployment := &DeploymentRecord{
+		ID:   "deploy-1",
+		Name: "my-app",
+		Services: map[string]ServiceRecord{
+			"web": {Image: "nginx", Replicas: 3},
+		},
+	}
+
+	gb := uint64(1024 * 1024 * 1024)
+	agents := []NodeRecord{
+		{Name: "small", MemoryTotalBytes: 2 * gb, MemoryUsedBytes: 1 * gb, CPUCores: 2},
+		{Name: "large", MemoryTotalBytes: 8 * gb, MemoryUsedBytes: 1 * gb, CPUCores: 8},
+	}
+
+	tasks, err := BuildTasksForDeployment(deployment, agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(tasks))
+	}
+
+	// "large" has 7GB free, "small" has 1GB free
+	// Each task requests default 512MB
+	// 1st task → large (7GB free), 2nd → large (6.5GB free), etc.
+	// At some point small may get a task if large fills up, but with only 3 tasks
+	// and 7GB vs 1GB, all 3 should go to "large"
+	for i, task := range tasks {
+		if task.AgentID != "large" {
+			t.Errorf("task %d: expected agent 'large', got %q (resource-aware should prefer larger agent)", i, task.AgentID)
+		}
+	}
+}
+
+func TestBuildTasksForDeployment_ResourceAware_Spreads(t *testing.T) {
+	// When agents are equally loaded, tasks should spread across them
+	deployment := &DeploymentRecord{
+		ID:   "deploy-1",
+		Name: "my-app",
+		Services: map[string]ServiceRecord{
+			"web": {Image: "nginx", Replicas: 4, MemoryLimit: "1g"},
+		},
+	}
+
+	gb := uint64(1024 * 1024 * 1024)
+	agents := []NodeRecord{
+		{Name: "agent-1", MemoryTotalBytes: 4 * gb, MemoryUsedBytes: 0, CPUCores: 4},
+		{Name: "agent-2", MemoryTotalBytes: 4 * gb, MemoryUsedBytes: 0, CPUCores: 4},
+	}
+
+	tasks, err := BuildTasksForDeployment(deployment, agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Count tasks per agent
+	agentCounts := map[string]int{}
+	for _, task := range tasks {
+		agentCounts[task.AgentID]++
+	}
+
+	// With equal resources (4GB each) and 1GB per task, should spread 2+2
+	if agentCounts["agent-1"] != 2 || agentCounts["agent-2"] != 2 {
+		t.Errorf("expected 2+2 spread, got agent-1=%d agent-2=%d", agentCounts["agent-1"], agentCounts["agent-2"])
+	}
+}
+
+func TestBuildTasksForDeployment_Placement(t *testing.T) {
+	deployment := &DeploymentRecord{
+		ID:   "deploy-1",
+		Name: "my-app",
+		Services: map[string]ServiceRecord{
+			"web": {Image: "nginx", Replicas: 2, Placement: "gateway-*"},
+		},
+	}
+	agents := []NodeRecord{
+		{Name: "gateway-1"},
+		{Name: "worker-1"},
+		{Name: "gateway-2"},
+	}
+
+	tasks, err := BuildTasksForDeployment(deployment, agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	for _, task := range tasks {
+		if task.AgentID != "gateway-1" && task.AgentID != "gateway-2" {
+			t.Errorf("task should be on gateway-*, got %q", task.AgentID)
+		}
+	}
+}
+
+func TestBuildTasksForDeployment_PlacementNoMatch(t *testing.T) {
+	deployment := &DeploymentRecord{
+		ID:   "deploy-1",
+		Name: "my-app",
+		Services: map[string]ServiceRecord{
+			"web": {Image: "nginx", Replicas: 1, Placement: "gpu-*"},
+		},
+	}
+	agents := []NodeRecord{{Name: "worker-1"}}
+
+	_, err := BuildTasksForDeployment(deployment, agents)
+	if err == nil {
+		t.Error("expected error for no matching agents")
+	}
+}
+
+func TestBuildTasksForDeployment_BlueGreen(t *testing.T) {
+	deployment := &DeploymentRecord{
+		ID:         "deploy-abc",
+		Name:       "my-app",
+		ReplacesID: "deploy-old",
+		Services: map[string]ServiceRecord{
+			"web": {Image: "nginx", Replicas: 1},
+		},
+	}
+	agents := []NodeRecord{{Name: "agent-1"}}
+
+	tasks, err := BuildTasksForDeployment(deployment, agents)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Blue-green uses deployment ID as container prefix
+	if tasks[0].ContainerName != "deploy-abc-web-0" {
+		t.Errorf("expected container name 'deploy-abc-web-0', got %q", tasks[0].ContainerName)
+	}
+}
+
+func TestValidateClusterCapacity(t *testing.T) {
+	gb := uint64(1024 * 1024 * 1024)
+
+	t.Run("passes when cluster has enough memory", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			Name: "my-app",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx", Replicas: 2, MemoryLimit: "1g"},
+			},
+		}
+		agents := []NodeRecord{
+			{Name: "a1", MemoryTotalBytes: 4 * gb},
+			{Name: "a2", MemoryTotalBytes: 4 * gb},
+		}
+
+		if err := ValidateClusterCapacity(deployment, agents); err != nil {
+			t.Errorf("expected no error, got: %v", err)
+		}
+	})
+
+	t.Run("fails when deployment exceeds cluster capacity", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			Name: "my-app",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx", Replicas: 10, MemoryLimit: "2g"},
+			},
+		}
+		agents := []NodeRecord{
+			{Name: "a1", MemoryTotalBytes: 4 * gb},
+			{Name: "a2", MemoryTotalBytes: 4 * gb},
+		}
+
+		err := ValidateClusterCapacity(deployment, agents)
+		if err == nil {
+			t.Error("expected capacity error")
+		}
+	})
+
+	t.Run("skips validation when no metrics", func(t *testing.T) {
+		deployment := &DeploymentRecord{
+			Name: "my-app",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx", Replicas: 100},
+			},
+		}
+		agents := []NodeRecord{{Name: "a1"}} // no metrics
+
+		if err := ValidateClusterCapacity(deployment, agents); err != nil {
+			t.Errorf("should skip validation without metrics, got: %v", err)
+		}
+	})
+
+	t.Run("uses default resource requests", func(t *testing.T) {
+		// 4 replicas * 512MB default = 2GB needed, cluster has 1GB
+		deployment := &DeploymentRecord{
+			Name: "my-app",
+			Services: map[string]ServiceRecord{
+				"web": {Image: "nginx", Replicas: 4},
+			},
+		}
+		agents := []NodeRecord{
+			{Name: "a1", MemoryTotalBytes: gb},
+		}
+
+		err := ValidateClusterCapacity(deployment, agents)
+		if err == nil {
+			t.Error("expected capacity error (4 * 512MB > 1GB)")
+		}
+	})
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		input uint64
+		want  string
+	}{
+		{0, "0B"},
+		{1024, "1024B"},
+		{1024 * 1024, "1MB"},
+		{512 * 1024 * 1024, "512MB"},
+		{1024 * 1024 * 1024, "1.0GB"},
+		{2 * 1024 * 1024 * 1024, "2.0GB"},
+	}
+	for _, tt := range tests {
+		got := formatBytes(tt.input)
+		if got != tt.want {
+			t.Errorf("formatBytes(%d) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

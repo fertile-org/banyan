@@ -111,12 +111,16 @@ type TaskResultRecord struct {
 
 // NodeRecord is stored at /nodes/<name> in etcd.
 type NodeRecord struct {
-	LastSeen   time.Time `json:"last_seen"`
-	CreatedAt  time.Time `json:"created_at"`
-	Name       string    `json:"name"`
-	Status     string    `json:"status"`
-	APIAddress string    `json:"api_address,omitempty"`
-	Tags       []string  `json:"tags,omitempty"`
+	LastSeen         time.Time `json:"last_seen"`
+	CreatedAt        time.Time `json:"created_at"`
+	Name             string    `json:"name"`
+	Status           string    `json:"status"`
+	APIAddress       string    `json:"api_address,omitempty"`
+	Tags             []string  `json:"tags,omitempty"`
+	MemoryTotalBytes uint64    `json:"memory_total_bytes,omitempty"`
+	MemoryUsedBytes  uint64    `json:"memory_used_bytes,omitempty"`
+	CPUCores         uint32    `json:"cpu_cores,omitempty"`
+	CPUUsageRatio    float64   `json:"cpu_usage_ratio,omitempty"`
 }
 
 // StateStore is a minimal interface for store operations used by helpers.

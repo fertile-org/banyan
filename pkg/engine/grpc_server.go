@@ -382,6 +382,22 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 	node.LastSeen = time.Now()
 	node.Status = "ready"
 	node.Tags = req.Tags
+	if req.SystemMetrics != nil {
+		// Bounds-check agent-reported metrics to prevent integer overflow in the
+		// scheduler (pickAgentByResources casts uint64→int64) and filter bogus values.
+		const maxMemory = 64 * 1024 * 1024 * 1024 * 1024 // 64 TB
+		const maxCPUCores = 1024
+		if req.SystemMetrics.MemoryTotalBytes > 0 && req.SystemMetrics.MemoryTotalBytes <= maxMemory {
+			node.MemoryTotalBytes = req.SystemMetrics.MemoryTotalBytes
+			node.MemoryUsedBytes = min(req.SystemMetrics.MemoryUsedBytes, req.SystemMetrics.MemoryTotalBytes)
+		}
+		if req.SystemMetrics.CpuCores > 0 && req.SystemMetrics.CpuCores <= maxCPUCores {
+			node.CPUCores = req.SystemMetrics.CpuCores
+		}
+		if req.SystemMetrics.CpuUsageRatio >= 0 && req.SystemMetrics.CpuUsageRatio <= 1.0 {
+			node.CPUUsageRatio = req.SystemMetrics.CpuUsageRatio
+		}
+	}
 	if err := s.store.Save(ctx, types.KeyNodes+req.AgentName, &node); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to update heartbeat: %v", err)
 	}

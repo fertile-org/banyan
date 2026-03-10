@@ -58,6 +58,7 @@ type DeploymentRecord struct {
 
 // ServiceRecord describes a service within a deployment.
 type ServiceRecord struct {
+	DependsOn         DependsOnConfig      `json:"depends_on,omitempty"`
 	Healthcheck       *ManifestHealthcheck `json:"healthcheck,omitempty"`
 	Image             string               `json:"image"`
 	Placement         string               `json:"placement,omitempty"`
@@ -69,7 +70,6 @@ type ServiceRecord struct {
 	Environment       []string             `json:"env,omitempty"`
 	Command           []string             `json:"command,omitempty"`
 	Entrypoint        []string             `json:"entrypoint,omitempty"`
-	DependsOn         []string             `json:"depends_on,omitempty"`
 	Replicas          int                  `json:"replicas"`
 }
 

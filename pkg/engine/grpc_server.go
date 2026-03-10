@@ -65,18 +65,18 @@ func (rl *rateLimiter) allow(ip string) bool {
 // engineGRPCServer implements the EngineService gRPC server.
 type engineGRPCServer struct {
 	banyanpb.UnimplementedEngineServiceServer
-	store            storage.StateStore
-	registryURL      string
-	whitelistedKeys  map[string]string        // publicKey → agentName
-	tunnelIPToAgent  map[string]string        // tunnelIP → agentName (reverse map for identity)
-	allocator        *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
-	peerTracker      *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
-	vpcCIDR          string                   // VPC network CIDR (e.g., "10.0.0.0/16")
-	metricsRegistry  *metrics.EngineMetricsRegistry
-	events           EventLog
-	limiter          *rateLimiter
-	startedAt        time.Time
-	log              *logging.Logger
+	store           storage.StateStore
+	registryURL     string
+	whitelistedKeys map[string]string        // publicKey → agentName
+	tunnelIPToAgent map[string]string        // tunnelIP → agentName (reverse map for identity)
+	allocator       *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
+	peerTracker     *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
+	vpcCIDR         string                   // VPC network CIDR (e.g., "10.0.0.0/16")
+	metricsRegistry *metrics.EngineMetricsRegistry
+	events          EventLog
+	limiter         *rateLimiter
+	startedAt       time.Time
+	log             *logging.Logger
 }
 
 // grpcServerOptions configures the engine gRPC server.
@@ -825,7 +825,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 				Replicas:  int32(svc.Replicas), //nolint:gosec // replica count is always small
 				Ports:     svc.Ports,
 				Command:   svc.Command,
-				DependsOn: svc.DependsOn,
+				DependsOn: dependsOnToProto(svc.DependsOn),
 				// Environment intentionally omitted — may contain secrets
 			}
 		}
@@ -1260,6 +1260,18 @@ func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName
 	return nil, nil, fmt.Errorf("container %q not found in cluster", containerName)
 }
 
+// dependsOnToProto converts types.DependsOnConfig to the proto map representation.
+func dependsOnToProto(deps types.DependsOnConfig) map[string]*banyanpb.DependsOnCondition {
+	if len(deps) == 0 {
+		return nil
+	}
+	m := make(map[string]*banyanpb.DependsOnCondition, len(deps))
+	for name, cond := range deps {
+		m[name] = &banyanpb.DependsOnCondition{Condition: cond.Condition}
+	}
+	return m
+}
+
 // protoToManifest converts a proto Manifest to types.BanyanManifest.
 func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 	services := make(map[string]types.ManifestService, len(m.Services))
@@ -1269,9 +1281,14 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 			Ports:       svc.Ports,
 			Environment: svc.Environment,
 			Command:     svc.Command,
-			DependsOn:   svc.DependsOn,
 			Restart:     svc.Restart,
 			Entrypoint:  svc.Entrypoint,
+		}
+		if len(svc.DependsOn) > 0 {
+			ms.DependsOn = make(types.DependsOnConfig, len(svc.DependsOn))
+			for depName, dep := range svc.DependsOn {
+				ms.DependsOn[depName] = types.DependsOnCondition{Condition: dep.Condition}
+			}
 		}
 		if svc.Healthcheck != nil {
 			ms.Healthcheck = &types.ManifestHealthcheck{
@@ -1587,7 +1604,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				Replicas:  int32(svc.Replicas), //nolint:gosec // replica count is always small
 				Ports:     svc.Ports,
 				Command:   svc.Command,
-				DependsOn: svc.DependsOn,
+				DependsOn: dependsOnToProto(svc.DependsOn),
 				// Environment intentionally omitted — may contain secrets
 			}
 		}

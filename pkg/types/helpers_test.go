@@ -36,7 +36,7 @@ func TestBuildServiceRecords(t *testing.T) {
 				Ports:       []string{"8080:80"},
 				Environment: []string{"DB=postgres"},
 				Command:     []string{"serve"},
-				DependsOn:   []string{"db"},
+				DependsOn:   DependsOnConfig{"db": {Condition: "service_started"}},
 			},
 		}
 		services := BuildServiceRecords(manifest)
@@ -54,8 +54,11 @@ func TestBuildServiceRecords(t *testing.T) {
 		if len(svc.Command) != 1 || svc.Command[0] != "serve" {
 			t.Errorf("unexpected command: %v", svc.Command)
 		}
-		if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "db" {
-			t.Errorf("unexpected depends_on: %v", svc.DependsOn)
+		if len(svc.DependsOn) != 1 {
+			t.Errorf("expected 1 depends_on entry, got %d", len(svc.DependsOn))
+		}
+		if _, ok := svc.DependsOn["db"]; !ok {
+			t.Errorf("expected depends_on to contain 'db', got %v", svc.DependsOn)
 		}
 	})
 
@@ -523,8 +526,8 @@ func (m *helperStateStore) List(_ context.Context, prefix string) ([]string, err
 
 func TestValidateServiceDependencies(t *testing.T) {
 	allServices := map[string]ServiceRecord{
-		"web": {Image: "nginx", DependsOn: []string{"api", "db"}},
-		"api": {Image: "myapi", DependsOn: []string{"db"}},
+		"web": {Image: "nginx", DependsOn: DependsOnConfig{"api": {Condition: "service_started"}, "db": {Condition: "service_started"}}},
+		"api": {Image: "myapi", DependsOn: DependsOnConfig{"db": {Condition: "service_started"}}},
 		"db":  {Image: "postgres"},
 	}
 

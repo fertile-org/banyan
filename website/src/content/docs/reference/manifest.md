@@ -16,7 +16,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Ports | `ports: ["80:80"]` | `ports: ["80:80"]` | Same format |
 | Environment | `environment:` | `environment:` | Same |
 | Command | `command:` | `command:` | Same |
-| Dependencies | `depends_on:` | `depends_on:` | Same (informational for full deploys; validated for per-service deploys) |
+| Dependencies | `depends_on:` | `depends_on:` | Same — short form and long form with `condition: service_healthy` |
 | Replicas | `deploy.replicas:` | `deploy.replicas:` | Same |
 | Placement | `deploy.placement.constraints:` | `deploy.placement.node:` | Glob pattern for agent name matching |
 | App name | Inferred from directory | `name:` | Explicit in Banyan |
@@ -69,7 +69,8 @@ services:
       - <arg1>
       - <arg2>
     depends_on:
-      - <other-service>
+      <other-service>:
+        condition: service_healthy  # or service_started (default)
 ```
 
 ## Fields
@@ -104,7 +105,7 @@ services:
 | `healthcheck.retries` | integer | No | -- | Consecutive failures before marking unhealthy. |
 | `healthcheck.start_period` | string | No | -- | Grace period for startup (e.g., `30s`). Failures during this period don't count toward retries. |
 | `healthcheck.disable` | boolean | No | `false` | Set `true` to disable any healthcheck defined in the image. |
-| `depends_on` | list | No | -- | Services that should start first. Validated during [per-service deploys](/guides/redeployment/#dependency-validation). |
+| `depends_on` | list or map | No | -- | Service dependencies. Short form: `["db", "redis"]`. Long form with conditions: `{db: {condition: service_healthy}}`. Conditions: `service_started` (default), `service_healthy`. See [depends_on](#depends_on) below. |
 
 ## Container naming
 
@@ -294,6 +295,43 @@ services:
 ```
 
 Paths are relative to the manifest file's directory.
+
+### depends_on
+
+Control startup order and declare service dependencies, using the same syntax as Docker Compose.
+
+**Short form** — services start first, no health requirement:
+
+```yaml
+services:
+  api:
+    image: my-api:latest
+    depends_on:
+      - db
+      - redis
+```
+
+**Long form** — with health conditions:
+
+```yaml
+services:
+  api:
+    image: my-api:latest
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+```
+
+| Condition | Meaning |
+|-----------|---------|
+| `service_started` | Dependency must be running (default) |
+| `service_healthy` | Dependency must be running **and** its [healthcheck](#service) must report healthy |
+
+The short form (`["db"]`) is equivalent to `{db: {condition: service_started}}`.
+
+During [per-service deploys](/guides/redeployment/#dependency-validation), Banyan validates that all dependencies are either already running or included in the same deploy command.
 
 ## Validation
 

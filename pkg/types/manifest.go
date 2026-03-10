@@ -118,7 +118,7 @@ type ManifestService struct {
 	Environment []string             `yaml:"environment,omitempty"`
 	EnvFile     EnvFile              `yaml:"env_file,omitempty"`
 	Command     []string             `yaml:"command,omitempty"`
-	DependsOn   []string             `yaml:"depends_on,omitempty"`
+	DependsOn   DependsOnConfig      `yaml:"depends_on,omitempty"`
 	Restart     string               `yaml:"restart,omitempty"`
 	Entrypoint  ShellCommand         `yaml:"entrypoint,omitempty"`
 }
@@ -186,6 +186,59 @@ func (b *ManifestBuild) UnmarshalYAML(value *yaml.Node) error {
 type ManifestNetwork struct {
 	CIDR   string `yaml:"cidr,omitempty"`
 	Driver string `yaml:"driver,omitempty"`
+}
+
+// DependsOnCondition represents a dependency condition (matches Docker Compose).
+type DependsOnCondition struct {
+	Condition string `yaml:"condition,omitempty" json:"condition,omitempty"`
+}
+
+// DependsOnConfig supports both Docker Compose depends_on forms:
+//
+//	Short form: depends_on: ["db", "redis"]
+//	Long form:  depends_on: {db: {condition: service_healthy}}
+type DependsOnConfig map[string]DependsOnCondition
+
+// UnmarshalYAML supports both list and map forms for depends_on.
+func (d *DependsOnConfig) UnmarshalYAML(value *yaml.Node) error {
+	// List form: ["db", "redis"]
+	if value.Kind == yaml.SequenceNode {
+		var list []string
+		if err := value.Decode(&list); err != nil {
+			return err
+		}
+		m := make(DependsOnConfig, len(list))
+		for _, name := range list {
+			m[name] = DependsOnCondition{Condition: "service_started"}
+		}
+		*d = m
+		return nil
+	}
+	// Map form: {db: {condition: service_healthy}}
+	var m map[string]DependsOnCondition
+	if err := value.Decode(&m); err != nil {
+		return err
+	}
+	// Default empty conditions to service_started
+	for name, cond := range m {
+		if cond.Condition == "" {
+			m[name] = DependsOnCondition{Condition: "service_started"}
+		}
+	}
+	*d = m
+	return nil
+}
+
+// ServiceNames returns a sorted list of dependency service names.
+func (d DependsOnConfig) ServiceNames() []string {
+	if len(d) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(d))
+	for name := range d {
+		names = append(names, name)
+	}
+	return names
 }
 
 // ShellCommand supports both string and list forms for entrypoint/command.

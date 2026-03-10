@@ -172,9 +172,14 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 			Ports:       svc.Ports,
 			Environment: svc.Environment,
 			Command:     svc.Command,
-			DependsOn:   svc.DependsOn,
 			Restart:     svc.Restart,
 			Entrypoint:  svc.Entrypoint,
+		}
+		if len(svc.DependsOn) > 0 {
+			ms.DependsOn = make(map[string]*banyanpb.DependsOnCondition, len(svc.DependsOn))
+			for depName, dep := range svc.DependsOn {
+				ms.DependsOn[depName] = &banyanpb.DependsOnCondition{Condition: dep.Condition}
+			}
 		}
 		if svc.Healthcheck != nil {
 			ms.Healthcheck = &banyanpb.ManifestHealthcheck{

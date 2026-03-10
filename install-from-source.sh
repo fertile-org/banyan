@@ -15,8 +15,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="/usr/local/bin"
 
 # Dependency versions
-NERDCTL_VERSION="2.0.3"
-CNI_VERSION="1.6.1"
+NERDCTL_VERSION="2.1.3"
+NERDCTL_MIN_VERSION="2.1.3"  # minimum for --health-cmd support
+CNI_VERSION="1.6.2"
 ETCD_VERSION="3.5.17"
 BUILDKIT_VERSION="0.19.0"
 
@@ -187,10 +188,20 @@ install_containerd() {
     fi
 }
 
+version_ge() {
+    # Returns 0 (true) if $1 >= $2 using semantic versioning
+    printf '%s\n%s\n' "$2" "$1" | sort -V -C
+}
+
 install_nerdctl() {
     if command -v nerdctl &>/dev/null; then
-        info "nerdctl already installed, skipping."
-        return
+        local current
+        current=$(nerdctl --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)
+        if [ -n "$current" ] && version_ge "$current" "$NERDCTL_MIN_VERSION"; then
+            info "nerdctl v${current} already installed (>= ${NERDCTL_MIN_VERSION}), skipping."
+            return
+        fi
+        warn "nerdctl v${current} is below minimum v${NERDCTL_MIN_VERSION} (required for healthcheck support). Upgrading..."
     fi
 
     info "Installing nerdctl v${NERDCTL_VERSION}..."
@@ -201,7 +212,7 @@ install_nerdctl() {
         fatal "Failed to install nerdctl from ${url}"
     fi
 
-    info "nerdctl installed."
+    info "nerdctl v${NERDCTL_VERSION} installed."
 }
 
 install_cni() {

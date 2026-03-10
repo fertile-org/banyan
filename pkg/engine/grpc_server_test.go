@@ -819,7 +819,7 @@ func TestProtoToManifest(t *testing.T) {
 					Ports:       []string{"80:80"},
 					Environment: []string{"FOO=bar"},
 					Command:     []string{"nginx"},
-					DependsOn:   []string{"db"},
+					DependsOn:   map[string]*banyanpb.DependsOnCondition{"db": {Condition: "service_started"}},
 				},
 			},
 		}
@@ -837,8 +837,11 @@ func TestProtoToManifest(t *testing.T) {
 		if len(svc.Ports) != 1 || svc.Ports[0] != "80:80" {
 			t.Errorf("unexpected ports: %v", svc.Ports)
 		}
-		if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "db" {
-			t.Errorf("unexpected depends_on: %v", svc.DependsOn)
+		if len(svc.DependsOn) != 1 {
+			t.Errorf("expected 1 depends_on entry, got %d", len(svc.DependsOn))
+		}
+		if _, ok := svc.DependsOn["db"]; !ok {
+			t.Errorf("expected depends_on to contain 'db', got %v", svc.DependsOn)
 		}
 	})
 
@@ -1310,7 +1313,7 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 		Name:   "multi-app",
 		Status: types.StatusRunning,
 		Services: map[string]types.ServiceRecord{
-			"web": {Image: "nginx", Replicas: 1, Ports: []string{"80:80"}, Environment: []string{"ENV=prod"}, Command: []string{"nginx"}, DependsOn: []string{"db"}},
+			"web": {Image: "nginx", Replicas: 1, Ports: []string{"80:80"}, Environment: []string{"ENV=prod"}, Command: []string{"nginx"}, DependsOn: types.DependsOnConfig{"db": {Condition: "service_started"}}},
 			"db":  {Image: "postgres", Replicas: 1},
 		},
 		CreatedAt: time.Now(),
@@ -1378,8 +1381,11 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 				if webSvc.Image != "nginx" {
 					t.Errorf("expected image 'nginx', got %q", webSvc.Image)
 				}
-				if len(webSvc.DependsOn) != 1 || webSvc.DependsOn[0] != "db" {
-					t.Errorf("expected depends_on [db], got %v", webSvc.DependsOn)
+				if len(webSvc.DependsOn) != 1 {
+					t.Errorf("expected 1 depends_on entry, got %d", len(webSvc.DependsOn))
+				}
+				if _, ok := webSvc.DependsOn["db"]; !ok {
+					t.Errorf("expected depends_on to contain 'db', got %v", webSvc.DependsOn)
 				}
 			}
 		}
@@ -3083,8 +3089,8 @@ func TestDeployServices(t *testing.T) {
 		})
 
 		allServices := map[string]types.ServiceRecord{
-			"web": {Image: "nginx:v2", Replicas: 1, DependsOn: []string{"api"}},
-			"api": {Image: "myapi:v2", Replicas: 1, DependsOn: []string{"db"}},
+			"web": {Image: "nginx:v2", Replicas: 1, DependsOn: types.DependsOnConfig{"api": {Condition: "service_started"}}},
+			"api": {Image: "myapi:v2", Replicas: 1, DependsOn: types.DependsOnConfig{"db": {Condition: "service_started"}}},
 			"db":  {Image: "postgres:15", Replicas: 1},
 		}
 
@@ -3165,7 +3171,7 @@ func TestDeployServices(t *testing.T) {
 		})
 
 		allServices := map[string]types.ServiceRecord{
-			"api": {Image: "myapi", Replicas: 1, DependsOn: []string{"db"}},
+			"api": {Image: "myapi", Replicas: 1, DependsOn: types.DependsOnConfig{"db": {Condition: "service_started"}}},
 			"web": {Image: "nginx", Replicas: 1},
 			"db":  {Image: "postgres", Replicas: 1},
 		}

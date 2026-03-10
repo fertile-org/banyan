@@ -23,11 +23,12 @@ RUN apt-get update && apt-get install -y \
 RUN mkdir -p /etc/cni/net.d /opt/cni/bin /var/lib/banyan /var/lib/banyan/store /var/run
 
 # Download CNI plugins
-RUN curl -L https://github.com/containernetworking/plugins/releases/download/v1.4.0/cni-plugins-linux-amd64-v1.4.0.tgz \
+RUN curl -L https://github.com/containernetworking/plugins/releases/download/v1.6.2/cni-plugins-linux-amd64-v1.6.2.tgz \
     | tar -xz -C /opt/cni/bin
 
 # Download nerdctl (containerd CLI, used by agent for container operations)
-RUN curl -L https://github.com/containerd/nerdctl/releases/download/v2.0.3/nerdctl-2.0.3-linux-amd64.tar.gz \
+# v2.1.3+ required for --health-cmd support
+RUN curl -L https://github.com/containerd/nerdctl/releases/download/v2.1.3/nerdctl-2.1.3-linux-amd64.tar.gz \
     | tar -xz -C /usr/local/bin nerdctl
 
 # Copy pre-built binaries (cache-bust file forces rebuild when binaries change)

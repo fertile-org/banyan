@@ -249,7 +249,7 @@ func TestManifestToProto(t *testing.T) {
 					Ports:       []string{"80:80"},
 					Environment: []string{"FOO=bar"},
 					Command:     []string{"nginx"},
-					DependsOn:   []string{"db"},
+					DependsOn:   types.DependsOnConfig{"db": {Condition: "service_started"}},
 				},
 			},
 		}
@@ -277,8 +277,13 @@ func TestManifestToProto(t *testing.T) {
 		if len(svc.Command) != 1 || svc.Command[0] != "nginx" {
 			t.Errorf("unexpected command: %v", svc.Command)
 		}
-		if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "db" {
-			t.Errorf("unexpected depends_on: %v", svc.DependsOn)
+		if len(svc.DependsOn) != 1 {
+			t.Errorf("expected 1 depends_on entry, got %d", len(svc.DependsOn))
+		}
+		if dep, ok := svc.DependsOn["db"]; !ok {
+			t.Errorf("expected depends_on to contain 'db', got %v", svc.DependsOn)
+		} else if dep.Condition != "service_started" {
+			t.Errorf("expected condition 'service_started', got %q", dep.Condition)
 		}
 	})
 

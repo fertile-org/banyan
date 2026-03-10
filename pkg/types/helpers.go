@@ -214,7 +214,7 @@ func ValidateServiceDependencies(targetServices []string, allServices map[string
 		if !ok {
 			continue
 		}
-		for _, dep := range svc.DependsOn {
+		for dep := range svc.DependsOn {
 			if !targetSet[dep] && !runningSet[dep] {
 				return fmt.Errorf("service %q depends on %q which is not running and not being deployed", svcName, dep)
 			}

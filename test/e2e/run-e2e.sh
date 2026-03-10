@@ -277,6 +277,42 @@ else
 fi
 
 # =================================================================
+# Phase 2c: Healthcheck and depends_on Condition Tests
+# =================================================================
+echo ""
+echo "========================================="
+echo "Phase 2c: Healthcheck & depends_on Tests"
+echo "========================================="
+
+# Test: depends_on long form with condition: service_started deployed successfully.
+# The manifest uses long-form depends_on — if parsing the long-form YAML failed,
+# the deploy in Phase 2 would have failed.
+log_info "Test: depends_on long form (condition: service_started) parsed and deployed"
+DEPLOY_STATUS=$(docker exec banyan-engine banyan-cli deployment e2e-test-app 2>&1) || true
+if echo "$DEPLOY_STATUS" | grep -qi "running\|deploying"; then
+    log_test_pass "depends_on: long form deployed successfully"
+else
+    log_test_fail "depends_on: deployment not running after long-form depends_on"
+    echo "$DEPLOY_STATUS"
+fi
+
+# Test: DB container is running (validates depends_on doesn't block deployment)
+log_info "Test: DB container running (depends_on resolved)"
+DB_CONTAINER_RUNNING=false
+for worker in banyan-worker-1 banyan-worker-2; do
+    for c in $(get_container_names "$worker"); do
+        if [[ "$c" == *"-db-"* ]]; then
+            DB_CONTAINER_RUNNING=true
+            log_test_pass "depends_on: DB container running on $worker"
+            break 2
+        fi
+    done
+done
+if [ "$DB_CONTAINER_RUNNING" = false ]; then
+    log_test_fail "depends_on: DB container not found on any worker"
+fi
+
+# =================================================================
 # Phase 3: VPC Networking Tests
 # =================================================================
 echo ""

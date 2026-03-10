@@ -147,18 +147,22 @@ func (d *WireGuardDriver) ReconcilePeers(ctx context.Context, peers []Peer) erro
 // WriteCNIConfig writes the CNI configuration for nerdctl to use the banyan bridge.
 // Containers connect to the bridge via CNI; WireGuard handles cross-host routing.
 func (d *WireGuardDriver) WriteCNIConfig(subnet net.IPNet) error {
-	config := cniConfigData{
-		CNIVersion:  "0.3.1",
-		Name:        "banyan",
-		Type:        "bridge",
-		Bridge:      d.bridgeName,
-		IsGateway:   true,
-		IPMasq:      false,
-		HairpinMode: true,
-		IPAM: cniIPAMData{
-			Type:   "host-local",
-			Subnet: subnet.String(),
-			Routes: []cniRouteData{{Dst: "0.0.0.0/0"}},
+	config := cniConflistData{
+		CNIVersion: "1.0.0",
+		Name:       "banyan",
+		Plugins: []cniPluginConfig{
+			{
+				Type:        "bridge",
+				Bridge:      d.bridgeName,
+				IsGateway:   true,
+				IPMasq:      false,
+				HairpinMode: true,
+				IPAM: &cniIPAMData{
+					Type:   "host-local",
+					Subnet: subnet.String(),
+					Routes: []cniRouteData{{Dst: "0.0.0.0/0"}},
+				},
+			},
 		},
 	}
 
@@ -170,6 +174,11 @@ func (d *WireGuardDriver) WriteCNIConfig(subnet net.IPNet) error {
 	if mkErr := os.MkdirAll(cniConfigDir, 0o755); mkErr != nil {
 		return fmt.Errorf("create CNI config dir: %w", mkErr)
 	}
+
+	// Remove legacy .conf file if it exists (upgraded from pre-conflist format).
+	// Having both 10-banyan.conf and 10-banyan.conflist causes CNI conflicts.
+	legacyConf := filepath.Join(cniConfigDir, "10-banyan.conf")
+	os.Remove(legacyConf) //nolint:errcheck // best-effort cleanup
 
 	configPath := filepath.Join(cniConfigDir, cniConfigFile)
 	if writeErr := os.WriteFile(configPath, data, 0o644); writeErr != nil { //nolint:gosec // CNI config must be readable by CNI plugins

@@ -49,7 +49,7 @@ func TestConvertFromProto(t *testing.T) {
 				Total:   2,
 				Services: map[string]*banyanpb.ServiceInfo{
 					"web": {Image: "nginx:latest", Replicas: 2, Ports: []string{"8080:80"}},
-					"db":  {Image: "postgres:15", Replicas: 1, Ports: []string{"5432:5432"}, DependsOn: []string{"web"}},
+					"db":  {Image: "postgres:15", Replicas: 1, Ports: []string{"5432:5432"}, DependsOn: map[string]*banyanpb.DependsOnCondition{"web": {Condition: "service_started"}}},
 				},
 				Tags:          []string{"production"},
 				CreatedAtUnix: now - 600,

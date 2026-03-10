@@ -182,7 +182,7 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 				Image:     svc.Image,
 				Replicas:  svc.Replicas,
 				Ports:     svc.Ports,
-				DependsOn: svc.DependsOn,
+				DependsOn: protoDependsOnToNames(svc.DependsOn),
 			})
 		}
 
@@ -250,4 +250,17 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 	}
 
 	return data
+}
+
+// protoDependsOnToNames extracts sorted dependency names from the proto map.
+func protoDependsOnToNames(deps map[string]*banyanpb.DependsOnCondition) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(deps))
+	for name := range deps {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

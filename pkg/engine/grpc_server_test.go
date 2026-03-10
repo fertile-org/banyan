@@ -819,7 +819,7 @@ func TestProtoToManifest(t *testing.T) {
 					Ports:       []string{"80:80"},
 					Environment: []string{"FOO=bar"},
 					Command:     []string{"nginx"},
-					DependsOn:   []string{"db"},
+					DependsOn:   map[string]*banyanpb.DependsOnCondition{"db": {Condition: "service_started"}},
 				},
 			},
 		}
@@ -837,8 +837,11 @@ func TestProtoToManifest(t *testing.T) {
 		if len(svc.Ports) != 1 || svc.Ports[0] != "80:80" {
 			t.Errorf("unexpected ports: %v", svc.Ports)
 		}
-		if len(svc.DependsOn) != 1 || svc.DependsOn[0] != "db" {
-			t.Errorf("unexpected depends_on: %v", svc.DependsOn)
+		if len(svc.DependsOn) != 1 {
+			t.Errorf("expected 1 depends_on entry, got %d", len(svc.DependsOn))
+		}
+		if _, ok := svc.DependsOn["db"]; !ok {
+			t.Errorf("expected depends_on to contain 'db', got %v", svc.DependsOn)
 		}
 	})
 
@@ -1310,7 +1313,7 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 		Name:   "multi-app",
 		Status: types.StatusRunning,
 		Services: map[string]types.ServiceRecord{
-			"web": {Image: "nginx", Replicas: 1, Ports: []string{"80:80"}, Environment: []string{"ENV=prod"}, Command: []string{"nginx"}, DependsOn: []string{"db"}},
+			"web": {Image: "nginx", Replicas: 1, Ports: []string{"80:80"}, Environment: []string{"ENV=prod"}, Command: []string{"nginx"}, DependsOn: types.DependsOnConfig{"db": {Condition: "service_started"}}},
 			"db":  {Image: "postgres", Replicas: 1},
 		},
 		CreatedAt: time.Now(),
@@ -1378,8 +1381,11 @@ func TestGetStatus_MultipleDeploymentsAndAgents(t *testing.T) {
 				if webSvc.Image != "nginx" {
 					t.Errorf("expected image 'nginx', got %q", webSvc.Image)
 				}
-				if len(webSvc.DependsOn) != 1 || webSvc.DependsOn[0] != "db" {
-					t.Errorf("expected depends_on [db], got %v", webSvc.DependsOn)
+				if len(webSvc.DependsOn) != 1 {
+					t.Errorf("expected 1 depends_on entry, got %d", len(webSvc.DependsOn))
+				}
+				if _, ok := webSvc.DependsOn["db"]; !ok {
+					t.Errorf("expected depends_on to contain 'db', got %v", webSvc.DependsOn)
 				}
 			}
 		}
@@ -3083,8 +3089,8 @@ func TestDeployServices(t *testing.T) {
 		})
 
 		allServices := map[string]types.ServiceRecord{
-			"web": {Image: "nginx:v2", Replicas: 1, DependsOn: []string{"api"}},
-			"api": {Image: "myapi:v2", Replicas: 1, DependsOn: []string{"db"}},
+			"web": {Image: "nginx:v2", Replicas: 1, DependsOn: types.DependsOnConfig{"api": {Condition: "service_started"}}},
+			"api": {Image: "myapi:v2", Replicas: 1, DependsOn: types.DependsOnConfig{"db": {Condition: "service_started"}}},
 			"db":  {Image: "postgres:15", Replicas: 1},
 		}
 
@@ -3165,7 +3171,7 @@ func TestDeployServices(t *testing.T) {
 		})
 
 		allServices := map[string]types.ServiceRecord{
-			"api": {Image: "myapi", Replicas: 1, DependsOn: []string{"db"}},
+			"api": {Image: "myapi", Replicas: 1, DependsOn: types.DependsOnConfig{"db": {Condition: "service_started"}}},
 			"web": {Image: "nginx", Replicas: 1},
 			"db":  {Image: "postgres", Replicas: 1},
 		}
@@ -3786,6 +3792,121 @@ func TestHeartbeat_UpdatesAgentMetrics(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
+}
+
+func TestHeartbeat_MetricsBoundsChecking(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register agent
+	_, err := client.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName:    "worker-bounds",
+		ApiAddress:   "worker-bounds:9090",
+		SessionToken: "token-bounds",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+
+	t.Run("valid metrics stored", func(t *testing.T) {
+		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 8 * 1024 * 1024 * 1024, // 8 GB
+				MemoryUsedBytes:  2 * 1024 * 1024 * 1024,  // 2 GB
+				CpuCores:         4,
+				CpuUsageRatio:    0.5,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		var node types.NodeRecord
+		if err := srv.store.Get(ctx, types.KeyNodes+"worker-bounds", &node); err != nil {
+			t.Fatalf("Get node failed: %v", err)
+		}
+		if node.MemoryTotalBytes != 8*1024*1024*1024 {
+			t.Errorf("MemoryTotalBytes = %d, want %d", node.MemoryTotalBytes, 8*1024*1024*1024)
+		}
+		if node.MemoryUsedBytes != 2*1024*1024*1024 {
+			t.Errorf("MemoryUsedBytes = %d, want %d", node.MemoryUsedBytes, 2*1024*1024*1024)
+		}
+		if node.CPUCores != 4 {
+			t.Errorf("CPUCores = %d, want 4", node.CPUCores)
+		}
+		if node.CPUUsageRatio != 0.5 {
+			t.Errorf("CPUUsageRatio = %f, want 0.5", node.CPUUsageRatio)
+		}
+	})
+
+	t.Run("excessive memory rejected", func(t *testing.T) {
+		// First set known good values
+		_, _ = client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 8 * 1024 * 1024 * 1024,
+				MemoryUsedBytes:  1 * 1024 * 1024 * 1024,
+				CpuCores:         4,
+				CpuUsageRatio:    0.25,
+			},
+		})
+
+		// Send bogus metrics — should not update memory/cpu fields
+		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 1<<63 + 1, // exceeds 64 TB cap
+				MemoryUsedBytes:  1 << 62,
+				CpuCores:         9999,        // exceeds 1024 cap
+				CpuUsageRatio:    5.0,         // exceeds 1.0 cap
+			},
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		var node types.NodeRecord
+		if err := srv.store.Get(ctx, types.KeyNodes+"worker-bounds", &node); err != nil {
+			t.Fatalf("Get node failed: %v", err)
+		}
+		// Fields should retain previous good values
+		if node.MemoryTotalBytes != 8*1024*1024*1024 {
+			t.Errorf("MemoryTotalBytes = %d, want previous value %d (bogus value should be rejected)", node.MemoryTotalBytes, 8*1024*1024*1024)
+		}
+		if node.CPUCores != 4 {
+			t.Errorf("CPUCores = %d, want previous value 4 (bogus value should be rejected)", node.CPUCores)
+		}
+		if node.CPUUsageRatio != 0.25 {
+			t.Errorf("CPUUsageRatio = %f, want previous value 0.25 (bogus value should be rejected)", node.CPUUsageRatio)
+		}
+	})
+
+	t.Run("used memory capped at total", func(t *testing.T) {
+		_, err := client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+			AgentName:    "worker-bounds",
+			SessionToken: "token-bounds",
+			SystemMetrics: &banyanpb.SystemMetrics{
+				MemoryTotalBytes: 4 * 1024 * 1024 * 1024, // 4 GB
+				MemoryUsedBytes:  8 * 1024 * 1024 * 1024,  // 8 GB (> total, should be capped)
+				CpuCores:         2,
+				CpuUsageRatio:    0.9,
+			},
+		})
+		if err != nil {
+			t.Fatalf("Heartbeat failed: %v", err)
+		}
+		var node types.NodeRecord
+		if err := srv.store.Get(ctx, types.KeyNodes+"worker-bounds", &node); err != nil {
+			t.Fatalf("Get node failed: %v", err)
+		}
+		if node.MemoryUsedBytes != 4*1024*1024*1024 {
+			t.Errorf("MemoryUsedBytes = %d, want %d (should be capped at total)", node.MemoryUsedBytes, 4*1024*1024*1024)
+		}
+	})
 }
 
 func TestReconcileDeploymentStatus(t *testing.T) {

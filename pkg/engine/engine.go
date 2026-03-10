@@ -465,6 +465,16 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 		return
 	}
 
+	// Validate cluster has enough total resources for this deployment
+	if capErr := types.ValidateClusterCapacity(deployment, agents); capErr != nil {
+		e.logger().Error("Cluster capacity exceeded", "name", deployment.Name, "error", capErr)
+		deployment.Status = types.StatusFailed
+		deployment.Error = capErr.Error()
+		deployment.UpdatedAt = time.Now()
+		_ = e.store.Save(ctx, types.KeyDeployments+deployment.ID, deployment)
+		return
+	}
+
 	e.logger().Info("Scheduling deployment", "name", deployment.Name, "services", len(deployment.Services), "agents", len(agents))
 
 	tasks, err := types.BuildTasksForDeployment(deployment, agents)

@@ -96,7 +96,9 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 }
 
 // BuildTasksForDeployment creates task records for a deployment, distributing
-// replicas round-robin across the given agents.
+// replicas across agents based on available resources.
+// When agents report system metrics (via heartbeat), tasks are assigned to the agent
+// with the most available memory. When metrics are unavailable, falls back to round-robin.
 // When ReplacesID is set (blue-green deployment), container names use the deployment ID
 // as prefix to avoid naming conflicts with the still-running old deployment.
 // Services with deploy.placement.node are scheduled only on matching agents (glob pattern).
@@ -104,6 +106,18 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 	containerPrefix := deployment.Name
 	if deployment.ReplacesID != "" {
 		containerPrefix = deployment.ID
+	}
+
+	// Track resources scheduled in this batch to avoid piling tasks on one agent.
+	batchMemory := make(map[string]uint64, len(agents))
+
+	// Check if any agent has resource metrics (MemoryTotalBytes > 0).
+	hasMetrics := false
+	for i := range agents {
+		if agents[i].MemoryTotalBytes > 0 {
+			hasMetrics = true
+			break
+		}
 	}
 
 	var tasks []*TaskRecord
@@ -118,9 +132,18 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 			}
 		}
 
+		resReq := ServiceResourceRequest(svc)
+
 		for i := 0; i < svc.Replicas; i++ {
-			agent := eligible[agentIdx%len(eligible)]
-			agentIdx++
+			var agent NodeRecord
+			if hasMetrics {
+				agent = pickAgentByResources(eligible, batchMemory, resReq)
+			} else {
+				agent = eligible[agentIdx%len(eligible)]
+				agentIdx++
+			}
+
+			batchMemory[agent.Name] += resReq.MemoryBytes
 
 			now := time.Now()
 			tasks = append(tasks, &TaskRecord{
@@ -151,12 +174,85 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 	return tasks, nil
 }
 
+// pickAgentByResources selects the agent with the most available memory,
+// accounting for resources already scheduled in this batch.
+func pickAgentByResources(agents []NodeRecord, batchMemory map[string]uint64, _ ResourceRequest) NodeRecord {
+	bestIdx := 0
+	bestAvail := int64(0)
+
+	for i := range agents {
+		// Available = total - OS used - already scheduled in this batch
+		avail := int64(agents[i].MemoryTotalBytes) - int64(agents[i].MemoryUsedBytes) - int64(batchMemory[agents[i].Name]) //nolint:gosec // values are bounds-checked in heartbeat handler
+		if i == 0 || avail > bestAvail {
+			bestAvail = avail
+			bestIdx = i
+		}
+	}
+
+	return agents[bestIdx]
+}
+
+// ValidateClusterCapacity checks whether the cluster has enough total resources
+// to fit the deployment. Returns an error if total resource requests exceed
+// total cluster capacity.
+func ValidateClusterCapacity(deployment *DeploymentRecord, agents []NodeRecord) error {
+	// Sum total cluster resources
+	var totalMemory uint64
+	hasMetrics := false
+	for i := range agents {
+		if agents[i].MemoryTotalBytes > 0 {
+			hasMetrics = true
+		}
+		totalMemory += agents[i].MemoryTotalBytes
+	}
+
+	// Skip validation if agents haven't reported metrics yet
+	if !hasMetrics {
+		return nil
+	}
+
+	// Sum deployment resource requests
+	var requestedMemory uint64
+	for _, svc := range deployment.Services { //nolint:gocritic // map iteration
+		req := ServiceResourceRequest(svc)
+		requestedMemory += req.MemoryBytes * uint64(svc.Replicas) //nolint:gosec // replicas is always small positive
+	}
+
+	if requestedMemory > totalMemory {
+		return fmt.Errorf(
+			"deployment %q requests %s memory but cluster has %s total across %d agents",
+			deployment.Name,
+			formatBytes(requestedMemory),
+			formatBytes(totalMemory),
+			len(agents),
+		)
+	}
+
+	return nil
+}
+
+// formatBytes formats bytes into a human-readable string.
+func formatBytes(b uint64) string {
+	const (
+		gb = 1024 * 1024 * 1024
+		mb = 1024 * 1024
+	)
+	switch {
+	case b >= gb:
+		return fmt.Sprintf("%.1fGB", float64(b)/float64(gb))
+	case b >= mb:
+		return fmt.Sprintf("%.0fMB", float64(b)/float64(mb))
+	default:
+		return fmt.Sprintf("%dB", b)
+	}
+}
+
 // filterAgentsByPlacement returns agents whose name matches the glob pattern.
 func filterAgentsByPlacement(agents []NodeRecord, pattern string) []NodeRecord {
 	var matched []NodeRecord
-	for _, agent := range agents {
-		if ok, _ := path.Match(pattern, agent.Name); ok {
-			matched = append(matched, agent)
+	for i := range agents {
+		if ok, _ := path.Match(pattern, agents[i].Name); ok {
+			matched = append(matched, agents[i])
 		}
 	}
 	return matched
@@ -214,7 +310,7 @@ func ValidateServiceDependencies(targetServices []string, allServices map[string
 		if !ok {
 			continue
 		}
-		for _, dep := range svc.DependsOn {
+		for dep := range svc.DependsOn {
 			if !targetSet[dep] && !runningSet[dep] {
 				return fmt.Errorf("service %q depends on %q which is not running and not being deployed", svcName, dep)
 			}

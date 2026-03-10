@@ -34,7 +34,9 @@ The script installs:
 | Role | What gets installed |
 |------|-------------------|
 | Engine | `banyan-engine`, `banyan-cli`, etcd, wireguard-tools |
-| Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl, CNI plugins, wireguard-tools, BuildKit |
+| Agent | `banyan-agent`, `banyan-cli`, containerd, nerdctl (>= 2.1.3), CNI plugins, wireguard-tools, BuildKit |
+
+If nerdctl is already installed, the script checks the version and upgrades if it's below 2.1.3 (required for healthcheck support).
 
 Supported distros: Ubuntu, Debian, CentOS, RHEL, Fedora, Rocky Linux, AlmaLinux. Architectures: x86_64, ARM64.
 
@@ -78,7 +80,7 @@ scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 When building from source, you still need runtime dependencies on each node:
 
 - **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below), wireguard-tools (for control tunnel).
-- **Worker nodes**: containerd, nerdctl, CNI plugins, wireguard-tools (for overlay and control tunnel), BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
+- **Worker nodes**: containerd, nerdctl (>= 2.1.3), CNI plugins, wireguard-tools (for overlay and control tunnel), BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
 
 You also need to create systemd service files manually (the install script does this automatically). See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for the service file contents, or run the engine/agent in the foreground with `sudo banyan-engine start`.
 

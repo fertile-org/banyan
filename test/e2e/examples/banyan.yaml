@@ -39,7 +39,8 @@ services:
           }
         }).listen(3000, () => console.log('API server running on port 3000'));
     depends_on:
-      - db
+      db:
+        condition: service_started
 
   # Redis database (single instance, no exposed ports)
   # Must bind to 0.0.0.0 — Redis 7 defaults to 127.0.0.1 only

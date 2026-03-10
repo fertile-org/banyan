@@ -543,3 +543,117 @@ services:
 		}
 	})
 }
+
+func TestDependsOnConfig(t *testing.T) {
+	t.Run("short form list", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    depends_on:
+      - db
+      - redis
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		deps := manifest.Services["web"].DependsOn
+		if len(deps) != 2 {
+			t.Fatalf("expected 2 deps, got %d", len(deps))
+		}
+		if deps["db"].Condition != "service_started" {
+			t.Errorf("expected service_started for db, got %q", deps["db"].Condition)
+		}
+		if deps["redis"].Condition != "service_started" {
+			t.Errorf("expected service_started for redis, got %q", deps["redis"].Condition)
+		}
+	})
+
+	t.Run("long form map with conditions", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		deps := manifest.Services["web"].DependsOn
+		if len(deps) != 2 {
+			t.Fatalf("expected 2 deps, got %d", len(deps))
+		}
+		if deps["db"].Condition != "service_healthy" {
+			t.Errorf("expected service_healthy for db, got %q", deps["db"].Condition)
+		}
+		if deps["redis"].Condition != "service_started" {
+			t.Errorf("expected service_started for redis, got %q", deps["redis"].Condition)
+		}
+	})
+
+	t.Run("long form map with empty condition defaults to service_started", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+    depends_on:
+      db: {}
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		deps := manifest.Services["web"].DependsOn
+		if len(deps) != 1 {
+			t.Fatalf("expected 1 dep, got %d", len(deps))
+		}
+		if deps["db"].Condition != "service_started" {
+			t.Errorf("expected service_started for db, got %q", deps["db"].Condition)
+		}
+	})
+
+	t.Run("no depends_on", func(t *testing.T) {
+		input := `
+name: my-app
+services:
+  web:
+    image: nginx
+`
+		var manifest BanyanManifest
+		if err := yaml.Unmarshal([]byte(input), &manifest); err != nil {
+			t.Fatalf("unmarshal failed: %v", err)
+		}
+		deps := manifest.Services["web"].DependsOn
+		if len(deps) != 0 {
+			t.Errorf("expected no deps, got %d", len(deps))
+		}
+	})
+
+	t.Run("ServiceNames returns all dependency names", func(t *testing.T) {
+		config := DependsOnConfig{
+			"db":    {Condition: "service_healthy"},
+			"redis": {Condition: "service_started"},
+		}
+		names := config.ServiceNames()
+		if len(names) != 2 {
+			t.Fatalf("expected 2 names, got %d", len(names))
+		}
+	})
+
+	t.Run("ServiceNames returns nil for empty config", func(t *testing.T) {
+		var config DependsOnConfig
+		names := config.ServiceNames()
+		if names != nil {
+			t.Errorf("expected nil, got %v", names)
+		}
+	})
+}

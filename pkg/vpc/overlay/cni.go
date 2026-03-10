@@ -5,7 +5,7 @@ import "net"
 const (
 	defaultBridge = "banyan0"
 	cniConfigDir  = "/etc/cni/net.d"
-	cniConfigFile = "10-banyan.conf"
+	cniConfigFile = "10-banyan.conflist"
 )
 
 // LinkOperations abstracts netlink/exec operations for testability.
@@ -19,16 +19,20 @@ type LinkOperations interface {
 	LinkExists(name string) (bool, error)
 }
 
-// cniConfigData is the CNI configuration for the banyan bridge network.
-type cniConfigData struct {
-	CNIVersion  string      `json:"cniVersion"`
-	Name        string      `json:"name"`
+// cniConflistData is the CNI conflist configuration for the banyan bridge network.
+type cniConflistData struct {
+	CNIVersion string            `json:"cniVersion"`
+	Name       string            `json:"name"`
+	Plugins    []cniPluginConfig `json:"plugins"`
+}
+
+type cniPluginConfig struct {
 	Type        string      `json:"type"`
-	Bridge      string      `json:"bridge"`
-	IsGateway   bool        `json:"isGateway"`
+	Bridge      string      `json:"bridge,omitempty"`
+	IsGateway   bool        `json:"isGateway,omitempty"`
 	IPMasq      bool        `json:"ipMasq"`
-	HairpinMode bool        `json:"hairpinMode"`
-	IPAM        cniIPAMData `json:"ipam"`
+	HairpinMode bool        `json:"hairpinMode,omitempty"`
+	IPAM        *cniIPAMData `json:"ipam,omitempty"`
 }
 
 type cniIPAMData struct {

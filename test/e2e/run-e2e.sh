@@ -1,6 +1,6 @@
 #!/bin/bash
 # Banyan E2E Test Runner
-# Tests: deployment, VPC networking, blue-green redeployment, down command
+# Tests: deployment, resource-aware scheduling, VPC networking, blue-green redeployment, down command
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -274,6 +274,89 @@ if [ -n "$ENVFILE_API_CONTAINER" ]; then
     fi
 else
     log_warn "Skipping env_file tests (no API container found)"
+fi
+
+# =================================================================
+# Phase 2c: Healthcheck and depends_on Condition Tests
+# =================================================================
+echo ""
+echo "========================================="
+echo "Phase 2c: Healthcheck & depends_on Tests"
+echo "========================================="
+
+# Test: depends_on long form with condition: service_started deployed successfully.
+# The manifest uses long-form depends_on — if parsing the long-form YAML failed,
+# the deploy in Phase 2 would have failed.
+log_info "Test: depends_on long form (condition: service_started) parsed and deployed"
+DEPLOY_STATUS=$(docker exec banyan-engine banyan-cli deployment e2e-test-app 2>&1) || true
+if echo "$DEPLOY_STATUS" | grep -qi "running\|deploying"; then
+    log_test_pass "depends_on: long form deployed successfully"
+else
+    log_test_fail "depends_on: deployment not running after long-form depends_on"
+    echo "$DEPLOY_STATUS"
+fi
+
+# Test: DB container is running (validates depends_on doesn't block deployment)
+log_info "Test: DB container running (depends_on resolved)"
+DB_CONTAINER_RUNNING=false
+for worker in banyan-worker-1 banyan-worker-2; do
+    for c in $(get_container_names "$worker"); do
+        if [[ "$c" == *"-db-"* ]]; then
+            DB_CONTAINER_RUNNING=true
+            log_test_pass "depends_on: DB container running on $worker"
+            break 2
+        fi
+    done
+done
+if [ "$DB_CONTAINER_RUNNING" = false ]; then
+    log_test_fail "depends_on: DB container not found on any worker"
+fi
+
+# =================================================================
+# Phase 2d: Resource-Aware Scheduling Tests
+# =================================================================
+echo ""
+echo "========================================="
+echo "Phase 2d: Resource-Aware Scheduling Tests"
+echo "========================================="
+
+# Test: Agent metrics are reported via heartbeat
+log_info "Test: Agent metrics populated after heartbeat"
+AGENT_JSON=$(docker exec banyan-engine banyan-cli agent -o json 2>&1) || true
+
+# Count agents with MemTotal > 0 (heartbeat reported SystemMetrics, engine stored on NodeRecord)
+AGENTS_WITH_METRICS=0
+for worker_name in worker-1 worker-2; do
+    # Extract MemTotal for this agent — look for "MemTotal":NNNN where NNNN > 0
+    AGENT_DETAIL=$(docker exec banyan-engine banyan-cli agent "$worker_name" -o json 2>&1) || true
+    MEM_TOTAL=$(echo "$AGENT_DETAIL" | grep -oP '"MemTotal":\s*\K[0-9]+' | head -1) || MEM_TOTAL="0"
+    CPU_CORES=$(echo "$AGENT_DETAIL" | grep -oP '"CPUCores":\s*\K[0-9]+' | head -1) || CPU_CORES="0"
+    if [ "${MEM_TOTAL:-0}" -gt 0 ] 2>/dev/null && [ "${CPU_CORES:-0}" -gt 0 ] 2>/dev/null; then
+        log_test_pass "Resource scheduling: $worker_name reports MemTotal=$MEM_TOTAL CPUCores=$CPU_CORES"
+        AGENTS_WITH_METRICS=$((AGENTS_WITH_METRICS + 1))
+    else
+        log_test_fail "Resource scheduling: $worker_name has MemTotal=$MEM_TOTAL CPUCores=$CPU_CORES (expected > 0)"
+    fi
+done
+
+# Test: Deployment succeeded with resource-aware scheduling (default: 512MB memory, 1 CPU per service)
+log_info "Test: Deployment succeeded with resource-aware scheduling"
+DEPLOY_STATUS=$(docker exec banyan-engine banyan-cli deployment e2e-test-app 2>&1) || true
+if echo "$DEPLOY_STATUS" | grep -qi "running"; then
+    log_test_pass "Resource scheduling: deployment running with resource requests"
+else
+    log_test_fail "Resource scheduling: deployment status not running"
+    echo "$DEPLOY_STATUS"
+fi
+
+# Test: Tasks are distributed across agents (not all on one agent)
+log_info "Test: Tasks distributed across agents"
+SCHED_W1=$(docker exec banyan-worker-1 nerdctl ps -q 2>/dev/null | wc -l)
+SCHED_W2=$(docker exec banyan-worker-2 nerdctl ps -q 2>/dev/null | wc -l)
+if [ "$SCHED_W1" -gt 0 ] && [ "$SCHED_W2" -gt 0 ]; then
+    log_test_pass "Resource scheduling: tasks spread across workers (w1=$SCHED_W1, w2=$SCHED_W2)"
+else
+    log_test_fail "Resource scheduling: tasks not distributed (w1=$SCHED_W1, w2=$SCHED_W2)"
 fi
 
 # =================================================================

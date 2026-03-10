@@ -178,10 +178,14 @@ message ManifestService {
   repeated string ports = 4;
   repeated string environment = 5;
   repeated string command = 6;
-  repeated string depends_on = 7;
+  map<string, DependsOnCondition> depends_on = 7;
   string restart = 8;
   repeated string entrypoint = 9;
   ManifestHealthcheck healthcheck = 10;
+}
+
+message DependsOnCondition {
+  string condition = 1;  // "service_started" or "service_healthy"
 }
 
 message ManifestHealthcheck {
@@ -264,7 +268,7 @@ message ServiceInfo {
   repeated string ports = 3;
   repeated string environment = 4;
   repeated string command = 5;
-  repeated string depends_on = 6;
+  map<string, DependsOnCondition> depends_on = 6;
 }
 
 message TaskInfo {

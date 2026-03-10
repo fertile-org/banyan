@@ -168,7 +168,7 @@ services:
 banyan-cli up -f banyan.yaml
 ```
 
-Banyan distributes 5 containers across 2 workers using round-robin:
+Banyan distributes 5 containers across 2 workers based on available resources — each task goes to the worker with the most available memory:
 
 | Worker 1 | Worker 2 |
 |----------|----------|
@@ -176,7 +176,7 @@ Banyan distributes 5 containers across 2 workers using round-robin:
 | my-app-api-1 | my-app-api-2 |
 | my-app-db-0 | |
 
-**The manifest didn't change.** You went from one server to two — same YAML, more capacity.
+**The manifest didn't change.** You went from one server to two — same YAML, more capacity. Banyan tracks CPU, memory, and disk on every worker and makes scheduling decisions accordingly. No manual pinning needed for most workloads.
 
 ## 5. Check containers on workers
 

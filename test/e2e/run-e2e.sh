@@ -93,17 +93,17 @@ test_proxy() {
     local target_ip=$2
     local port=$3
     local desc=$4
-    local retries=5
+    local retries=10
     local i=0
     local http_code
     while [ $i -lt $retries ]; do
-        http_code=$(docker exec "$source" curl -s -o /dev/null -w "%{http_code}" --connect-timeout 10 "http://${target_ip}:${port}/" 2>/dev/null) || http_code="000"
+        http_code=$(docker exec "$source" curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 "http://${target_ip}:${port}/" 2>/dev/null) || http_code="000"
         if [ "$http_code" = "200" ]; then
             log_test_pass "$desc (HTTP $http_code)"
             return 0
         fi
         i=$((i + 1))
-        [ $i -lt $retries ] && sleep 2
+        [ $i -lt $retries ] && sleep 3
     done
     log_test_fail "$desc (HTTP $http_code after $retries attempts)"
     # Debug: show verbose curl output and routing info on failure
@@ -403,19 +403,37 @@ for container in $WORKER2_CONTAINERS; do
 done
 
 # Test 2: Cross-host container connectivity
+# Wait for VPC peer convergence: agent health reports (10s) + heartbeat peer exchange (15s)
 log_info "Test: Cross-host container connectivity via overlay"
 if [ -n "$WORKER1_IP" ] && [ -n "$WORKER2_IP" ] && [ -n "$WORKER1_CONTAINER" ] && [ -n "$WORKER2_CONTAINER" ]; then
-    # Ping from worker-1 container to worker-2 container
-    if docker exec banyan-worker-1 nerdctl exec "$WORKER1_CONTAINER" ping -c 3 -W 5 "$WORKER2_IP" 2>/dev/null | grep -q "0% packet loss"; then
+    # Wait for cross-host connectivity with retries (peers converge via heartbeat)
+    PING_OK_1TO2=false
+    PING_OK_2TO1=false
+    for attempt in $(seq 1 10); do
+        if [ "$PING_OK_1TO2" = false ]; then
+            if docker exec banyan-worker-1 nerdctl exec "$WORKER1_CONTAINER" ping -c 1 -W 3 "$WORKER2_IP" >/dev/null 2>&1; then
+                PING_OK_1TO2=true
+            fi
+        fi
+        if [ "$PING_OK_2TO1" = false ]; then
+            if docker exec banyan-worker-2 nerdctl exec "$WORKER2_CONTAINER" ping -c 1 -W 3 "$WORKER1_IP" >/dev/null 2>&1; then
+                PING_OK_2TO1=true
+            fi
+        fi
+        if [ "$PING_OK_1TO2" = true ] && [ "$PING_OK_2TO1" = true ]; then
+            break
+        fi
+        sleep 3
+    done
+
+    if [ "$PING_OK_1TO2" = true ]; then
         log_test_pass "Cross-host ping: $WORKER1_CONTAINER ($WORKER1_IP) -> $WORKER2_IP"
     else
         log_test_fail "Cross-host ping failed: $WORKER1_CONTAINER ($WORKER1_IP) -> $WORKER2_IP"
-        # Debug: show ping output
         docker exec banyan-worker-1 nerdctl exec "$WORKER1_CONTAINER" ping -c 3 -W 5 "$WORKER2_IP" 2>&1 || true
     fi
 
-    # Ping from worker-2 container to worker-1 container
-    if docker exec banyan-worker-2 nerdctl exec "$WORKER2_CONTAINER" ping -c 3 -W 5 "$WORKER1_IP" 2>/dev/null | grep -q "0% packet loss"; then
+    if [ "$PING_OK_2TO1" = true ]; then
         log_test_pass "Cross-host ping: $WORKER2_CONTAINER ($WORKER2_IP) -> $WORKER1_IP"
     else
         log_test_fail "Cross-host ping failed: $WORKER2_CONTAINER ($WORKER2_IP) -> $WORKER1_IP"
@@ -724,14 +742,34 @@ for container in $(get_container_names banyan-worker-2); do
 done
 
 if [ -n "$POST_W1_IP" ] && [ -n "$POST_W2_IP" ] && [ -n "$POST_W1_CONTAINER" ] && [ -n "$POST_W2_CONTAINER" ]; then
-    if docker exec banyan-worker-1 nerdctl exec "$POST_W1_CONTAINER" ping -c 3 -W 5 "$POST_W2_IP" 2>/dev/null | grep -q "0% packet loss"; then
+    # Wait for peer convergence after redeployment
+    POST_PING_1TO2=false
+    POST_PING_2TO1=false
+    for attempt in $(seq 1 10); do
+        if [ "$POST_PING_1TO2" = false ]; then
+            if docker exec banyan-worker-1 nerdctl exec "$POST_W1_CONTAINER" ping -c 1 -W 3 "$POST_W2_IP" >/dev/null 2>&1; then
+                POST_PING_1TO2=true
+            fi
+        fi
+        if [ "$POST_PING_2TO1" = false ]; then
+            if docker exec banyan-worker-2 nerdctl exec "$POST_W2_CONTAINER" ping -c 1 -W 3 "$POST_W1_IP" >/dev/null 2>&1; then
+                POST_PING_2TO1=true
+            fi
+        fi
+        if [ "$POST_PING_1TO2" = true ] && [ "$POST_PING_2TO1" = true ]; then
+            break
+        fi
+        sleep 3
+    done
+
+    if [ "$POST_PING_1TO2" = true ]; then
         log_test_pass "Post-redeploy cross-host: $POST_W1_CONTAINER -> $POST_W2_IP"
     else
         log_test_fail "Post-redeploy cross-host: $POST_W1_CONTAINER -> $POST_W2_IP"
         docker exec banyan-worker-1 nerdctl exec "$POST_W1_CONTAINER" ping -c 3 -W 5 "$POST_W2_IP" 2>&1 || true
     fi
 
-    if docker exec banyan-worker-2 nerdctl exec "$POST_W2_CONTAINER" ping -c 3 -W 5 "$POST_W1_IP" 2>/dev/null | grep -q "0% packet loss"; then
+    if [ "$POST_PING_2TO1" = true ]; then
         log_test_pass "Post-redeploy cross-host: $POST_W2_CONTAINER -> $POST_W1_IP"
     else
         log_test_fail "Post-redeploy cross-host: $POST_W2_CONTAINER -> $POST_W1_IP"

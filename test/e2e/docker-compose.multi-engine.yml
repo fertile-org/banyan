@@ -1,0 +1,136 @@
+version: '3.8'
+
+# Banyan Multi-Engine HA E2E Test Environment
+# 2 Engines (multi-engine mode) + external etcd + 2 Agents
+#
+# Pre-requisite: Build binaries first (see run-e2e.sh)
+#
+# Auth: Public key exchange via shared volume (keys-exchange).
+# Both engines share external etcd and external registry (in-memory fallback).
+
+services:
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.17
+    container_name: banyan-etcd
+    hostname: etcd
+    command:
+      - etcd
+      - --name=etcd0
+      - --advertise-client-urls=http://0.0.0.0:2379
+      - --listen-client-urls=http://0.0.0.0:2379
+      - --listen-peer-urls=http://0.0.0.0:2380
+      - --data-dir=/etcd-data
+    networks:
+      banyan-net:
+        ipv4_address: 172.28.0.5
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  engine-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: banyan-engine-1
+    hostname: engine-1
+    privileged: true
+    command: ["/entrypoint-engine-ha.sh"]
+    environment:
+      - ENGINE_ID=engine-1
+      - ENGINE_GRPC_PORT=50051
+      - ETCD_ENDPOINT=http://172.28.0.5:2379
+    networks:
+      banyan-net:
+        ipv4_address: 172.28.0.10
+    volumes:
+      - keys-exchange:/tmp/keys-exchange
+      - engine1-data:/var/lib/banyan
+      - ./examples:/examples:ro
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+  engine-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: banyan-engine-2
+    hostname: engine-2
+    privileged: true
+    command: ["/entrypoint-engine-ha.sh"]
+    environment:
+      - ENGINE_ID=engine-2
+      - ENGINE_GRPC_PORT=50051
+      - ETCD_ENDPOINT=http://172.28.0.5:2379
+    networks:
+      banyan-net:
+        ipv4_address: 172.28.0.13
+    volumes:
+      - keys-exchange:/tmp/keys-exchange
+      - engine2-data:/var/lib/banyan
+      - ./examples:/examples:ro
+    depends_on:
+      etcd:
+        condition: service_healthy
+
+  worker-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: banyan-ha-worker-1
+    hostname: worker-1
+    privileged: true
+    command: ["/entrypoint-agent-ha.sh"]
+    environment:
+      - NODE_NAME=worker-1
+      - ENGINE_ENDPOINTS=172.28.0.10:50051,172.28.0.13:50051
+    networks:
+      banyan-net:
+        ipv4_address: 172.28.0.11
+    volumes:
+      - keys-exchange:/tmp/keys-exchange
+      - worker1-data:/var/lib/banyan
+      - worker1-containerd:/var/lib/containerd
+    depends_on:
+      - engine-1
+      - engine-2
+
+  worker-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: banyan-ha-worker-2
+    hostname: worker-2
+    privileged: true
+    command: ["/entrypoint-agent-ha.sh"]
+    environment:
+      - NODE_NAME=worker-2
+      - ENGINE_ENDPOINTS=172.28.0.10:50051,172.28.0.13:50051
+    networks:
+      banyan-net:
+        ipv4_address: 172.28.0.12
+    volumes:
+      - keys-exchange:/tmp/keys-exchange
+      - worker2-data:/var/lib/banyan
+      - worker2-containerd:/var/lib/containerd
+    depends_on:
+      - engine-1
+      - engine-2
+
+networks:
+  banyan-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
+
+volumes:
+  keys-exchange:
+  engine1-data:
+  engine2-data:
+  worker1-data:
+  worker1-containerd:
+  worker2-data:
+  worker2-containerd:

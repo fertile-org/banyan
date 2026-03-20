@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"time"
 
 	"google.golang.org/grpc"
@@ -40,33 +41,74 @@ func NewEngineClient(engineAddr string) (*EngineClient, error) {
 // kernel interface exists. Extracted as a package-level variable for test mocking.
 var controlTunnelExistsFn = overlay.ControlTunnelExists
 
-// controlTunnelEngineIP is the engine IP used when connecting through the control tunnel.
-// Extracted as a package-level variable for test mocking.
-var controlTunnelEngineIP = types.ControlTunnelEngineIP
-
-// NewAutoEngineClient creates a gRPC client that connects through the WireGuard control tunnel.
-// Requires both a WireGuard keypair and the engine's WG public key to be configured.
+// NewAutoEngineClient creates a gRPC client that connects to the engine.
+// Always uses the `engines` list from config. Each engine has its own WireGuard
+// public key — the CLI derives tunnel IPs from keys and connects via WG tunnel.
+// Supports multiple engines for HA failover — tries each with a health check.
 func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
 	cfg, _ := types.LoadConfig(configPath)
 
-	if cfg.CLI.WGPublicKey == "" {
+	// Build engine list from config — always use `engines` field.
+	// Fall back to old single-engine fields for configs that haven't been re-initialized.
+	engines := cfg.CLI.Engines
+	if len(engines) == 0 && cfg.CLI.EngineWGPublicKey != "" {
+		port := "50051"
+		if cfg.CLI.EnginePort != "" {
+			port = cfg.CLI.EnginePort
+		}
+		host := cfg.CLI.EngineHost
+		if host == "" {
+			host = "localhost"
+		}
+		engines = []types.EngineEndpoint{
+			{Address: host + ":" + port, WGPublicKey: cfg.CLI.EngineWGPublicKey},
+		}
+	}
+
+	if len(engines) == 0 {
+		return nil, fmt.Errorf("no engines configured. Run 'sudo banyan-cli init'")
+	}
+
+	// WG auth required unless engines are configured for direct connection (e.g., insecure mode)
+	if cfg.CLI.WGPublicKey == "" && len(cfg.CLI.Engines) == 0 {
 		return nil, fmt.Errorf("no authentication configured. Run 'sudo banyan-cli init'")
 	}
 
-	if cfg.CLI.EngineWGPublicKey == "" {
-		return nil, fmt.Errorf("engine WireGuard public key not configured. Run 'sudo banyan-cli init' and provide the engine's public key")
+	// Build endpoint list — use WG tunnel IPs when tunnel is active, direct addresses otherwise
+	tunnelActive := controlTunnelExistsFn(types.ControlIfaceCLI)
+	var endpoints []string
+	for _, eng := range engines {
+		if tunnelActive {
+			_, port, splitErr := net.SplitHostPort(eng.Address)
+			if splitErr != nil {
+				continue
+			}
+			tunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
+			endpoints = append(endpoints, tunnelIP.String()+":"+port)
+		} else {
+			endpoints = append(endpoints, eng.Address)
+		}
 	}
 
-	if !controlTunnelExistsFn(types.ControlIfaceCLI) {
-		return nil, fmt.Errorf("WireGuard control tunnel is not active. Run 'sudo banyan-cli login' to re-establish it")
+	// Try each endpoint with a health check
+	var lastErr error
+	for _, ep := range endpoints {
+		client, err := NewEngineClient(ep)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		err = client.Health(ctx)
+		cancel()
+		if err != nil {
+			client.Close()
+			lastErr = err
+			continue
+		}
+		return client, nil
 	}
-
-	port := "50051"
-	if cfg.CLI.EnginePort != "" {
-		port = cfg.CLI.EnginePort
-	}
-	tunnelAddr := controlTunnelEngineIP + ":" + port
-	return NewEngineClient(tunnelAddr)
+	return nil, fmt.Errorf("failed to connect to any engine: %w", lastErr)
 }
 
 // Close closes the gRPC connection.

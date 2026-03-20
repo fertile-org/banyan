@@ -2284,3 +2284,65 @@ func TestAllHealthchecksHealthy(t *testing.T) {
 		}
 	})
 }
+
+func TestGenerateEngineID(t *testing.T) {
+	t.Run("returns non-empty string", func(t *testing.T) {
+		id := GenerateEngineID()
+		if id == "" {
+			t.Fatal("expected non-empty engine ID")
+		}
+	})
+
+	t.Run("contains hostname and random suffix", func(t *testing.T) {
+		id := GenerateEngineID()
+		// Should contain a dash separating hostname from random hex
+		if !strings.Contains(id, "-") {
+			t.Errorf("expected engine ID to contain dashes, got %q", id)
+		}
+		// Should end with 4 hex chars
+		parts := strings.Split(id, "-")
+		lastPart := parts[len(parts)-1]
+		if len(lastPart) != 4 {
+			t.Errorf("expected 4-char hex suffix, got %q", lastPart)
+		}
+	})
+
+	t.Run("generates unique IDs", func(t *testing.T) {
+		id1 := GenerateEngineID()
+		id2 := GenerateEngineID()
+		if id1 == id2 {
+			t.Errorf("expected unique IDs, both got %q", id1)
+		}
+	})
+}
+
+func TestNewWithEngineID(t *testing.T) {
+	t.Run("uses provided engine ID", func(t *testing.T) {
+		eng, err := New(&Options{
+			StoreBackend: "etcd",
+			StoreAddress: "http://localhost:2379",
+			EngineID:     "custom-engine-1",
+		})
+		if err != nil {
+			t.Skipf("requires etcd: %v", err)
+		}
+		defer eng.Close()
+		if eng.EngineID() != "custom-engine-1" {
+			t.Errorf("expected engine ID 'custom-engine-1', got %q", eng.EngineID())
+		}
+	})
+
+	t.Run("auto-generates engine ID when empty", func(t *testing.T) {
+		eng, err := New(&Options{
+			StoreBackend: "etcd",
+			StoreAddress: "http://localhost:2379",
+		})
+		if err != nil {
+			t.Skipf("requires etcd: %v", err)
+		}
+		defer eng.Close()
+		if eng.EngineID() == "" {
+			t.Error("expected auto-generated engine ID")
+		}
+	})
+}

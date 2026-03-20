@@ -53,20 +53,38 @@ func runLogin(cmd *cobra.Command, args []string) error {
 }
 
 func loginSetupTunnel(cfg *types.BanyanConfig, privKey string) error {
-	myTunnelIP := types.TunnelIPFromPublicKey(cfg.CLI.WGPublicKey)
-	engineHost := cfg.CLI.EngineHost
-	engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+	// Build engine list — same as NewAutoEngineClient
+	engines := cfg.CLI.Engines
+	if len(engines) == 0 && cfg.CLI.EngineWGPublicKey != "" {
+		port := cfg.CLI.EnginePort
+		if port == "" {
+			port = "50051"
+		}
+		host := cfg.CLI.EngineHost
+		if host == "" {
+			host = "localhost"
+		}
+		engines = []types.EngineEndpoint{
+			{Address: host + ":" + port, WGPublicKey: cfg.CLI.EngineWGPublicKey},
+		}
+	}
 
+	myTunnelIP := types.TunnelIPFromPublicKey(cfg.CLI.WGPublicKey)
 	fmt.Printf("  %s Setting up WireGuard control tunnel (%s)...\n", styleInfo.Render("[..]"), myTunnelIP)
 
 	if err := setupControlTunnelFn(types.ControlIfaceCLI, privKey, myTunnelIP, 0); err != nil {
 		return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure this runs with sudo and wireguard kernel module is loaded)", err)
 	}
 
-	engineIP := net.ParseIP(types.ControlTunnelEngineIP)
-	if err := addControlPeerFn(types.ControlIfaceCLI, cfg.CLI.EngineWGPublicKey, engineEndpointWG, engineIP); err != nil {
-		_ = cleanupControlTunnelFn(types.ControlIfaceCLI)
-		return fmt.Errorf("failed to add engine peer to control tunnel: %w", err)
+	// Add all engine peers — each engine has its own WG key and derived tunnel IP
+	for _, eng := range engines {
+		engineHost, _, _ := net.SplitHostPort(eng.Address)
+		engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+		engineTunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
+		if err := addControlPeerFn(types.ControlIfaceCLI, eng.WGPublicKey, engineEndpointWG, engineTunnelIP); err != nil {
+			_ = cleanupControlTunnelFn(types.ControlIfaceCLI)
+			return fmt.Errorf("failed to add engine peer to control tunnel: %w", err)
+		}
 	}
 
 	fmt.Printf("  %s Control tunnel ready\n", styleOK.Render("[OK]"))

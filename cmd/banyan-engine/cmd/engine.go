@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -120,6 +119,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	dirs := []string{
 		engineDataDir,
 		filepath.Join(engineDataDir, "etcd"),
+		filepath.Join(engineDataDir, "registry"),
 		filepath.Join(engineDataDir, "vpc"),
 		"/var/log",
 		"/var/run",
@@ -176,6 +176,8 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		existingCfg.Engine.EtcdCertFile = ""
 		existingCfg.Engine.EtcdKeyFile = ""
 		existingCfg.Engine.EtcdCAFile = ""
+		existingCfg.Engine.ManagedRegistry = false
+		existingCfg.Engine.ExternalRegistryURL = ""
 	}
 
 	// --- Create whitelisted keys directory ---
@@ -212,62 +214,118 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		fmt.Println(styleInfo.Render("Share this public key with agents and CLI clients during their init."))
 	}
 
-	// --- Etcd setup ---
-	if existingCfg.Engine.StoreBackend != "" {
-		if existingCfg.Engine.ManagedEtcd {
-			fmt.Printf("  %s Managed etcd already configured\n", styleOK.Render("[OK]"))
-		} else {
-			fmt.Printf("  %s External etcd already configured: %s\n", styleOK.Render("[OK]"), existingCfg.Engine.StoreAddress)
-		}
-	} else {
-		var etcdChoice string
-		form := huh.NewForm(
+	// --- Deployment mode ---
+	// Ask first: single or multi-engine? This determines the etcd/registry flow.
+	fmt.Println()
+	multiEngine := existingCfg.Engine.MultiEngine
+	if existingCfg.Engine.StoreBackend == "" {
+		// Fresh config — ask deployment mode
+		var modeChoice string
+		modeForm := huh.NewForm(
 			huh.NewGroup(
 				huh.NewSelect[string]().
-					Title("Etcd setup").
-					Description("Banyan requires etcd for distributed state storage").
+					Title("Deployment mode").
+					Description("How many engines will run in your cluster?").
 					Options(
-						huh.NewOption("Managed - Banyan runs etcd for you (recommended)", "managed"),
-						huh.NewOption("External - Connect to your own etcd cluster", "external"),
+						huh.NewOption("Single engine — zero config, everything managed for you (recommended)", "single"),
+						huh.NewOption("Multi-engine HA — 2+ engines for high availability (requires your own etcd and registry)", "multi"),
 					).
-					Value(&etcdChoice),
+					Value(&modeChoice),
 			),
 		)
-		if err := form.Run(); err != nil {
+		if err := modeForm.Run(); err != nil {
 			if errors.Is(err, huh.ErrUserAborted) {
 				fmt.Println("\nInitialization cancelled.")
 				return nil
 			}
-			return fmt.Errorf("etcd setup: %w", err)
+			return fmt.Errorf("deployment mode: %w", err)
 		}
+		multiEngine = modeChoice == "multi"
+	}
 
+	if multiEngine {
+		// --- Multi-engine setup: external etcd + external registry required ---
+		existingCfg.Engine.MultiEngine = true
+		existingCfg.Engine.ManagedEtcd = false
+		existingCfg.Engine.ManagedRegistry = false
 		existingCfg.Engine.StoreBackend = "etcd"
 
-		if etcdChoice == "managed" {
-			existingCfg.Engine.ManagedEtcd = true
+		fmt.Println(styleInfo.Render("\nMulti-engine mode requires an external etcd cluster and registry."))
+		fmt.Println(styleInfo.Render("All engines must point to the same etcd and registry.\n"))
+
+		// Etcd endpoints
+		etcdEndpoints := existingCfg.Engine.StoreAddress
+		if etcdEndpoints == "" {
+			etcdEndpoints = "http://etcd.internal:2379"
+		}
+		registryURL := existingCfg.Engine.ExternalRegistryURL
+		if registryURL == "" {
+			registryURL = "registry.internal:5000"
+		}
+
+		var authMethod string
+		multiForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("External etcd endpoint").
+					Description("Your etcd cluster address (shared between all engines)").
+					Value(&etcdEndpoints),
+				huh.NewInput().
+					Title("External registry URL").
+					Description("Your OCI registry address (shared between all engines, e.g. registry.internal:5000)").
+					Value(&registryURL),
+				huh.NewSelect[string]().
+					Title("Etcd connection security").
+					Options(
+						huh.NewOption("None", "none"),
+						huh.NewOption("Username & Password", "password"),
+						huh.NewOption("TLS (CA certificate)", "tls"),
+						huh.NewOption("mTLS (client certificates)", "mtls"),
+					).
+					Value(&authMethod),
+			),
+		)
+		if err := multiForm.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("multi-engine setup: %w", err)
+		}
+		existingCfg.Engine.StoreAddress = etcdEndpoints
+		existingCfg.Engine.ExternalRegistryURL = registryURL
+		fmt.Printf("  %s External etcd: %s\n", styleOK.Render("[OK]"), etcdEndpoints)
+		fmt.Printf("  %s External registry: %s\n", styleOK.Render("[OK]"), registryURL)
+
+		// Collect auth-specific inputs for etcd
+		if err := collectEtcdAuth(&existingCfg, authMethod); err != nil {
+			return err
+		}
+
+		fmt.Printf("  %s Multi-engine HA mode enabled\n", styleOK.Render("[OK]"))
+	} else {
+		// --- Single-engine setup: managed or external etcd/registry ---
+		existingCfg.Engine.MultiEngine = false
+
+		// Etcd setup
+		if existingCfg.Engine.StoreBackend != "" {
+			if existingCfg.Engine.ManagedEtcd {
+				fmt.Printf("  %s Managed etcd already configured\n", styleOK.Render("[OK]"))
+			} else {
+				fmt.Printf("  %s External etcd already configured: %s\n", styleOK.Render("[OK]"), existingCfg.Engine.StoreAddress)
+			}
 		} else {
-			existingCfg.Engine.ManagedEtcd = false
-
-			// Collect endpoints and auth method
-			var endpoints string
-			var authMethod string
-			endpoints = "http://localhost:2379"
-
+			var etcdChoice string
 			form := huh.NewForm(
 				huh.NewGroup(
-					huh.NewInput().
-						Title("Etcd endpoints").
-						Description("Comma-separated list of etcd endpoints").
-						Value(&endpoints),
 					huh.NewSelect[string]().
-						Title("Connection security").
+						Title("Etcd setup").
+						Description("Banyan requires etcd for distributed state storage").
 						Options(
-							huh.NewOption("None", "none"),
-							huh.NewOption("Username & Password", "password"),
-							huh.NewOption("TLS (CA certificate)", "tls"),
-							huh.NewOption("mTLS (client certificates)", "mtls"),
+							huh.NewOption("Managed - Banyan runs etcd for you (recommended)", "managed"),
+							huh.NewOption("External - Connect to your own etcd cluster", "external"),
 						).
-						Value(&authMethod),
+						Value(&etcdChoice),
 				),
 			)
 			if err := form.Run(); err != nil {
@@ -275,23 +333,33 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 					fmt.Println("\nInitialization cancelled.")
 					return nil
 				}
-				return fmt.Errorf("etcd endpoints: %w", err)
+				return fmt.Errorf("etcd setup: %w", err)
 			}
-			existingCfg.Engine.StoreAddress = endpoints
 
-			// Collect auth-specific inputs
-			switch authMethod {
-			case "password":
-				var username, password string
+			existingCfg.Engine.StoreBackend = "etcd"
+
+			if etcdChoice == "managed" {
+				existingCfg.Engine.ManagedEtcd = true
+			} else {
+				existingCfg.Engine.ManagedEtcd = false
+				var endpoints string
+				var authMethod string
+				endpoints = "http://localhost:2379"
 				form := huh.NewForm(
 					huh.NewGroup(
 						huh.NewInput().
-							Title("Etcd username").
-							Value(&username),
-						huh.NewInput().
-							Title("Etcd password").
-							EchoMode(huh.EchoModePassword).
-							Value(&password),
+							Title("Etcd endpoints").
+							Description("Comma-separated list of etcd endpoints").
+							Value(&endpoints),
+						huh.NewSelect[string]().
+							Title("Connection security").
+							Options(
+								huh.NewOption("None", "none"),
+								huh.NewOption("Username & Password", "password"),
+								huh.NewOption("TLS (CA certificate)", "tls"),
+								huh.NewOption("mTLS (client certificates)", "mtls"),
+							).
+							Value(&authMethod),
 					),
 				)
 				if err := form.Run(); err != nil {
@@ -299,54 +367,74 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 						fmt.Println("\nInitialization cancelled.")
 						return nil
 					}
-					return fmt.Errorf("etcd credentials: %w", err)
+					return fmt.Errorf("etcd endpoints: %w", err)
 				}
-				existingCfg.Engine.EtcdUsername = username
-				existingCfg.Engine.EtcdPassword = password
-			case "tls":
-				var caFile string
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewInput().
-							Title("CA certificate path").
-							Value(&caFile),
-					),
-				)
-				if err := form.Run(); err != nil {
-					if errors.Is(err, huh.ErrUserAborted) {
-						fmt.Println("\nInitialization cancelled.")
-						return nil
-					}
-					return fmt.Errorf("etcd TLS: %w", err)
+				existingCfg.Engine.StoreAddress = endpoints
+				if err := collectEtcdAuth(&existingCfg, authMethod); err != nil {
+					return err
 				}
-				existingCfg.Engine.EtcdCAFile = caFile
-			case "mtls":
-				var caFile, certFile, keyFile string
-				form := huh.NewForm(
-					huh.NewGroup(
-						huh.NewInput().
-							Title("CA certificate path").
-							Value(&caFile),
-						huh.NewInput().
-							Title("Client certificate path").
-							Value(&certFile),
-						huh.NewInput().
-							Title("Client key path").
-							Value(&keyFile),
-					),
-				)
-				if err := form.Run(); err != nil {
-					if errors.Is(err, huh.ErrUserAborted) {
-						fmt.Println("\nInitialization cancelled.")
-						return nil
-					}
-					return fmt.Errorf("etcd TLS: %w", err)
-				}
-				existingCfg.Engine.EtcdCAFile = caFile
-				existingCfg.Engine.EtcdCertFile = certFile
-				existingCfg.Engine.EtcdKeyFile = keyFile
 			}
 		}
+
+		// Registry setup
+		if existingCfg.Engine.ManagedRegistry || existingCfg.Engine.ExternalRegistryURL != "" {
+			if existingCfg.Engine.ManagedRegistry {
+				fmt.Printf("  %s Managed registry already configured\n", styleOK.Render("[OK]"))
+			} else {
+				fmt.Printf("  %s External registry already configured: %s\n", styleOK.Render("[OK]"), existingCfg.Engine.ExternalRegistryURL)
+			}
+		} else {
+			var registryChoice string
+			form := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("OCI Registry setup").
+						Description("Banyan requires an OCI registry for container image storage").
+						Options(
+							huh.NewOption("Managed - Banyan runs a registry for you (recommended)", "managed"),
+							huh.NewOption("External - Use your own registry (Harbor, Docker Hub, etc.)", "external"),
+						).
+						Value(&registryChoice),
+				),
+			)
+			if err := form.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println("\nInitialization cancelled.")
+					return nil
+				}
+				return fmt.Errorf("registry setup: %w", err)
+			}
+
+			if registryChoice == "managed" {
+				existingCfg.Engine.ManagedRegistry = true
+				fmt.Printf("  %s Managed registry will be started with the engine\n", styleOK.Render("[OK]"))
+			} else {
+				existingCfg.Engine.ManagedRegistry = false
+				var registryURL string
+				form := huh.NewForm(
+					huh.NewGroup(
+						huh.NewInput().
+							Title("External registry URL").
+							Description("e.g. myregistry.example.com:5000 or registry.example.com/banyan").
+							Value(&registryURL),
+					),
+				)
+				if err := form.Run(); err != nil {
+					if errors.Is(err, huh.ErrUserAborted) {
+						fmt.Println("\nInitialization cancelled.")
+						return nil
+					}
+					return fmt.Errorf("registry URL: %w", err)
+				}
+				existingCfg.Engine.ExternalRegistryURL = registryURL
+				fmt.Printf("  %s External registry: %s\n", styleOK.Render("[OK]"), registryURL)
+			}
+		}
+	}
+
+	// Auto-generate engine ID (internal, never shown to user)
+	if existingCfg.Engine.EngineID == "" {
+		existingCfg.Engine.EngineID = engine.GenerateEngineID()
 	}
 
 	// --- Save config ---
@@ -385,6 +473,61 @@ func resolveStoreConfig(cmd *cobra.Command) (backend, address string) {
 	}
 
 	return backend, address
+}
+
+// collectEtcdAuth prompts for etcd authentication credentials based on the selected method.
+func collectEtcdAuth(cfg *types.BanyanConfig, authMethod string) error {
+	switch authMethod {
+	case "password":
+		var username, password string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Etcd username").Value(&username),
+				huh.NewInput().Title("Etcd password").EchoMode(huh.EchoModePassword).Value(&password),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return nil
+			}
+			return fmt.Errorf("etcd credentials: %w", err)
+		}
+		cfg.Engine.EtcdUsername = username
+		cfg.Engine.EtcdPassword = password
+	case "tls":
+		var caFile string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().Title("CA certificate path").Value(&caFile),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return nil
+			}
+			return fmt.Errorf("etcd TLS: %w", err)
+		}
+		cfg.Engine.EtcdCAFile = caFile
+	case "mtls":
+		var caFile, certFile, keyFile string
+		form := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().Title("CA certificate path").Value(&caFile),
+				huh.NewInput().Title("Client certificate path").Value(&certFile),
+				huh.NewInput().Title("Client key path").Value(&keyFile),
+			),
+		)
+		if err := form.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				return nil
+			}
+			return fmt.Errorf("etcd mTLS: %w", err)
+		}
+		cfg.Engine.EtcdCAFile = caFile
+		cfg.Engine.EtcdCertFile = certFile
+		cfg.Engine.EtcdKeyFile = keyFile
+	}
+	return nil
 }
 
 func runEngineStart(cmd *cobra.Command, args []string) error {
@@ -459,18 +602,21 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Set up WireGuard control tunnel (required when keys are configured)
+	// Engine's tunnel IP is derived from its own public key — same derivation agents/CLI use.
+	var engineTunnelIP string
 	if cfg.Engine.WGPrivateKeyFile != "" {
 		wgPrivateKey, readErr := types.ReadPrivateKeyFile(cfg.Engine.WGPrivateKeyFile)
 		if readErr != nil {
 			return fmt.Errorf("failed to load WireGuard private key: %w", readErr)
 		}
+		tunnelIP := types.TunnelIPFromPublicKey(cfg.Engine.WGPublicKey)
+		engineTunnelIP = tunnelIP.String()
 		log.Info("Setting up WireGuard control tunnel")
-		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
-		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, wgPrivateKey, engineIP, types.ControlTunnelPort); tunnelErr != nil {
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, wgPrivateKey, tunnelIP, types.ControlTunnelPort); tunnelErr != nil {
 			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
 		}
 		defer overlay.CleanupControlTunnelExec(types.ControlIfaceEngine) //nolint:errcheck // best-effort cleanup on exit
-		log.Info("Control tunnel ready", "ip", types.ControlTunnelEngineIP, "port", types.ControlTunnelPort)
+		log.Info("Control tunnel ready", "ip", engineTunnelIP, "port", types.ControlTunnelPort)
 
 		// Add whitelisted keys as control tunnel peers
 		for pubKey, name := range whitelistedKeys {
@@ -482,6 +628,52 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 			}
 		}
 	}
+
+	// Validate multi-engine prerequisites
+	if cfg.Engine.MultiEngine {
+		if cfg.Engine.ManagedEtcd {
+			return fmt.Errorf("multi-engine mode requires external etcd (set managed_etcd: false and provide store_address)")
+		}
+		if cfg.Engine.ManagedRegistry || cfg.Engine.ExternalRegistryURL == "" {
+			return fmt.Errorf("multi-engine mode requires external registry (set managed_registry: false and provide external_registry_url)")
+		}
+	}
+
+	// Handle managed or external registry
+	var registryURL string
+	controlTunnelActive := cfg.Engine.WGPrivateKeyFile != ""
+	if cfg.Engine.ExternalRegistryURL != "" {
+		// User-provided external registry
+		registryURL = cfg.Engine.ExternalRegistryURL
+		log.Info("Using external registry", "url", registryURL)
+	} else if cfg.Engine.ManagedRegistry {
+		// Managed Distribution registry subprocess
+		registryDataDir := filepath.Join(engineDataDir, "registry")
+		registryBindAddr := "127.0.0.1"
+		if controlTunnelActive && engineTunnelIP != "" {
+			registryBindAddr = engineTunnelIP
+		}
+		log.Info("Starting managed registry", "data_dir", registryDataDir, "bind", registryBindAddr, "port", managedRegistryPort)
+		registryCmd, regErr := startManagedRegistry(registryDataDir, registryBindAddr, managedRegistryPort)
+		if regErr != nil {
+			// Fall back to in-memory registry if Distribution binary is not installed
+			log.Warn("Managed registry failed to start, falling back to in-memory registry", "error", regErr)
+		} else {
+			defer stopManagedRegistry(registryCmd)
+
+			registryHost := registryBindAddr
+			if registryHost == "127.0.0.1" {
+				engineIP, ipErr := engine.DetermineEngineIP()
+				if ipErr != nil {
+					return fmt.Errorf("failed to determine engine IP for registry: %w", ipErr)
+				}
+				registryHost = engineIP
+			}
+			registryURL = fmt.Sprintf("%s:%s", registryHost, managedRegistryPort)
+			log.Info("Managed registry started", "url", registryURL)
+		}
+	}
+	// If registryURL is empty, engine.Run() will start the in-memory fallback
 
 	// Resolve metrics port from config
 	metricsPort := cfg.Engine.MetricsPort
@@ -501,7 +693,11 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		EtcdCAFile:          cfg.Engine.EtcdCAFile,
 		WhitelistedKeys:     whitelistedKeys,
 		AllowInsecure:       engineAllowInsecure,
-		ControlTunnelActive: cfg.Engine.WGPrivateKeyFile != "",
+		ControlTunnelActive: controlTunnelActive,
+		TunnelIP:            engineTunnelIP,
+		ExternalRegistryURL: registryURL,
+		EngineID:            cfg.Engine.EngineID,
+		MultiEngine:         cfg.Engine.MultiEngine,
 	})
 	if err != nil {
 		return err
@@ -586,6 +782,82 @@ func waitForEtcd(clientURL string, timeout time.Duration) error {
 		time.Sleep(200 * time.Millisecond)
 	}
 	return fmt.Errorf("timeout waiting for etcd at %s", clientURL)
+}
+
+// managedRegistryPort is the default port for the managed Distribution registry.
+const managedRegistryPort = "5000"
+
+// startManagedRegistry starts a Distribution (Docker Registry v2) process.
+// It writes a minimal config, starts the binary, and waits for it to become healthy.
+func startManagedRegistry(dataDir, bindAddr, port string) (*exec.Cmd, error) {
+	if err := os.MkdirAll(dataDir, 0o700); err != nil {
+		return nil, fmt.Errorf("create registry data dir: %w", err)
+	}
+
+	// Write a minimal Distribution config
+	configContent := fmt.Sprintf(`version: 0.1
+storage:
+  filesystem:
+    rootdirectory: %s
+http:
+  addr: %s:%s
+`, dataDir, bindAddr, port)
+
+	regConfigPath := filepath.Join(dataDir, "config.yml")
+	if err := os.WriteFile(regConfigPath, []byte(configContent), 0o600); err != nil {
+		return nil, fmt.Errorf("write registry config: %w", err)
+	}
+
+	registryCmd := exec.Command("registry", "serve", regConfigPath) //nolint:gosec // config path is constructed internally
+	registryCmd.Stdout = os.Stdout
+	registryCmd.Stderr = os.Stderr
+
+	if err := registryCmd.Start(); err != nil {
+		return nil, fmt.Errorf("start registry: %w", err)
+	}
+
+	registryURL := fmt.Sprintf("http://%s:%s", bindAddr, port)
+	if err := waitForRegistry(registryURL, 10*time.Second); err != nil {
+		_ = registryCmd.Process.Kill()
+		return nil, fmt.Errorf("registry did not become healthy: %w", err)
+	}
+
+	return registryCmd, nil
+}
+
+// waitForRegistry polls the registry /v2/ endpoint until it responds OK or the timeout expires.
+func waitForRegistry(baseURL string, timeout time.Duration) error {
+	healthURL := baseURL + "/v2/"
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		resp, err := http.Get(healthURL) //nolint:gosec // managed registry on localhost
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized {
+				return nil
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return fmt.Errorf("timeout waiting for registry at %s", baseURL)
+}
+
+// stopManagedRegistry gracefully stops the managed registry process.
+func stopManagedRegistry(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+	logging.Info("Managed registry stopped")
 }
 
 // stopManagedEtcd gracefully stops the managed etcd process.

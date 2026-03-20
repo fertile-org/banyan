@@ -1664,8 +1664,9 @@ func setupCustomServer(t *testing.T, srv banyanpb.EngineServiceServer) (*EngineC
 	}
 
 	client := &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
+		endpoints: []string{"passthrough:///bufnet"},
+		conn:      conn,
+		client:    banyanpb.NewEngineServiceClient(conn),
 	}
 
 	cleanup := func() {

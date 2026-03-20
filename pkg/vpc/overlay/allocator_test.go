@@ -1,6 +1,7 @@
 package overlay
 
 import (
+	"context"
 	"testing"
 )
 
@@ -43,7 +44,8 @@ func TestAllocate_FirstAgent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	subnet, err := a.Allocate("worker-1")
+	ctx := context.Background()
+	subnet, err := a.Allocate(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("Allocate failed: %v", err)
 	}
@@ -59,12 +61,13 @@ func TestAllocate_MultipleAgents(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	s1, err := a.Allocate("worker-1")
+	ctx := context.Background()
+	s1, err := a.Allocate(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("Allocate worker-1 failed: %v", err)
 	}
 
-	s2, err := a.Allocate("worker-2")
+	s2, err := a.Allocate(ctx, "worker-2")
 	if err != nil {
 		t.Fatalf("Allocate worker-2 failed: %v", err)
 	}
@@ -87,12 +90,13 @@ func TestAllocate_Idempotent(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	s1, err := a.Allocate("worker-1")
+	ctx := context.Background()
+	s1, err := a.Allocate(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("first Allocate failed: %v", err)
 	}
 
-	s2, err := a.Allocate("worker-1")
+	s2, err := a.Allocate(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("second Allocate failed: %v", err)
 	}
@@ -108,11 +112,12 @@ func TestAllocate_Release(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	s1, _ := a.Allocate("worker-1")
-	a.Release("worker-1")
+	ctx := context.Background()
+	s1, _ := a.Allocate(ctx, "worker-1")
+	a.Release(ctx, "worker-1")
 
 	// The released subnet should be available again
-	s2, err := a.Allocate("worker-2")
+	s2, err := a.Allocate(ctx, "worker-2")
 	if err != nil {
 		t.Fatalf("Allocate after release failed: %v", err)
 	}
@@ -129,7 +134,7 @@ func TestAllocate_ReleaseNonexistent(t *testing.T) {
 	}
 
 	// Should not panic
-	a.Release("nonexistent")
+	a.Release(context.Background(), "nonexistent")
 }
 
 func TestAllocate_Exhaustion(t *testing.T) {
@@ -139,17 +144,18 @@ func TestAllocate_Exhaustion(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, err = a.Allocate("worker-1")
+	ctx := context.Background()
+	_, err = a.Allocate(ctx, "worker-1")
 	if err != nil {
 		t.Fatalf("Allocate worker-1 failed: %v", err)
 	}
 
-	_, err = a.Allocate("worker-2")
+	_, err = a.Allocate(ctx, "worker-2")
 	if err != nil {
 		t.Fatalf("Allocate worker-2 failed: %v", err)
 	}
 
-	_, err = a.Allocate("worker-3")
+	_, err = a.Allocate(ctx, "worker-3")
 	if err == nil {
 		t.Fatal("expected error on exhaustion")
 	}
@@ -161,10 +167,11 @@ func TestGetAll(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	a.Allocate("worker-1")
-	a.Allocate("worker-2")
+	ctx := context.Background()
+	a.Allocate(ctx, "worker-1")
+	a.Allocate(ctx, "worker-2")
 
-	all := a.GetAll()
+	all := a.GetAll(ctx)
 	if len(all) != 2 {
 		t.Fatalf("expected 2 allocations, got %d", len(all))
 	}
@@ -183,7 +190,7 @@ func TestGetAll_Empty(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	all := a.GetAll()
+	all := a.GetAll(context.Background())
 	if len(all) != 0 {
 		t.Errorf("expected 0 allocations, got %d", len(all))
 	}

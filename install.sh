@@ -26,6 +26,7 @@ NERDCTL_MIN_VERSION="2.1.3"  # minimum for --health-cmd support
 CNI_VERSION="1.6.2"
 ETCD_VERSION="3.5.17"
 BUILDKIT_VERSION="0.19.0"
+REGISTRY_VERSION="2.8.3"
 # --- Output helpers ---
 
 GREEN='\033[0;32m'
@@ -330,6 +331,27 @@ install_cni() {
     info "CNI plugins installed."
 }
 
+install_registry() {
+    if command -v registry &>/dev/null; then
+        info "Distribution registry already installed, skipping."
+        return
+    fi
+
+    info "Installing Distribution registry v${REGISTRY_VERSION}..."
+
+    local url="https://github.com/distribution/distribution/releases/download/v${REGISTRY_VERSION}/registry_${REGISTRY_VERSION}_linux_${ARCH}.tar.gz"
+    local tmp
+    tmp=$(mktemp -d)
+    if ! curl -fsSL "$url" | tar -xz -C "$tmp"; then
+        rm -rf "$tmp"
+        fatal "Failed to download Distribution registry from ${url}"
+    fi
+    mv "$tmp/registry" "${INSTALL_DIR}/"
+    rm -rf "$tmp"
+
+    info "Distribution registry v${REGISTRY_VERSION} installed."
+}
+
 install_wireguard() {
     if command -v wg &>/dev/null; then
         info "wireguard-tools already installed, skipping."
@@ -440,6 +462,13 @@ verify() {
             info "  etcd: OK"
         else
             error "  etcd: NOT FOUND"
+            ok=false
+        fi
+
+        if command -v registry &>/dev/null; then
+            info "  registry: OK"
+        else
+            error "  registry: NOT FOUND"
             ok=false
         fi
 
@@ -572,6 +601,7 @@ main() {
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
         install_etcd
+        install_registry   # Distribution registry for OCI image storage
         install_wireguard  # WireGuard is used for the control tunnel (encrypted gRPC)
     fi
 

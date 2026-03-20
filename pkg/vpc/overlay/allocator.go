@@ -1,12 +1,21 @@
 package overlay
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"maps"
 	"net"
 	"sync"
 )
+
+// SubnetAllocatorInterface is the interface for subnet allocation.
+// Both in-memory (SubnetAllocator) and etcd-backed implementations satisfy this.
+type SubnetAllocatorInterface interface {
+	Allocate(ctx context.Context, agentName string) (*net.IPNet, error)
+	Release(ctx context.Context, agentName string)
+	GetAll(ctx context.Context) map[string]*net.IPNet
+}
 
 // SubnetAllocator assigns /24 subnets to agents from a VPC CIDR.
 type SubnetAllocator struct {
@@ -40,7 +49,7 @@ func NewSubnetAllocator(vpcCIDR string) (*SubnetAllocator, error) {
 
 // Allocate assigns a /24 subnet to the given agent. Idempotent — returns the
 // same subnet if the agent already has one.
-func (a *SubnetAllocator) Allocate(agentName string) (*net.IPNet, error) {
+func (a *SubnetAllocator) Allocate(_ context.Context, agentName string) (*net.IPNet, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -61,7 +70,7 @@ func (a *SubnetAllocator) Allocate(agentName string) (*net.IPNet, error) {
 }
 
 // Release frees the subnet allocated to the given agent.
-func (a *SubnetAllocator) Release(agentName string) {
+func (a *SubnetAllocator) Release(_ context.Context, agentName string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
@@ -72,7 +81,7 @@ func (a *SubnetAllocator) Release(agentName string) {
 }
 
 // GetAll returns a copy of all current allocations.
-func (a *SubnetAllocator) GetAll() map[string]*net.IPNet {
+func (a *SubnetAllocator) GetAll(_ context.Context) map[string]*net.IPNet {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 

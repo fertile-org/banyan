@@ -13,8 +13,8 @@ Run containers across multiple servers using a familiar YAML manifest.
 
 - Parse banyan.yaml manifest (Docker Compose-compatible syntax)
 - Engine control plane with etcd-based state
-- Agent workers with containerd/nerdctl container management
-- Round-robin scheduling across workers
+- Agent nodes with containerd/nerdctl container management
+- Round-robin scheduling across agents
 - CLI for engine, agent, and deploy workflows
 - VPC networking layer (IPAM, DNS, CNI)
 - E2E test infrastructure
@@ -149,14 +149,19 @@ Smarter task distribution based on node resources instead of simple round-robin.
 
 ## Milestone 7 — Multi-Engine High Availability
 
-Multiple active engine nodes share workload for high availability and horizontal scaling.
+Status: **Done**
 
-- **Active-active engines**: Any engine can handle CLI requests and schedule tasks
-- **etcd coordination**: Task claiming via Compare-And-Swap to prevent duplication
-- **Distributed registry**: Index-based lookup so agents pull images from the correct engine
-- **Optimistic locking**: Concurrent deployment updates are serialized
-- **Session state in etcd**: Agents can reconnect to any engine
-- **Client load balancing**: CLI connects to any available engine
+Run multiple engines for high availability. All engines are active — no leader, no standby. If one goes down, the others continue instantly.
+
+- **Active-active scheduling**: All engines handle RPCs and run the scheduling loop. Per-deployment distributed locks in etcd prevent duplicate work.
+- **Instant scheduling**: Deploy commands trigger scheduling immediately on the receiving engine, instead of waiting for a polling loop.
+- **Managed registry**: Persistent OCI image storage via Distribution (Docker Registry v2) subprocess. Images survive engine restarts.
+- **Agent multi-endpoint failover**: Agents configured with multiple engine addresses reconnect to the next available engine within seconds.
+- **CLI multi-endpoint failover**: CLI tries each configured engine endpoint with a health check, connects to the first one that responds.
+- **External etcd + registry required**: HA mode requires user-provided etcd cluster and OCI registry (managed services are single-process and can't be shared).
+- **Zero-config single-engine preserved**: Default single-engine mode is unchanged — no new configuration needed for existing users.
+
+See [High Availability](/guides/high-availability/) for setup guide.
 
 ---
 

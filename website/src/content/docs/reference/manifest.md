@@ -88,11 +88,11 @@ services:
 |-------|------|----------|---------|-------------|
 | `image` | string | Conditional | -- | Container image. Required unless `build` is set. Any registry works: `nginx:alpine`, `ghcr.io/org/app:v1`. |
 | `build` | string or object | No | -- | Build from a Dockerfile. See [Build](#build) below. |
-| `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available workers. |
+| `deploy.replicas` | integer | No | `1` | Number of container instances. Distributed across available agents. |
 | `deploy.placement.node` | string | No | -- | Glob pattern to pin this service to specific nodes. Supports `*`, `?`, and `[abc]`. Example: `gateway-*` matches `gateway-1`, `gateway-2`. |
 | `deploy.resources.limits.memory` | string | No | -- | Memory limit (e.g., `512m`, `1g`). Container is killed if it exceeds this. Also used for scheduling if no reservation is set. |
 | `deploy.resources.limits.cpus` | string | No | -- | CPU limit (e.g., `"0.5"`, `"2"`). Fractional cores allowed. |
-| `deploy.resources.reservations.memory` | string | No | -- | Memory reservation (e.g., `256m`). Used by the scheduler to decide which worker runs this service. Takes priority over `limits.memory` for scheduling. |
+| `deploy.resources.reservations.memory` | string | No | -- | Memory reservation (e.g., `256m`). Used by the scheduler to decide which agent runs this service. Takes priority over `limits.memory` for scheduling. |
 | `restart` | string | No | `no` | Restart policy: `no`, `always`, `unless-stopped`, `on-failure`, or `on-failure:N`. |
 | `entrypoint` | string or list | No | -- | Override the container's ENTRYPOINT. Supports string or list form. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
@@ -132,7 +132,7 @@ services:
     image: nginx:alpine
 ```
 
-One container on one worker.
+One container on one agent.
 
 ### Full example
 
@@ -191,7 +191,7 @@ services:
       - POSTGRES_DB=app
 ```
 
-This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across workers, `build:` for custom services, `image:` for off-the-shelf databases, `healthcheck:` for container health monitoring, and service DNS (`api.my-app.internal:8080`, `db.my-app.internal`) for cross-service communication. During blue-green redeployments, Banyan waits for healthchecks to pass before tearing down old containers.
+This shows `deploy.placement.node` to pin the reverse proxy to gateway servers, `deploy.replicas` to scale the API across agents, `build:` for custom services, `image:` for off-the-shelf databases, `healthcheck:` for container health monitoring, and service DNS (`api.my-app.internal:8080`, `db.my-app.internal`) for cross-service communication. During blue-green redeployments, Banyan waits for healthchecks to pass before tearing down old containers.
 
 ### Service DNS
 
@@ -335,13 +335,13 @@ During [per-service deploys](/guides/redeployment/#dependency-validation), Banya
 
 ### Resource-aware scheduling
 
-Banyan uses `deploy.resources` to decide where to place containers. Each task goes to the worker with the most available memory.
+Banyan uses `deploy.resources` to decide where to place containers. Each task goes to the agent with the most available memory.
 
-**How the scheduler picks a worker:**
+**How the scheduler picks an agent:**
 
-1. Workers report CPU, memory, and disk usage to the engine every heartbeat.
-2. For each container, the scheduler picks the worker with the most available memory (total − used − already-scheduled-in-this-deployment).
-3. If no worker has reported metrics yet (e.g., during the first few seconds after startup), scheduling falls back to round-robin.
+1. Agents report CPU, memory, and disk usage to the engine every heartbeat.
+2. For each container, the scheduler picks the agent with the most available memory (total − used − already-scheduled-in-this-deployment).
+3. If no agent has reported metrics yet (e.g., during the first few seconds after startup), scheduling falls back to round-robin.
 
 **What counts as the resource request:**
 

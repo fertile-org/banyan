@@ -107,6 +107,9 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
   <Card title="Live terminal dashboard" icon="seti:cake_php">
     `banyan-cli dashboard` opens a real-time TUI — engine health, agent resources, deployments, container status, and cluster events, all updating live. Navigate views with keyboard shortcuts, drill into details, and use the built-in command palette. No Grafana setup, no browser — monitoring is one command away.
   </Card>
+  <Card title="High availability built in" icon="approve-check">
+    Run multiple engines for zero-downtime control plane. All engines are active — no leader election, no manual failover. Start with one engine, add more when you need them.
+  </Card>
   <Card title="Open source, self-hosted" icon="openCollective">
     Apache 2.0. Inspect the code, modify it, run it on your own servers. No vendor lock-in, no usage-based pricing.
   </Card>
@@ -131,7 +134,7 @@ One-time setup on each machine:
 sudo banyan-engine init
 sudo systemctl enable --now banyan-engine
 
-# Each worker
+# Each agent
 sudo banyan-agent init
 sudo systemctl enable --now banyan-agent
 
@@ -169,7 +172,7 @@ graph TD
             Agent1 ~~~ C1
         end
 
-        subgraph A2[Worker 1]
+        subgraph A2[Agent 1]
             Agent2[fa:fa-cube banyan-agent]
             C2{{fa:fa-box container: api-0}}
             C3{{fa:fa-box container: api-1}}
@@ -177,7 +180,7 @@ graph TD
             Agent2 ~~~ C3
         end
 
-        subgraph AN[Worker 2]
+        subgraph AN[Agent 2]
             AgentN[fa:fa-cube banyan-agent]
             C4{{fa:fa-box container: api-2}}
             C5{{fa:fa-box container: db-0}}
@@ -190,4 +193,4 @@ graph TD
     Engine -.-|/metrics| Prom
 ```
 
-The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard and authenticated via public key whitelist.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard and authenticated via public key whitelist. For high availability, run [multiple engines](/guides/high-availability/) — they coordinate automatically.

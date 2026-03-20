@@ -1,5 +1,5 @@
 ---
-title: Secure Your Cluster
+title: Security
 description: How Banyan authenticates engines, agents, and CLI clients.
 sidebar:
   order: 1

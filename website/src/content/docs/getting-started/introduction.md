@@ -16,6 +16,7 @@ The usual next step is Kubernetes. But Kubernetes is built for platform teams ru
 - **Everything is built in** — networking, service discovery, load balancing, a container registry, a terminal dashboard. No external tools to assemble.
 - **The manifest feels like Docker Compose** — same `services`, `build`, `ports`, `environment`, `depends_on` you already know. Add `deploy.replicas` to scale across servers.
 - **Three concepts, not thirty** — engine (control plane), agent (one per server), manifest (your YAML file). No CRDs, no Helm charts, no operators.
+- **High availability when you need it** — run multiple engines and the cluster keeps working when a server goes down. Start with one engine, add more later.
 - **Forever open source** — Apache 2.0, no enterprise edition, no BSL conversion.
 
 ## Who is it for?

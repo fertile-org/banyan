@@ -1,5 +1,5 @@
 ---
-title: See What's Running
+title: Monitoring
 description: Monitor your cluster with the built-in terminal dashboard and Prometheus metrics.
 sidebar:
   order: 4

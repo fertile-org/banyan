@@ -235,14 +235,22 @@ func (s *engineGRPCServer) rateLimitInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// isControlTunnelIP returns true if the IP is on the WireGuard control tunnel network.
+// Any IP on this network is an authenticated WG peer (the tunnel enforces this).
+func isControlTunnelIP(ip string) bool {
+	_, cidr, _ := net.ParseCIDR(types.ControlTunnelCIDR)
+	return cidr != nil && cidr.Contains(net.ParseIP(ip))
+}
+
 // auditLogInterceptor returns a unary interceptor that logs all RPC calls with peer identity.
 func (s *engineGRPCServer) auditLogInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		peerIP, _ := banyanrpc.PeerIPFromContext(ctx)
 		agent := s.tunnelIPToAgent[peerIP]
 
-		// Log unknown peers at warn level (potential unauthorized access)
-		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" {
+		// Warn about unknown peers — but not for IPs on the control tunnel
+		// (same-host agent/CLI traffic may arrive from the engine's own tunnel IP)
+		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" && !isControlTunnelIP(peerIP) {
 			s.logger().Warn("RPC from unknown peer",
 				"method", info.FullMethod, "peer_ip", peerIP)
 		}
@@ -262,7 +270,7 @@ func (s *engineGRPCServer) auditLogStreamInterceptor() grpc.StreamServerIntercep
 		peerIP, _ := banyanrpc.PeerIPFromContext(ss.Context())
 		agent := s.tunnelIPToAgent[peerIP]
 
-		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" {
+		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" && !isControlTunnelIP(peerIP) {
 			s.logger().Warn("Stream RPC from unknown peer",
 				"method", info.FullMethod, "peer_ip", peerIP)
 		}

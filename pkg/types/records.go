@@ -12,6 +12,7 @@ const (
 	KeyNodes       = "nodes/"
 	KeyTasks       = "tasks/"
 	KeyRegistry    = "config/registry"
+	KeyEngines     = "engines/"
 )
 
 // Deployment statuses.
@@ -121,6 +122,17 @@ type NodeRecord struct {
 	MemoryUsedBytes  uint64    `json:"memory_used_bytes,omitempty"`
 	CPUCores         uint32    `json:"cpu_cores,omitempty"`
 	CPUUsageRatio    float64   `json:"cpu_usage_ratio,omitempty"`
+}
+
+// EngineRecord is stored at /engines/<id> in etcd with a TTL lease.
+// Auto-expires if the engine crashes (15s TTL, renewed every 10s).
+type EngineRecord struct {
+	StartedAt   time.Time `json:"started_at"`
+	LastSeen    time.Time `json:"last_seen"`
+	ID          string    `json:"id"`
+	Status      string    `json:"status"`
+	GRPCAddr    string    `json:"grpc_addr"`
+	RegistryURL string    `json:"registry_url,omitempty"`
 }
 
 // StateStore is a minimal interface for store operations used by helpers.

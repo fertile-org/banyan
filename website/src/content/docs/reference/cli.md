@@ -10,7 +10,7 @@ Banyan uses three binaries. Install only what each machine needs.
 | Binary | Role | Install on | Requires sudo |
 |--------|------|------------|---------------|
 | `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node | Yes (all commands) |
-| `banyan-agent` | Worker (task execution, container management) | Worker nodes | Yes (all commands) |
+| `banyan-agent` | Agent (task execution, container management) | Agent nodes | Yes (all commands) |
 | `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine | `init` and `login` |
 
 ---
@@ -93,7 +93,7 @@ sudo banyan-engine status
 
 ## banyan-agent
 
-Run on each worker node.
+Run on each agent node.
 
 ### init
 
@@ -111,7 +111,7 @@ The wizard generates a WireGuard keypair and asks:
 
 1. **Engine host** — hostname or IP of the Banyan engine (e.g., `192.168.1.10`).
 2. **Engine gRPC port** — default `50051`.
-3. **Node name** — unique name for this worker (default: hostname).
+3. **Node name** — unique name for this agent (default: hostname).
 4. **Engine WireGuard public key** — required, displayed during `banyan-engine init`.
 5. **Tags** — comma-separated tags for environment isolation (optional).
 

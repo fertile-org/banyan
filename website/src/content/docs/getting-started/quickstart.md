@@ -39,7 +39,7 @@ sudo banyan-agent start
 The init wizard asks for:
 - **Engine host** — `localhost` for single-machine setup.
 - **Engine port** — default `50051`.
-- **Node name** — a name for this worker (default: your hostname).
+- **Node name** — a name for this agent (default: your hostname).
 
 During init, Banyan generates a WireGuard keypair and displays the agent's public key. For a single-machine setup, the key is automatically whitelisted. For multi-node setups, copy the public key to the engine (see [Authentication](/guides/authentication/)).
 
@@ -102,7 +102,7 @@ services:
 If you've written a `docker-compose.yml`, this looks familiar. Same `services`, same `image`, same `ports`. The additions: `name` identifies the deployment, and `deploy.replicas` tells Banyan to run 2 instances of the web service.
 
 :::tip
-Want to deploy your own code? Use `build: ./your-app` instead of `image:` — Banyan builds the Dockerfile, pushes to its built-in registry, and distributes the image to all workers. See [Manifest Reference](/reference/manifest/#build-from-source).
+Want to deploy your own code? Use `build: ./your-app` instead of `image:` — Banyan builds the Dockerfile, pushes to its built-in registry, and distributes the image to all agents. See [Manifest Reference](/reference/manifest/#build-from-source).
 :::
 
 ## 5. Deploy
@@ -214,11 +214,11 @@ sudo banyan-engine stop
 ## What just happened
 
 1. The **CLI** sent your manifest to the **Engine**.
-2. The **Engine** scheduled containers across available **Agents** — placing each task on the worker with the most available memory.
+2. The **Engine** scheduled containers across available **Agents** — placing each task on the agent with the most available memory.
 3. The **Agent** pulled images and started containers using containerd.
 4. The CLI waited until all containers reported healthy, then showed success.
 
-Your `banyan.yaml` didn't reference any specific servers. When you add more workers — run `sudo banyan-agent init` on another machine, whitelist its public key on the engine, then `sudo banyan-agent start` — Banyan distributes containers across all of them automatically. **The manifest doesn't change.**
+Your `banyan.yaml` didn't reference any specific servers. When you add more agents — run `sudo banyan-agent init` on another machine, whitelist its public key on the engine, then `sudo banyan-agent start` — Banyan distributes containers across all of them automatically. **The manifest doesn't change.**
 
 ## Next steps
 

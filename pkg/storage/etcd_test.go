@@ -11,25 +11,34 @@ import (
 	"testing"
 	"time"
 
+	pb "go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // mockEtcdKV is an in-memory mock of etcdKV for unit tests.
 type mockEtcdKV struct {
-	mu      sync.RWMutex
-	data    map[string]string
-	leaseID atomic.Int64
+	mu        sync.RWMutex
+	data      map[string]string
+	revisions map[string]int64 // ModRevision per key
+	nextRev   int64
+	leaseID   atomic.Int64
 }
 
 func newMockEtcdKV() *mockEtcdKV {
-	return &mockEtcdKV{data: make(map[string]string)}
+	return &mockEtcdKV{
+		data:      make(map[string]string),
+		revisions: make(map[string]int64),
+		nextRev:   1,
+	}
 }
 
 func (m *mockEtcdKV) Put(_ context.Context, key, val string, _ ...clientv3.OpOption) (*clientv3.PutResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.data[key] = val
+	m.nextRev++
+	m.revisions[key] = m.nextRev
 	return &clientv3.PutResponse{}, nil
 }
 
@@ -44,8 +53,9 @@ func (m *mockEtcdKV) Get(_ context.Context, key string, opts ...clientv3.OpOptio
 		for k, v := range m.data {
 			if strings.HasPrefix(k, key) {
 				kvs = append(kvs, &mvccpb.KeyValue{
-					Key:   []byte(k),
-					Value: []byte(v),
+					Key:         []byte(k),
+					Value:       []byte(v),
+					ModRevision: m.revisions[k],
 				})
 			}
 		}
@@ -57,8 +67,9 @@ func (m *mockEtcdKV) Get(_ context.Context, key string, opts ...clientv3.OpOptio
 		// Exact key lookup
 		if val, ok := m.data[key]; ok {
 			kvs = append(kvs, &mvccpb.KeyValue{
-				Key:   []byte(key),
-				Value: []byte(val),
+				Key:         []byte(key),
+				Value:       []byte(val),
+				ModRevision: m.revisions[key],
 			})
 		}
 	}
@@ -82,8 +93,69 @@ func (m *mockEtcdKV) KeepAliveOnce(_ context.Context, _ clientv3.LeaseID) (*clie
 	return &clientv3.LeaseKeepAliveResponse{}, nil
 }
 
+func (m *mockEtcdKV) Txn(_ context.Context) clientv3.Txn {
+	return &mockTxn{kv: m}
+}
+
 func (m *mockEtcdKV) Watch(_ context.Context, _ string, _ ...clientv3.OpOption) clientv3.WatchChan {
 	return nil
+}
+
+// mockTxn implements clientv3.Txn for testing CAS operations.
+// Only supports ModRevision comparisons.
+type mockTxn struct {
+	kv             *mockEtcdKV
+	cmps           []clientv3.Cmp
+	thenOps        []clientv3.Op
+	elseOps        []clientv3.Op
+	expectedRevKey string
+	expectedRev    int64
+}
+
+func (t *mockTxn) If(cs ...clientv3.Cmp) clientv3.Txn {
+	t.cmps = cs
+	// Extract key and expected revision from first comparison
+	if len(cs) > 0 {
+		cmp := pb.Compare(cs[0])
+		t.expectedRevKey = string(cmp.Key)
+		if mr, ok := cmp.TargetUnion.(*pb.Compare_ModRevision); ok {
+			t.expectedRev = mr.ModRevision
+		}
+	}
+	return t
+}
+func (t *mockTxn) Then(ops ...clientv3.Op) clientv3.Txn { t.thenOps = ops; return t }
+func (t *mockTxn) Else(ops ...clientv3.Op) clientv3.Txn { t.elseOps = ops; return t }
+func (t *mockTxn) Commit() (*clientv3.TxnResponse, error) {
+	t.kv.mu.Lock()
+	defer t.kv.mu.Unlock()
+
+	// Check if the revision matches
+	succeeded := true
+	if t.expectedRevKey != "" {
+		actualRev := t.kv.revisions[t.expectedRevKey]
+		if actualRev != t.expectedRev {
+			succeeded = false
+		}
+	}
+
+	ops := t.thenOps
+	if !succeeded {
+		ops = t.elseOps
+	}
+
+	// Execute ops
+	for _, op := range ops {
+		if op.IsPut() {
+			key := string(op.KeyBytes())
+			val := string(op.ValueBytes())
+			t.kv.data[key] = val
+			t.kv.nextRev++
+			t.kv.revisions[key] = t.kv.nextRev
+		}
+	}
+
+	return &clientv3.TxnResponse{Succeeded: succeeded}, nil
 }
 
 func (m *mockEtcdKV) Close() error {
@@ -493,6 +565,120 @@ CbWHMB8GA1UdIwQYMBaAFPa8YE9Ta7Hox8XNszjgG7I9CbWHMA8GA1UdEwEB/wQF
 MAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIhAI2xWCIDlgWC8HaAFj2k1KPlyGwRX5VU
 B4OMliqoxTy8AiBS5r17kMXE/NQZYwYi3tcFHJrqGfICI1j4/iyARc++2A==
 -----END CERTIFICATE-----`)
+
+func TestEtcdStore_GetWithRevision(t *testing.T) {
+	store := newMockEtcdStore()
+	ctx := context.Background()
+
+	t.Run("returns revision", func(t *testing.T) {
+		if err := store.Save(ctx, "rev-key", "value1"); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+
+		var got string
+		rev, err := store.GetWithRevision(ctx, "rev-key", &got)
+		if err != nil {
+			t.Fatalf("GetWithRevision: %v", err)
+		}
+		if got != "value1" {
+			t.Errorf("got %q, want %q", got, "value1")
+		}
+		if rev <= 0 {
+			t.Errorf("expected positive revision, got %d", rev)
+		}
+	})
+
+	t.Run("nonexistent key", func(t *testing.T) {
+		var got string
+		_, err := store.GetWithRevision(ctx, "nonexistent", &got)
+		if err == nil {
+			t.Error("expected error for nonexistent key")
+		}
+	})
+
+	t.Run("empty key", func(t *testing.T) {
+		var got string
+		_, err := store.GetWithRevision(ctx, "", &got)
+		if err == nil {
+			t.Error("expected error for empty key")
+		}
+	})
+
+	t.Run("nil value", func(t *testing.T) {
+		_, err := store.GetWithRevision(ctx, "k", nil)
+		if err == nil {
+			t.Error("expected error for nil value")
+		}
+	})
+}
+
+func TestEtcdStore_SaveIfRevision(t *testing.T) {
+	store := newMockEtcdStore()
+	ctx := context.Background()
+
+	t.Run("succeeds with correct revision", func(t *testing.T) {
+		if err := store.Save(ctx, "cas-key", "v1"); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+
+		var got string
+		rev, err := store.GetWithRevision(ctx, "cas-key", &got)
+		if err != nil {
+			t.Fatalf("GetWithRevision: %v", err)
+		}
+
+		if err := store.SaveIfRevision(ctx, "cas-key", "v2", rev); err != nil {
+			t.Fatalf("SaveIfRevision: %v", err)
+		}
+
+		// Verify the value was updated
+		var updated string
+		if err := store.Get(ctx, "cas-key", &updated); err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if updated != "v2" {
+			t.Errorf("got %q, want %q", updated, "v2")
+		}
+	})
+
+	t.Run("fails with wrong revision", func(t *testing.T) {
+		if err := store.Save(ctx, "cas-key2", "v1"); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+
+		// Use a wrong revision
+		err := store.SaveIfRevision(ctx, "cas-key2", "v2", 999999)
+		if err == nil {
+			t.Fatal("expected ErrRevisionMismatch")
+		}
+		if err != ErrRevisionMismatch {
+			t.Fatalf("expected ErrRevisionMismatch, got %v", err)
+		}
+
+		// Verify value was NOT updated
+		var got string
+		if err := store.Get(ctx, "cas-key2", &got); err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got != "v1" {
+			t.Errorf("expected value to remain 'v1', got %q", got)
+		}
+	})
+
+	t.Run("empty key", func(t *testing.T) {
+		err := store.SaveIfRevision(ctx, "", "val", 1)
+		if err == nil {
+			t.Error("expected error for empty key")
+		}
+	})
+
+	t.Run("nil value", func(t *testing.T) {
+		err := store.SaveIfRevision(ctx, "k", nil, 1)
+		if err == nil {
+			t.Error("expected error for nil value")
+		}
+	})
+}
 
 // --- Real etcd tests (skipped in CI) ---
 

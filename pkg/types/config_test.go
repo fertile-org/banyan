@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -36,18 +35,14 @@ func TestTunnelIPFromPublicKey(t *testing.T) {
 		}
 	})
 
-	t.Run("avoids engine IP 10.200.0.1", func(t *testing.T) {
-		engineIP := net.ParseIP(ControlTunnelEngineIP).To4()
-		// Test with many keys to increase collision chance
+	t.Run("avoids network addresses", func(t *testing.T) {
+		// Test with many keys to ensure no network/broadcast addresses
 		for i := range 1000 {
 			key := fmt.Sprintf("test-key-%d", i)
 			ip := TunnelIPFromPublicKey(key).To4()
-			if ip.Equal(engineIP) {
-				t.Errorf("key %q produced engine IP %s", key, ip)
-			}
-			// Also check network address 10.200.0.0
-			if ip[0] == 10 && ip[1] == 200 && ip[2] == 0 && ip[3] == 0 {
-				t.Errorf("key %q produced network address %s", key, ip)
+			// 10.200.0.0 = network address, 10.200.0.1 = reserved low address
+			if ip[0] == 10 && ip[1] == 200 && ip[2] == 0 && ip[3] <= 1 {
+				t.Errorf("key %q produced reserved address %s", key, ip)
 			}
 		}
 	})
@@ -227,6 +222,103 @@ func TestLoadSaveConfig(t *testing.T) {
 		}
 		if loaded.Engine.EtcdCAFile != "/etc/banyan/etcd-ca.crt" {
 			t.Errorf("expected etcd_ca_file=/etc/banyan/etcd-ca.crt, got %s", loaded.Engine.EtcdCAFile)
+		}
+	})
+}
+
+func TestLoadSaveConfig_RegistryFields(t *testing.T) {
+	t.Run("round-trip with managed registry", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+		cfg := BanyanConfig{
+			Engine: EngineConfig{
+				StoreBackend:    "etcd",
+				ManagedEtcd:     true,
+				ManagedRegistry: true,
+			},
+		}
+
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+
+		loaded, err := LoadConfig(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		if !loaded.Engine.ManagedRegistry {
+			t.Error("expected managed_registry=true")
+		}
+		if loaded.Engine.ExternalRegistryURL != "" {
+			t.Errorf("expected empty external_registry_url, got %s", loaded.Engine.ExternalRegistryURL)
+		}
+	})
+
+	t.Run("round-trip with external registry", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+		cfg := BanyanConfig{
+			Engine: EngineConfig{
+				StoreBackend:        "etcd",
+				ManagedEtcd:         false,
+				StoreAddress:        "http://etcd.example.com:2379",
+				ManagedRegistry:     false,
+				ExternalRegistryURL: "registry.example.com:5000",
+			},
+		}
+
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+
+		loaded, err := LoadConfig(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		if loaded.Engine.ManagedRegistry {
+			t.Error("expected managed_registry=false")
+		}
+		if loaded.Engine.ExternalRegistryURL != "registry.example.com:5000" {
+			t.Errorf("expected external_registry_url=registry.example.com:5000, got %s", loaded.Engine.ExternalRegistryURL)
+		}
+	})
+}
+
+func TestLoadSaveConfig_EngineIdentityFields(t *testing.T) {
+	t.Run("round-trip with engine ID and multi-engine", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+		cfg := BanyanConfig{
+			Engine: EngineConfig{
+				StoreBackend:        "etcd",
+				StoreAddress:        "http://etcd.example.com:2379",
+				EngineID:            "prod-web-1-a3f2",
+				MultiEngine:         true,
+				ManagedEtcd:         false,
+				ManagedRegistry:     false,
+				ExternalRegistryURL: "registry.example.com:5000",
+			},
+		}
+
+		if err := SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+
+		loaded, err := LoadConfig(cfgPath)
+		if err != nil {
+			t.Fatalf("LoadConfig failed: %v", err)
+		}
+
+		if loaded.Engine.EngineID != "prod-web-1-a3f2" {
+			t.Errorf("expected engine_id=prod-web-1-a3f2, got %s", loaded.Engine.EngineID)
+		}
+		if !loaded.Engine.MultiEngine {
+			t.Error("expected multi_engine=true")
 		}
 	})
 }

@@ -1,20 +1,22 @@
 package overlay
 
 import (
+	"context"
 	"net"
 	"testing"
 )
 
 func TestPeerTracker_Update(t *testing.T) {
 	tracker := NewPeerTracker()
+	ctx := context.Background()
 
 	peer := Peer{
 		Subnet: net.IPNet{IP: net.ParseIP("10.0.1.0"), Mask: net.CIDRMask(24, 32)},
 		HostIP: net.ParseIP("192.168.1.10"),
 	}
-	tracker.Update("worker-1", peer)
+	tracker.Update(ctx, "worker-1", peer)
 
-	peers := tracker.GetPeersExcluding("other")
+	peers := tracker.GetPeersExcluding(ctx, "other")
 	if len(peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(peers))
 	}
@@ -25,14 +27,15 @@ func TestPeerTracker_Update(t *testing.T) {
 
 func TestPeerTracker_UpdateOverwrite(t *testing.T) {
 	tracker := NewPeerTracker()
+	ctx := context.Background()
 
 	peer1 := Peer{HostIP: net.ParseIP("192.168.1.10")}
 	peer2 := Peer{HostIP: net.ParseIP("192.168.1.20")}
 
-	tracker.Update("worker-1", peer1)
-	tracker.Update("worker-1", peer2) // overwrite
+	tracker.Update(ctx, "worker-1", peer1)
+	tracker.Update(ctx, "worker-1", peer2) // overwrite
 
-	peers := tracker.GetPeersExcluding("other")
+	peers := tracker.GetPeersExcluding(ctx, "other")
 	if len(peers) != 1 {
 		t.Fatalf("expected 1 peer after overwrite, got %d", len(peers))
 	}
@@ -43,12 +46,13 @@ func TestPeerTracker_UpdateOverwrite(t *testing.T) {
 
 func TestPeerTracker_Remove(t *testing.T) {
 	tracker := NewPeerTracker()
+	ctx := context.Background()
 
-	tracker.Update("worker-1", Peer{HostIP: net.ParseIP("192.168.1.10")})
-	tracker.Update("worker-2", Peer{HostIP: net.ParseIP("192.168.1.20")})
-	tracker.Remove("worker-1")
+	tracker.Update(ctx, "worker-1", Peer{HostIP: net.ParseIP("192.168.1.10")})
+	tracker.Update(ctx, "worker-2", Peer{HostIP: net.ParseIP("192.168.1.20")})
+	tracker.Remove(ctx, "worker-1")
 
-	peers := tracker.GetPeersExcluding("other")
+	peers := tracker.GetPeersExcluding(ctx, "other")
 	if len(peers) != 1 {
 		t.Fatalf("expected 1 peer after remove, got %d", len(peers))
 	}
@@ -60,17 +64,18 @@ func TestPeerTracker_Remove(t *testing.T) {
 func TestPeerTracker_RemoveNonexistent(t *testing.T) {
 	tracker := NewPeerTracker()
 	// Should not panic
-	tracker.Remove("nonexistent")
+	tracker.Remove(context.Background(), "nonexistent")
 }
 
 func TestPeerTracker_GetPeersExcluding(t *testing.T) {
 	tracker := NewPeerTracker()
+	ctx := context.Background()
 
-	tracker.Update("worker-1", Peer{HostIP: net.ParseIP("192.168.1.10")})
-	tracker.Update("worker-2", Peer{HostIP: net.ParseIP("192.168.1.20")})
-	tracker.Update("worker-3", Peer{HostIP: net.ParseIP("192.168.1.30")})
+	tracker.Update(ctx, "worker-1", Peer{HostIP: net.ParseIP("192.168.1.10")})
+	tracker.Update(ctx, "worker-2", Peer{HostIP: net.ParseIP("192.168.1.20")})
+	tracker.Update(ctx, "worker-3", Peer{HostIP: net.ParseIP("192.168.1.30")})
 
-	peers := tracker.GetPeersExcluding("worker-2")
+	peers := tracker.GetPeersExcluding(ctx, "worker-2")
 	if len(peers) != 2 {
 		t.Fatalf("expected 2 peers (excluding worker-2), got %d", len(peers))
 	}
@@ -85,7 +90,7 @@ func TestPeerTracker_GetPeersExcluding(t *testing.T) {
 
 func TestPeerTracker_Empty(t *testing.T) {
 	tracker := NewPeerTracker()
-	peers := tracker.GetPeersExcluding("anyone")
+	peers := tracker.GetPeersExcluding(context.Background(), "anyone")
 	if len(peers) != 0 {
 		t.Errorf("expected 0 peers, got %d", len(peers))
 	}
@@ -93,10 +98,11 @@ func TestPeerTracker_Empty(t *testing.T) {
 
 func TestPeerTracker_GetPeersExcluding_NoMatch(t *testing.T) {
 	tracker := NewPeerTracker()
-	tracker.Update("worker-1", Peer{HostIP: net.ParseIP("192.168.1.10")})
+	ctx := context.Background()
+	tracker.Update(ctx, "worker-1", Peer{HostIP: net.ParseIP("192.168.1.10")})
 
 	// Excluding a non-existent agent returns all peers
-	peers := tracker.GetPeersExcluding("nonexistent")
+	peers := tracker.GetPeersExcluding(ctx, "nonexistent")
 	if len(peers) != 1 {
 		t.Fatalf("expected 1 peer, got %d", len(peers))
 	}

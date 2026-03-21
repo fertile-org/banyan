@@ -4,10 +4,14 @@ package engine
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/google/go-containerregistry/pkg/registry"
@@ -33,9 +37,13 @@ type Options struct {
 	EtcdCertFile    string            // client certificate for mTLS
 	EtcdKeyFile     string            // client key for mTLS
 	EtcdCAFile      string            // CA certificate for server verification
-	WhitelistedKeys    map[string]string // publicKey → agentName
-	AllowInsecure      bool              // allow running without authentication (development only)
-	ControlTunnelActive bool             // WireGuard control tunnel is set up and active
+	WhitelistedKeys     map[string]string // publicKey → agentName
+	AllowInsecure       bool              // allow running without authentication (development only)
+	ControlTunnelActive bool              // WireGuard control tunnel is set up and active
+	TunnelIP            string            // engine's WireGuard tunnel IP (derived from public key)
+	ExternalRegistryURL string            // external registry URL (skips embedded registry when set)
+	EngineID            string            // unique engine identifier (auto-generated if empty)
+	MultiEngine         bool              // enable multi-engine coordination
 }
 
 // Engine is the Banyan control plane.
@@ -44,6 +52,9 @@ type Engine struct {
 	grpcServer       *engineGRPCServer
 	opts             Options
 	registryURL      string
+	engineID         string
+	multiEngine      bool
+	scheduleCh       chan struct{} // triggers immediate scheduling (from Deploy/Register RPCs)
 	metricsRegistry  *metrics.EngineMetricsRegistry
 	metricsCollector *metrics.SystemCollector
 	events           EventLog
@@ -79,9 +90,17 @@ func New(opts *Options) (*Engine, error) {
 		eventLog = NewEventBuffer(100)
 	}
 
+	engineID := opts.EngineID
+	if engineID == "" {
+		engineID = GenerateEngineID()
+	}
+
 	e := &Engine{
 		opts:             *opts,
 		store:            store,
+		engineID:         engineID,
+		multiEngine:      opts.MultiEngine,
+		scheduleCh:       make(chan struct{}, 1),
 		metricsRegistry:  metrics.NewEngineMetricsRegistry(),
 		metricsCollector: metrics.NewSystemCollector(),
 		events:           eventLog,
@@ -92,6 +111,29 @@ func New(opts *Options) (*Engine, error) {
 	e.metricsCollector.Collect()
 
 	return e, nil
+}
+
+// GenerateEngineID creates a unique engine ID from hostname + 4 random hex chars.
+// Example: "prod-web-1-a3f2"
+func GenerateEngineID() string {
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "engine"
+	}
+	// Sanitize hostname: lowercase, replace dots with dashes
+	hostname = strings.ToLower(hostname)
+	hostname = strings.ReplaceAll(hostname, ".", "-")
+
+	b := make([]byte, 2)
+	if _, err := rand.Read(b); err != nil {
+		return hostname
+	}
+	return hostname + "-" + hex.EncodeToString(b)
+}
+
+// EngineID returns the engine's unique identifier.
+func (e *Engine) EngineID() string {
+	return e.engineID
 }
 
 // logger returns the engine's logger, initializing it if nil (for test convenience).
@@ -110,65 +152,84 @@ func (e *Engine) Run(ctx context.Context) error {
 	} else if e.opts.AllowInsecure {
 		e.logger().Warn("SECURITY WARNING: Running without authentication (--allow-insecure). Do NOT use in production.")
 	} else {
-		return fmt.Errorf("no whitelisted public keys configured, cannot start without authentication. " +
-			"Add agent keys with: banyan-engine init\n" +
-			"Or use --allow-insecure for development only (NOT for production)")
+		return fmt.Errorf("no whitelisted public keys configured, cannot start without authentication.\n" +
+			"  Add client keys with: sudo banyan-engine add-client --name <name> --pubkey <key>\n" +
+			"  Or use --allow-insecure for development only (NOT for production)")
 	}
 
 	// Initialize VPC overlay networking (subnet allocation + peer tracking)
-	var allocator *overlay.SubnetAllocator
-	var peerTracker *overlay.PeerTracker
+	var allocator overlay.SubnetAllocatorInterface
+	var peerTracker overlay.PeerTrackerInterface
 	if e.opts.VPCCIDR != "" {
 		if err := checkCIDRConflict(e.opts.VPCCIDR); err != nil {
 			return fmt.Errorf("VPC CIDR conflict: %w", err)
 		}
-		var allocErr error
-		allocator, allocErr = overlay.NewSubnetAllocator(e.opts.VPCCIDR)
-		if allocErr != nil {
-			return fmt.Errorf("failed to create subnet allocator: %w", allocErr)
+
+		if e.multiEngine {
+			// Multi-engine: etcd-backed allocator and peer tracker for coordination
+			lockStore, ok := e.store.(storage.LockStore)
+			if !ok {
+				return fmt.Errorf("multi-engine VPC requires etcd store with lock support")
+			}
+			var allocErr error
+			allocator, allocErr = newEtcdSubnetAllocator(e.opts.VPCCIDR, e.store, lockStore)
+			if allocErr != nil {
+				return fmt.Errorf("failed to create etcd subnet allocator: %w", allocErr)
+			}
+			peerTracker = newEtcdPeerTracker(e.store)
+			e.logger().Info("VPC overlay networking enabled (etcd-backed)", "cidr", e.opts.VPCCIDR)
+		} else {
+			// Single-engine: in-memory allocator and peer tracker
+			var allocErr error
+			allocator, allocErr = overlay.NewSubnetAllocator(e.opts.VPCCIDR)
+			if allocErr != nil {
+				return fmt.Errorf("failed to create subnet allocator: %w", allocErr)
+			}
+			peerTracker = overlay.NewPeerTracker()
+			e.logger().Info("VPC overlay networking enabled", "cidr", e.opts.VPCCIDR)
 		}
-		peerTracker = overlay.NewPeerTracker()
-		e.logger().Info("VPC overlay networking enabled", "cidr", e.opts.VPCCIDR)
 	}
 
-	// Start embedded OCI registry — bind to control tunnel IP when WireGuard
-	// tunnel is active, localhost otherwise.
-	registryBindAddr := "127.0.0.1"
-	if e.opts.ControlTunnelActive {
-		registryBindAddr = types.ControlTunnelEngineIP
-	}
-	e.logger().Info("Starting OCI registry", "bind", registryBindAddr, "port", e.opts.RegistryPort)
-	registryListener, err := startRegistry(ctx, registryBindAddr, e.opts.RegistryPort)
-	if err != nil {
-		return fmt.Errorf("failed to start registry: %w", err)
-	}
-	e.logger().Info("OCI registry listening", "bind", registryBindAddr, "port", e.opts.RegistryPort)
-
-	// Determine registry URL for agents to pull from
-	registryHost := registryBindAddr
-	if registryHost == "127.0.0.1" || registryHost == "0.0.0.0" {
-		// In insecure/local mode, determine the actual engine IP for agents
-		engineIP, ipErr := DetermineEngineIP()
-		if ipErr != nil {
-			return fmt.Errorf("failed to determine engine IP: %w", ipErr)
+	// Start OCI registry — either use an external URL (managed subprocess or
+	// user-provided) or fall back to the in-memory registry for dev/test.
+	if e.opts.ExternalRegistryURL != "" {
+		e.registryURL = e.opts.ExternalRegistryURL
+	} else {
+		// Fallback: start in-memory registry (dev/test when Distribution binary is unavailable)
+		registryBindAddr := "127.0.0.1"
+		if e.opts.ControlTunnelActive {
+			registryBindAddr = e.opts.TunnelIP
 		}
-		registryHost = engineIP
+		e.logger().Info("Starting in-memory OCI registry", "bind", registryBindAddr, "port", e.opts.RegistryPort)
+		registryListener, startErr := startRegistry(ctx, registryBindAddr, e.opts.RegistryPort)
+		if startErr != nil {
+			return fmt.Errorf("failed to start registry: %w", startErr)
+		}
+		_ = registryListener
+
+		registryHost := registryBindAddr
+		if registryHost == "127.0.0.1" || registryHost == "0.0.0.0" {
+			engineIP, ipErr := DetermineEngineIP()
+			if ipErr != nil {
+				return fmt.Errorf("failed to determine engine IP: %w", ipErr)
+			}
+			registryHost = engineIP
+		}
+		e.registryURL = fmt.Sprintf("%s:%s", registryHost, e.opts.RegistryPort)
 	}
-	e.registryURL = fmt.Sprintf("%s:%s", registryHost, e.opts.RegistryPort)
 	if saveErr := e.store.Save(ctx, types.KeyRegistry, e.registryURL); saveErr != nil {
 		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
-	e.logger().Info("Registry URL saved to store", "url", e.registryURL)
-	_ = registryListener
 
 	// Start Engine gRPC server — bind to control tunnel IP when authenticated,
-	// localhost in insecure mode. This prevents the control plane from being
-	// exposed on public interfaces.
+	// localhost in insecure mode. In multi-engine mode with insecure, bind to
+	// all interfaces so agents on other hosts can connect.
 	grpcBindAddr := "127.0.0.1"
 	if e.opts.ControlTunnelActive {
-		grpcBindAddr = types.ControlTunnelEngineIP
+		grpcBindAddr = e.opts.TunnelIP
+	} else if e.opts.AllowInsecure && e.multiEngine {
+		grpcBindAddr = "0.0.0.0"
 	}
-	e.logger().Info("Starting gRPC server", "bind", grpcBindAddr, "port", e.opts.GRPCPort)
 	grpcSrv, err := startEngineGRPC(ctx, &grpcServerOptions{
 		Store:           e.store,
 		Port:            e.opts.GRPCPort,
@@ -179,6 +240,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		VPCCIDR:         e.opts.VPCCIDR,
 		WhitelistedKeys: e.opts.WhitelistedKeys,
 		AllowInsecure:   e.opts.AllowInsecure,
+		ScheduleCh:      e.scheduleCh,
 		MetricsRegistry: e.metricsRegistry,
 		Events:          e.events,
 		StartedAt:       e.startedAt,
@@ -187,7 +249,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
 	e.grpcServer = grpcSrv
-	e.logger().Info("gRPC server listening", "port", e.opts.GRPCPort)
 
 	// Start Prometheus metrics HTTP server
 	metricsPort := e.opts.MetricsPort
@@ -197,10 +258,21 @@ func (e *Engine) Run(ctx context.Context) error {
 	if startErr := e.startMetricsHTTP(ctx, metricsPort); startErr != nil {
 		return fmt.Errorf("failed to start metrics server: %w", startErr)
 	}
-	e.logger().Info("Prometheus metrics available", "port", metricsPort)
+
+	// Register engine in etcd (for discovery by other engines / CLI)
+	grpcAddr := grpcBindAddr + ":" + e.opts.GRPCPort
+	e.registerEngine(ctx, grpcAddr)
 
 	// Start the orchestration loop
 	go e.engineLoop(ctx)
+
+	// Single summary line after all components are ready
+	e.logger().Info("Engine ready",
+		"grpc", grpcAddr,
+		"registry", e.registryURL,
+		"metrics", ":"+metricsPort,
+		"clients", len(e.opts.WhitelistedKeys),
+	)
 
 	<-ctx.Done()
 	return nil
@@ -218,6 +290,27 @@ func (e *Engine) emitEvent(eventType, message, severity string) {
 	}
 	if e.metricsRegistry != nil {
 		e.metricsRegistry.IncrementEvent(eventType)
+	}
+}
+
+// registerEngine saves an EngineRecord to etcd with a keep-alive lease.
+// The record auto-expires if this engine crashes (15s TTL, renewed every 10s).
+func (e *Engine) registerEngine(ctx context.Context, grpcAddr string) {
+	etcdStore, ok := e.store.(*storage.EtcdStore)
+	if !ok {
+		return // not etcd-backed (test/dev), skip registration
+	}
+
+	record := types.EngineRecord{
+		ID:          e.engineID,
+		Status:      "ready",
+		GRPCAddr:    grpcAddr,
+		RegistryURL: e.registryURL,
+		StartedAt:   e.startedAt,
+		LastSeen:    time.Now(),
+	}
+	if err := etcdStore.KeepAlive(ctx, types.KeyEngines+e.engineID, &record, 15*time.Second, 10*time.Second); err != nil {
+		e.logger().Warn("Failed to register engine in etcd", "error", err)
 	}
 }
 
@@ -239,7 +332,7 @@ func (e *Engine) startMetricsHTTP(ctx context.Context, port string) error {
 	// Bind metrics to same address as gRPC (control tunnel or localhost)
 	metricsBindAddr := "127.0.0.1"
 	if e.opts.ControlTunnelActive {
-		metricsBindAddr = types.ControlTunnelEngineIP
+		metricsBindAddr = e.opts.TunnelIP
 	}
 	lis, err := net.Listen("tcp", metricsBindAddr+":"+port)
 	if err != nil {
@@ -262,7 +355,10 @@ func (e *Engine) startMetricsHTTP(ctx context.Context, port string) error {
 	return nil
 }
 
-// engineLoop is the main orchestration loop.
+// engineLoop is the main orchestration loop. All engines run this loop.
+// In multi-engine mode, per-deployment distributed locks prevent duplicate work.
+// The scheduleCh allows immediate scheduling when a Deploy RPC or agent
+// registration occurs, instead of waiting for the next 3s tick.
 func (e *Engine) engineLoop(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
@@ -274,6 +370,8 @@ func (e *Engine) engineLoop(ctx context.Context) {
 		case <-ticker.C:
 			e.processDeployments(ctx)
 			e.updateMetrics(ctx)
+		case <-e.scheduleCh:
+			e.processDeployments(ctx)
 		}
 	}
 }
@@ -447,7 +545,29 @@ func (e *Engine) hasConflictingDeployment(ctx context.Context, deployment *types
 }
 
 // schedulePendingDeployment assigns tasks to available agents.
+// Uses a per-deployment distributed lock when etcd is available, so multiple
+// engines can safely run this concurrently without creating duplicate tasks.
 func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *types.DeploymentRecord) {
+	// Acquire per-deployment lock to prevent duplicate scheduling across engines.
+	// When the store doesn't support locks (e.g., MemoryStore in tests), skip locking.
+	if lockStore, ok := e.store.(storage.LockStore); ok {
+		unlock, lockErr := lockStore.Lock(ctx, "locks/deploy/"+deployment.ID, 30*time.Second)
+		if lockErr != nil {
+			return // another engine is handling this, or etcd issue
+		}
+		defer unlock()
+
+		// Re-read deployment after acquiring lock (may have been scheduled already)
+		var fresh types.DeploymentRecord
+		if err := e.store.Get(ctx, types.KeyDeployments+deployment.ID, &fresh); err != nil {
+			return
+		}
+		if fresh.Status != types.StatusPending {
+			return // already scheduled by another engine
+		}
+		deployment = &fresh
+	}
+
 	// Wait for conflicting deployments (same name, stopping/deploying) to finish
 	if e.hasConflictingDeployment(ctx, deployment) {
 		return
@@ -509,7 +629,25 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 }
 
 // checkDeployingDeployment checks if all tasks for a deployment have completed.
+// Uses a per-deployment lock because blueGreenTeardownOld creates stop tasks (non-idempotent).
 func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types.DeploymentRecord) {
+	if lockStore, ok := e.store.(storage.LockStore); ok {
+		unlock, lockErr := lockStore.Lock(ctx, "locks/deploy/"+deployment.ID, 30*time.Second)
+		if lockErr != nil {
+			return
+		}
+		defer unlock()
+
+		var fresh types.DeploymentRecord
+		if err := e.store.Get(ctx, types.KeyDeployments+deployment.ID, &fresh); err != nil {
+			return
+		}
+		if fresh.Status != types.StatusDeploying {
+			return
+		}
+		deployment = &fresh
+	}
+
 	nodeKeys, err := e.store.List(ctx, types.KeyNodes)
 	if err != nil {
 		return
@@ -564,6 +702,13 @@ func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types
 	newStatus, errMsg := types.DetermineDeploymentStatus(totalTasks, completedTasks, failedTasks, firstError)
 	if newStatus == "" {
 		return
+	}
+
+	// If all tasks completed successfully, wait for healthchecks before marking RUNNING.
+	// This ensures the deployment is actually ready, not just started.
+	// Services without healthchecks pass immediately (allHealthchecksHealthy returns true).
+	if newStatus == types.StatusRunning && !e.allHealthchecksHealthy(ctx, deployment) {
+		return // stay in DEPLOYING, check again on next loop tick
 	}
 
 	deployment.Status = newStatus

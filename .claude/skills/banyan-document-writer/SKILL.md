@@ -336,6 +336,49 @@ Use these when framing features. Don't list them all — weave them naturally. E
 | Minimal mental model | "Three concepts: engine, agent, manifest" | K8s has 50+ resource types. Banyan has 3 things to understand. |
 | No YAML templating | "Your manifest is the deployment — no translation layer" | K8s manifests go through Helm → templates → values → overrides. Banyan is what-you-write-is-what-runs. |
 
+## Terminology — be consistent
+
+Use these terms consistently across all documentation:
+
+| Correct | Wrong | Why |
+|---|---|---|
+| **agent** | worker, node, worker node | Banyan calls it "agent" everywhere (binary is `banyan-agent`). Never use "worker" to refer to a Banyan agent machine. |
+| **engine** | server, control plane, master | The binary is `banyan-engine`. Use "engine" consistently. |
+| **manifest** | config file, deployment file, YAML file | Banyan's deployment descriptor is always "manifest" or "banyan.yaml". |
+| **deploy** or **deployment** | release, rollout | Banyan uses "deployment" for the unit of work. |
+| **container** | pod, instance | Banyan runs containers, not pods. |
+
+Exception: `worker-1`, `worker-2` are acceptable as **example hostnames** in code blocks (e.g., `--agent-name worker-1`). But in prose, always say "agent" when referring to the machine role.
+
+## Navigation titles — keep them short
+
+Sidebar navigation titles must be **short nouns or noun phrases** (1-2 words). Long descriptive titles make the sidebar look cluttered and hard to scan.
+
+| Good | Bad | Why |
+|---|---|---|
+| Security | Secure Your Cluster | Sidebar needs to be scannable |
+| Multi-Agent | Deploy Across Multiple Servers | Too long for navigation |
+| Monitoring | See What's Running | Descriptive belongs in the page body |
+| Redeployment | Update Running Apps with Zero Downtime | Way too long |
+| High Availability | Run Multiple Engines for HA | Noun phrase, not a sentence |
+| CLI Reference | CLI Commands and Their Flags | Just "CLI Reference" |
+
+**Rule**: If the title is more than 3 words, shorten it. The `description` field in frontmatter carries the detail — that's what shows in search results and tooltips. The `title` is for navigation.
+
+```yaml
+# Good
+---
+title: Security
+description: How Banyan authenticates engines, agents, and CLI clients.
+---
+
+# Bad
+---
+title: Secure Your Cluster with WireGuard Authentication
+description: How Banyan authenticates engines, agents, and CLI clients.
+---
+```
+
 ## Current Feature Status (check before writing)
 
 Before documenting any feature, verify its implementation status:
@@ -343,8 +386,8 @@ Before documenting any feature, verify its implementation status:
 | Feature | Status | Doc approach |
 |---|---|---|
 | Core orchestration (deploy, status, logs, down) | Done | Document fully |
-| Multi-node deployment | Done | Document fully |
-| Authentication (password + token) | Done | Document fully |
+| Multi-agent deployment | Done | Document fully |
+| Authentication (WireGuard + public key) | Done | Document fully |
 | Built-in image registry | Done | Document fully |
 | VPC networking | Done | Document fully |
 | Blue-green redeployment | Done | Document fully |
@@ -352,7 +395,7 @@ Before documenting any feature, verify its implementation status:
 | Prometheus metrics | Done | Document fully |
 | CLI terminal dashboard | Done | Document fully |
 | Resource-aware scheduling | Done | Document fully |
-| Multi-engine HA | Planned (M7) | Don't document |
+| Multi-engine HA | Done (M7) | Document fully |
 | Auto-scaling | Planned (M8) | Don't document |
 | Volumes | Not planned yet | Note as limitation |
 | mTLS | Planned | Mention as upcoming |
@@ -365,20 +408,23 @@ User documentation lives in: `website/src/content/docs/`
 
 ```
 getting-started/
-  installation.md     — Install Banyan and dependencies
-  quickstart.md       — First deployment on Banyan
+  installation.md     — Installation
+  introduction.md     — Why Banyan?
+  quickstart.md       — Quickstart
 
-guides/                       — Task-oriented: "How do I do X?"
-  authentication.md   — Secure cluster communication
-  multi-node.md       — Deploy across multiple servers
-  redeployment.md     — Update running apps with zero downtime
+guides/
+  authentication.md   — Security
+  multi-node.md       — Multi-Agent
+  redeployment.md     — Redeployment
+  high-availability.md — High Availability
+  monitoring.md       — Monitoring
 
-reference/                    — Lookup-oriented: "What's the syntax for X?"
-  manifest.md         — All banyan.yaml fields
-  cli.md              — All commands and flags
-  troubleshooting.md  — Common issues and fixes
+reference/
+  manifest.md         — Manifest Reference
+  cli.md              — CLI Reference
+  troubleshooting.md  — Troubleshooting
 
-roadmap.md            — What's next
+roadmap.md            — Roadmap
 index.mdx             — Landing page
 ```
 

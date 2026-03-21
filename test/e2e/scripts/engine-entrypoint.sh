@@ -13,6 +13,7 @@ engine:
     grpc_port: "50051"
     store_backend: "etcd"
     managed_etcd: true
+    managed_registry: true
     overlay_type: "vxlan"
 EOF
 chmod 600 /etc/banyan/banyan.yaml
@@ -89,9 +90,17 @@ ENGINE_PID=$!
 trap "kill -TERM $ENGINE_PID 2>/dev/null; wait $ENGINE_PID 2>/dev/null; exit" SIGTERM SIGINT
 
 # 8. Wait for gRPC to be ready, then signal workers
-# gRPC binds to the WireGuard tunnel IP (10.200.0.1), not localhost
+# gRPC binds to the engine's WireGuard tunnel IP (derived from its public key)
+ENGINE_HASH=$(echo -n "$ENGINE_PUB_KEY" | sha256sum | head -c 4)
+ENGINE_O3=$((16#${ENGINE_HASH:0:2}))
+ENGINE_O4=$((16#${ENGINE_HASH:2:2}))
+if [ "$ENGINE_O3" -eq 0 ] && [ "$ENGINE_O4" -le 1 ]; then
+    ENGINE_O4=$((ENGINE_O4 + 2))
+fi
+ENGINE_TUNNEL_IP="10.200.${ENGINE_O3}.${ENGINE_O4}"
+echo "Engine tunnel IP: $ENGINE_TUNNEL_IP"
 echo "Waiting for engine gRPC to be ready..."
-until nc -z 10.200.0.1 50051 2>/dev/null; do
+until nc -z "$ENGINE_TUNNEL_IP" 50051 2>/dev/null; do
     sleep 1
 done
 touch /tmp/keys-exchange/engine-ready
@@ -117,7 +126,8 @@ ip addr add "${CLI_TUNNEL_IP}/16" dev wg-ctl-cli
 ip link set wg-ctl-cli up
 
 # Add engine as peer (engine listens on 127.0.0.1:51821 inside same container)
-wg set wg-ctl-cli peer "$ENGINE_PUB_KEY" allowed-ips 10.200.0.1/32 endpoint 127.0.0.1:51821
+# Use engine's derived tunnel IP (not hardcoded 10.200.0.1)
+wg set wg-ctl-cli peer "$ENGINE_PUB_KEY" allowed-ips ${ENGINE_TUNNEL_IP}/32 endpoint 127.0.0.1:51821
 echo "CLI control tunnel ready."
 
 # Wait for the engine process (keeps the container running)

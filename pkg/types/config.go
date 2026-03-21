@@ -13,9 +13,8 @@ import (
 
 // Control tunnel constants.
 const (
-	ControlTunnelCIDR     = "10.200.0.0/16"
-	ControlTunnelEngineIP = "10.200.0.1"
-	ControlTunnelPort     = 51821
+	ControlTunnelCIDR = "10.200.0.0/16"
+	ControlTunnelPort = 51821
 
 	// Per-component interface names (max 15 chars for Linux IFNAMSIZ).
 	ControlIfaceEngine = "wg-ctl-eng"
@@ -41,20 +40,24 @@ type BanyanConfig struct {
 
 // EngineConfig holds engine-specific settings.
 type EngineConfig struct {
-	APIPort            string `yaml:"api_port,omitempty"`
-	GRPCPort           string `yaml:"grpc_port,omitempty"`
-	MetricsPort        string `yaml:"metrics_port,omitempty"`
-	StoreBackend       string `yaml:"store_backend,omitempty"`
-	StoreAddress       string `yaml:"store_address,omitempty"`
-	EtcdUsername       string `yaml:"etcd_username,omitempty"`
-	EtcdPassword       string `yaml:"etcd_password,omitempty"`
-	EtcdCertFile       string `yaml:"etcd_cert_file,omitempty"`
-	EtcdKeyFile        string `yaml:"etcd_key_file,omitempty"`
-	EtcdCAFile         string `yaml:"etcd_ca_file,omitempty"`
-	WhitelistedKeysDir string `yaml:"whitelisted_keys_dir,omitempty"`
-	WGPrivateKeyFile   string `yaml:"wg_private_key_file,omitempty"`
-	WGPublicKey        string `yaml:"wg_public_key,omitempty"`
-	ManagedEtcd        bool   `yaml:"managed_etcd,omitempty"`
+	APIPort             string `yaml:"api_port,omitempty"`
+	GRPCPort            string `yaml:"grpc_port,omitempty"`
+	MetricsPort         string `yaml:"metrics_port,omitempty"`
+	StoreBackend        string `yaml:"store_backend,omitempty"`
+	StoreAddress        string `yaml:"store_address,omitempty"`
+	EtcdUsername        string `yaml:"etcd_username,omitempty"`
+	EtcdPassword        string `yaml:"etcd_password,omitempty"`
+	EtcdCertFile        string `yaml:"etcd_cert_file,omitempty"`
+	EtcdKeyFile         string `yaml:"etcd_key_file,omitempty"`
+	EtcdCAFile          string `yaml:"etcd_ca_file,omitempty"`
+	WhitelistedKeysDir  string `yaml:"whitelisted_keys_dir,omitempty"`
+	WGPrivateKeyFile    string `yaml:"wg_private_key_file,omitempty"`
+	WGPublicKey         string `yaml:"wg_public_key,omitempty"`
+	ExternalRegistryURL string `yaml:"external_registry_url,omitempty"`
+	EngineID            string `yaml:"engine_id,omitempty"`
+	ManagedEtcd         bool   `yaml:"managed_etcd,omitempty"`
+	ManagedRegistry     bool   `yaml:"managed_registry,omitempty"`
+	MultiEngine         bool   `yaml:"multi_engine,omitempty"`
 }
 
 // GetStoreBackend returns the configured store backend, defaulting to "etcd".
@@ -65,25 +68,33 @@ func (c *EngineConfig) GetStoreBackend() string {
 	return c.StoreBackend
 }
 
+// EngineEndpoint describes one engine in a multi-engine HA setup.
+type EngineEndpoint struct {
+	Address     string `yaml:"address"`
+	WGPublicKey string `yaml:"wg_public_key"`
+}
+
 // AgentConfig holds agent-specific settings.
 type AgentConfig struct {
-	EngineHost        string   `yaml:"engine_host,omitempty"`
-	EnginePort        string   `yaml:"engine_port,omitempty"`
-	AgentName         string   `yaml:"agent_name,omitempty"`
-	WGPrivateKeyFile  string   `yaml:"wg_private_key_file,omitempty"`
-	WGPublicKey       string   `yaml:"wg_public_key,omitempty"`
-	EngineWGPublicKey string   `yaml:"engine_wg_public_key,omitempty"`
-	Tags              []string `yaml:"tags,omitempty"`
+	EngineHost        string           `yaml:"engine_host,omitempty"`
+	EnginePort        string           `yaml:"engine_port,omitempty"`
+	AgentName         string           `yaml:"agent_name,omitempty"`
+	WGPrivateKeyFile  string           `yaml:"wg_private_key_file,omitempty"`
+	WGPublicKey       string           `yaml:"wg_public_key,omitempty"`
+	EngineWGPublicKey string           `yaml:"engine_wg_public_key,omitempty"`
+	Tags              []string         `yaml:"tags,omitempty"`
+	Engines           []EngineEndpoint `yaml:"engines,omitempty"` // multi-engine HA
 }
 
 // CLIConfig holds CLI-specific settings.
 type CLIConfig struct {
-	EngineHost        string `yaml:"engine_host,omitempty"`
-	EnginePort        string `yaml:"engine_port,omitempty"`
-	Name              string `yaml:"name,omitempty"`
-	WGPrivateKeyFile  string `yaml:"wg_private_key_file,omitempty"`
-	WGPublicKey       string `yaml:"wg_public_key,omitempty"`
-	EngineWGPublicKey string `yaml:"engine_wg_public_key,omitempty"`
+	EngineHost        string           `yaml:"engine_host,omitempty"`
+	EnginePort        string           `yaml:"engine_port,omitempty"`
+	Name              string           `yaml:"name,omitempty"`
+	WGPrivateKeyFile  string           `yaml:"wg_private_key_file,omitempty"`
+	WGPublicKey       string           `yaml:"wg_public_key,omitempty"`
+	EngineWGPublicKey string           `yaml:"engine_wg_public_key,omitempty"`
+	Engines           []EngineEndpoint `yaml:"engines,omitempty"` // multi-engine HA
 }
 
 // LoadConfig reads and parses the Banyan config file at the given path.
@@ -126,11 +137,16 @@ func SaveConfig(path string, cfg *BanyanConfig) error {
 }
 
 // GetConfigEngineEndpoint builds the engine gRPC endpoint from agent config.
-// Returns empty string if not configured.
+// Returns empty string if not configured. Checks `engines` list first, then old fields.
 func GetConfigEngineEndpoint(configPath string) string {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		return ""
+	}
+
+	// New: check engines list first
+	if len(cfg.Agent.Engines) > 0 {
+		return cfg.Agent.Engines[0].Address
 	}
 
 	host := cfg.Agent.EngineHost
@@ -147,11 +163,16 @@ func GetConfigEngineEndpoint(configPath string) string {
 }
 
 // GetCLIEngineEndpoint builds the engine gRPC endpoint from cli config.
-// Returns empty string if not configured.
+// Returns empty string if not configured. Checks `engines` list first, then old fields.
 func GetCLIEngineEndpoint(configPath string) string {
 	cfg, err := LoadConfig(configPath)
 	if err != nil {
 		return ""
+	}
+
+	// New: check engines list first
+	if len(cfg.CLI.Engines) > 0 {
+		return cfg.CLI.Engines[0].Address
 	}
 
 	host := cfg.CLI.EngineHost

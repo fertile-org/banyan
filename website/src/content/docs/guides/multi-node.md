@@ -1,5 +1,5 @@
 ---
-title: Deploy Across Multiple Servers
+title: Multi-Agent
 description: Scale from one server to many — your manifest doesn't change.
 sidebar:
   order: 2
@@ -14,25 +14,25 @@ graph TD
     Engine[fa:fa-server banyan-engine] -->|gRPC :50051| W1
     Engine -->|gRPC :50051| W2
 
-    subgraph W1[Worker 1]
+    subgraph W1[Agent 1]
         Agent1[fa:fa-cube banyan-agent]
         C1{{fa:fa-box containers}}
     end
 
-    subgraph W2[Worker 2]
+    subgraph W2[Agent 2]
         Agent2[fa:fa-cube banyan-agent]
         C2{{fa:fa-box containers}}
     end
 ```
 
-The Engine orchestrates. Workers run containers. All communication happens over gRPC with public key authentication.
+The Engine orchestrates. Agents run containers. All communication happens over gRPC with public key authentication.
 
 ## Prerequisites
 
 Install the appropriate binaries on each server. See [Installation](/getting-started/installation/).
 
 - **Engine node**: `banyan-engine`, `banyan-cli`, etcd (managed automatically by default)
-- **Worker nodes**: `banyan-agent`, containerd, nerdctl, wireguard-tools
+- **Agent nodes**: `banyan-agent`, containerd, nerdctl, wireguard-tools
 - **Deploy machine**: `banyan-cli` (can be the engine node or any other machine)
 
 ## 1. Start the Engine
@@ -57,7 +57,7 @@ sudo banyan-cli init
 # It generates a WireGuard keypair and displays the public key
 
 # Copy the CLI's public key to the engine
-echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
+sudo banyan-engine add-client --name deploy-machine --pubkey '<cli-public-key>'
 ```
 
 Verify the connection:
@@ -83,9 +83,9 @@ Cluster Summary
   Tasks:        0 completed, 0 failed
 ```
 
-## 2. Add Workers
+## 2. Add Agents
 
-On Worker 1 (`192.168.1.11`):
+On Agent 1 (`192.168.1.11`):
 
 ```bash
 sudo banyan-agent init
@@ -95,17 +95,17 @@ sudo systemctl enable --now banyan-agent
 The init wizard asks for:
 - **Engine host** — IP or hostname of the engine server (e.g., `192.168.1.10`).
 - **Engine gRPC port** — default `50051`.
-- **Node name** — unique name for this worker (default: hostname).
+- **Node name** — unique name for this agent (default: hostname).
 - **Engine WireGuard public key** — the engine's public key from `banyan-engine init` (optional, enables encrypted control tunnel).
 
 During init, Banyan generates a WireGuard keypair and displays the agent's public key. Copy this key to the engine:
 
 ```bash
 # On the engine machine
-echo '<worker-1-public-key>' > /etc/banyan/whitelisted-keys/worker-1.pub
+sudo banyan-engine add-client --name worker-1 --pubkey '<worker-1-public-key>'
 ```
 
-On Worker 2 (`192.168.1.12`):
+On Agent 2 (`192.168.1.12`):
 
 ```bash
 sudo banyan-agent init
@@ -129,7 +129,7 @@ worker-2             connected             0     0.8%     4.5%
 
 ## 4. Deploy
 
-The same manifest from the [Quickstart](/getting-started/quickstart/) works here without changes. Banyan distributes replicas across workers automatically.
+The same manifest from the [Quickstart](/getting-started/quickstart/) works here without changes. Banyan distributes replicas across agents automatically.
 
 ```yaml
 name: my-app
@@ -168,17 +168,17 @@ services:
 banyan-cli up -f banyan.yaml
 ```
 
-Banyan distributes 5 containers across 2 workers based on available resources — each task goes to the worker with the most available memory:
+Banyan distributes 5 containers across 2 agents based on available resources — each task goes to the agent with the most available memory:
 
-| Worker 1 | Worker 2 |
-|----------|----------|
+| Agent 1 | Agent 2 |
+|---------|---------|
 | my-app-web-0 | my-app-api-0 |
 | my-app-api-1 | my-app-api-2 |
 | my-app-db-0 | |
 
-**The manifest didn't change.** You went from one server to two — same YAML, more capacity. Banyan tracks CPU, memory, and disk on every worker and makes scheduling decisions accordingly. No manual pinning needed for most workloads.
+**The manifest didn't change.** You went from one server to two — same YAML, more capacity. Banyan tracks CPU, memory, and disk on every agent and makes scheduling decisions accordingly. No manual pinning needed for most workloads.
 
-## 5. Check containers on workers
+## 5. Check containers on agents
 
 From the CLI:
 
@@ -186,7 +186,7 @@ From the CLI:
 banyan-cli container
 ```
 
-Or SSH into a worker and list running containers directly:
+Or SSH into an agent and list running containers directly:
 
 ```bash
 sudo nerdctl ps
@@ -202,7 +202,7 @@ sudo banyan-cli init
 # Enter the engine host and port — generates a keypair and displays the public key
 
 # Copy the CLI's public key to the engine
-echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
+sudo banyan-engine add-client --name deploy-machine --pubkey '<cli-public-key>'
 
 # Deploy from anywhere
 banyan-cli up -f banyan.yaml
@@ -210,16 +210,22 @@ banyan-cli up -f banyan.yaml
 
 After a machine reboot, run `sudo banyan-cli login` to re-establish the WireGuard tunnel. No prompts — it reads the saved config.
 
-## Adding more workers
+## Adding more agents
 
 1. Install `banyan-agent`, containerd, nerdctl, and wireguard-tools on the new server.
 2. Run `sudo banyan-agent init` (enter engine host, port, and node name).
-3. Copy the agent's public key to the engine: `echo '<pubkey>' > /etc/banyan/whitelisted-keys/<name>.pub`
+3. Whitelist the agent's public key: `sudo banyan-engine add-client --name <name> --pubkey <key>`
 4. Run `sudo systemctl enable --now banyan-agent`
 
-The new worker appears in `banyan-cli agent` within seconds. Future deployments include it automatically.
+The new agent appears in `banyan-cli agent` within seconds. Future deployments include it automatically.
 
 That's the point — **scaling is adding a server, not editing a manifest.**
+
+## High availability
+
+By default, the engine is a single process. If it goes down, agents keep running containers but no new deployments can be scheduled until it's back.
+
+For clusters where control plane downtime is not acceptable, you can run multiple engines. See [High Availability](/guides/high-availability/).
 
 ## Firewall requirements
 
@@ -232,4 +238,4 @@ That's the point — **scaling is adding a server, not editing a manifest.**
 | 51821 | UDP | Agents/CLI → Engine | WireGuard control tunnel (encrypted control plane) |
 | 4789 | UDP | Agent ↔ Agent | VXLAN overlay (fallback if WireGuard unavailable) |
 
-Workers communicate with each other over the overlay network (WireGuard or VXLAN) for cross-host container traffic. When the control tunnel is active, gRPC traffic (ports 50051/50052) flows inside the WireGuard tunnel and does not need to be exposed directly.
+Agents communicate with each other over the overlay network (WireGuard or VXLAN) for cross-host container traffic. When the control tunnel is active, gRPC traffic (ports 50051/50052) flows inside the WireGuard tunnel and does not need to be exposed directly.

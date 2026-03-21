@@ -1,5 +1,5 @@
 ---
-title: Secure Your Cluster
+title: Security
 description: How Banyan authenticates engines, agents, and CLI clients.
 sidebar:
   order: 1
@@ -144,7 +144,7 @@ cat /etc/banyan/banyan.yaml | grep wg_public_key
 # Output: wg_public_key: "abc123..."
 
 # On the engine machine
-echo 'abc123...' > /etc/banyan/whitelisted-keys/worker-1.pub
+sudo banyan-engine add-client --name worker-1 --pubkey 'abc123...'
 ```
 
 Or copy directly between machines:

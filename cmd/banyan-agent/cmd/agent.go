@@ -268,6 +268,28 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 	existingCfg.Agent.EngineWGPublicKey = engineWGPubKey
 	existingCfg.Agent.Tags = parseTags(tagsInput)
 
+	// --- Additional engine endpoints for HA ---
+	if len(existingCfg.Agent.Engines) > 0 {
+		fmt.Printf("  %s HA engines already configured:\n", styleOK.Render("[OK]"))
+		for i, eng := range existingCfg.Agent.Engines {
+			fmt.Printf("    %d. %s\n", i+1, eng.Address)
+		}
+	} else {
+		primaryAddr := engineHost + ":" + enginePort
+		engines := collectEngineEndpoints(primaryAddr, engineWGPubKey)
+		if engines != nil {
+			existingCfg.Agent.Engines = engines
+			fmt.Printf("  %s HA engines configured:\n", styleOK.Render("[OK]"))
+			for i, eng := range engines {
+				label := ""
+				if i == 0 {
+					label = " (primary)"
+				}
+				fmt.Printf("    %d. %s%s\n", i+1, eng.Address, label)
+			}
+		}
+	}
+
 	// --- Save config ---
 	if err := types.SaveConfig(configPath, &existingCfg); err != nil {
 		fmt.Printf("  %s Failed to save config: %v\n", styleWarn.Render("[WARN]"), err)
@@ -283,9 +305,9 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println()
 		fmt.Println(styleInfo.Render("To whitelist this agent on the engine:"))
-		fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n",
-			existingCfg.Agent.WGPublicKey,
-			keyFileName)
+		fmt.Printf("  sudo banyan-engine add-client --name %s --pubkey '%s'\n",
+			keyFileName,
+			existingCfg.Agent.WGPublicKey)
 	}
 
 	fmt.Println()
@@ -357,11 +379,6 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no authentication configured (missing WireGuard public key). Run 'banyan-agent init' to generate a keypair")
 	}
 
-	// Verify engine WireGuard public key is configured (required for control tunnel)
-	if cfg.Agent.EngineWGPublicKey == "" {
-		return fmt.Errorf("engine WireGuard public key not configured. Run 'banyan-agent init' and provide the engine's public key")
-	}
-
 	// Check for nerdctl
 	if nerdctlPath, lookErr := exec.LookPath("nerdctl"); lookErr != nil {
 		log.Warn("nerdctl not found, container operations will fail")
@@ -378,8 +395,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write PID file: %w", writeErr)
 	}
 
-	// Set up WireGuard control tunnel (required when engine public key is configured)
-	controlTunnelActive := false
+	// Read WireGuard private key
 	var agentWGPrivateKey string
 	if cfg.Agent.WGPrivateKeyFile != "" {
 		var readErr error
@@ -388,27 +404,56 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to load WireGuard private key: %w", readErr)
 		}
 	}
-	if cfg.Agent.EngineWGPublicKey != "" && agentWGPrivateKey != "" {
-		myTunnelIP := types.TunnelIPFromPublicKey(cfg.Agent.WGPublicKey)
-		log.Info("Setting up WireGuard control tunnel", "tunnel_ip", myTunnelIP)
-		engineEndpointWG := cfg.Agent.EngineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
-		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceAgent, agentWGPrivateKey, myTunnelIP, 0); tunnelErr != nil {
-			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
-		}
-		engineIP := net.ParseIP(types.ControlTunnelEngineIP)
-		if peerErr := overlay.AddControlPeerExec(types.ControlIfaceAgent, cfg.Agent.EngineWGPublicKey, engineEndpointWG, engineIP); peerErr != nil {
-			_ = overlay.CleanupControlTunnelExec(types.ControlIfaceAgent)
-			return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
-		}
-		controlTunnelActive = true
-		// Override gRPC endpoint to route through tunnel
+
+	// Build engine list from config — always use the `engines` field.
+	// Single-engine configs that still use old fields are converted to a 1-entry list.
+	engines := cfg.Agent.Engines
+	if len(engines) == 0 && cfg.Agent.EngineWGPublicKey != "" {
 		enginePort := cfg.Agent.EnginePort
 		if enginePort == "" {
 			enginePort = "50051"
 		}
-		agentEngineEndpoint = types.ControlTunnelEngineIP + ":" + enginePort
-		log.Info("Control tunnel ready", "grpc_endpoint", agentEngineEndpoint)
+		engines = []types.EngineEndpoint{
+			{Address: cfg.Agent.EngineHost + ":" + enginePort, WGPublicKey: cfg.Agent.EngineWGPublicKey},
+		}
 	}
+
+	// Set up WireGuard control tunnel with all engine peers
+	controlTunnelActive := false
+	if agentWGPrivateKey != "" && len(engines) > 0 {
+		myTunnelIP := types.TunnelIPFromPublicKey(cfg.Agent.WGPublicKey)
+		log.Info("Setting up WireGuard control tunnel", "tunnel_ip", myTunnelIP, "engine_peers", len(engines))
+		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceAgent, agentWGPrivateKey, myTunnelIP, 0); tunnelErr != nil {
+			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
+		}
+		for _, eng := range engines {
+			engineHost, _, _ := net.SplitHostPort(eng.Address)
+			engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+			engineTunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
+			if peerErr := overlay.AddControlPeerExec(types.ControlIfaceAgent, eng.WGPublicKey, engineEndpointWG, engineTunnelIP); peerErr != nil {
+				_ = overlay.CleanupControlTunnelExec(types.ControlIfaceAgent)
+				return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
+			}
+			log.Info("Engine peer added to tunnel", "address", eng.Address, "tunnel_ip", engineTunnelIP)
+		}
+		controlTunnelActive = true
+	}
+
+	// Build gRPC endpoint list
+	var grpcEndpoints []string
+	for _, eng := range engines {
+		if controlTunnelActive {
+			_, port, _ := net.SplitHostPort(eng.Address)
+			tunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
+			grpcEndpoints = append(grpcEndpoints, tunnelIP.String()+":"+port)
+		} else {
+			grpcEndpoints = append(grpcEndpoints, eng.Address)
+		}
+	}
+	if len(grpcEndpoints) > 0 {
+		agentEngineEndpoint = grpcEndpoints[0]
+	}
+	log.Info("Engine endpoints configured", "primary", agentEngineEndpoint, "total", max(len(grpcEndpoints), 1))
 
 	// Determine API address — use tunnel IP if control tunnel is active
 	apiAddress := agentAPIAddress
@@ -418,15 +463,16 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 
 	a, err := agent.New(&agent.Options{
-		AgentName:      nodeName,
-		EngineEndpoint: agentEngineEndpoint,
-		PublicKey:      publicKey,
-		WGPrivateKey:   agentWGPrivateKey,
-		WGPublicKey:    cfg.Agent.WGPublicKey,
-		APIPort:        agentAPIPort,
-		APIAddress:     apiAddress,
-		PidFile:        agentPidFile,
-		Tags:           cfg.Agent.Tags,
+		AgentName:       nodeName,
+		EngineEndpoint:  agentEngineEndpoint,
+		EngineEndpoints: grpcEndpoints,
+		PublicKey:       publicKey,
+		WGPrivateKey:    agentWGPrivateKey,
+		WGPublicKey:     cfg.Agent.WGPublicKey,
+		APIPort:         agentAPIPort,
+		APIAddress:      apiAddress,
+		PidFile:         agentPidFile,
+		Tags:            cfg.Agent.Tags,
 	})
 	if err != nil {
 		return err
@@ -541,6 +587,71 @@ func isAgentRunning() bool {
 
 // parseTags splits a comma-separated string into a trimmed tag slice.
 // Returns nil for empty input.
+// collectEngineEndpoints prompts the user to add engine endpoints (address + WG key)
+// one by one for HA failover. The primary engine is included as the first entry.
+// Returns nil if the user doesn't want HA.
+func collectEngineEndpoints(primaryAddr, primaryWGKey string) []types.EngineEndpoint {
+	var addMore bool
+	confirmForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Add additional engine endpoints for high availability?").
+				Description("For single-engine setups, choose No").
+				Value(&addMore),
+		),
+	)
+	if err := confirmForm.Run(); err != nil || !addMore {
+		return nil
+	}
+
+	engines := []types.EngineEndpoint{
+		{Address: primaryAddr, WGPublicKey: primaryWGKey},
+	}
+
+	for {
+		var address, wgKey string
+		epForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Engine #%d — address", len(engines)+1)).
+					Description("host:port (or leave empty to finish)").
+					Value(&address),
+			),
+		)
+		if err := epForm.Run(); err != nil {
+			break
+		}
+		address = strings.TrimSpace(address)
+		if address == "" {
+			break
+		}
+
+		keyForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Engine #%d — WireGuard public key", len(engines)+1)).
+					Description("Displayed during 'banyan-engine init' on that server").
+					Value(&wgKey),
+			),
+		)
+		if err := keyForm.Run(); err != nil {
+			break
+		}
+		wgKey = strings.TrimSpace(wgKey)
+		if wgKey == "" {
+			fmt.Printf("  %s WireGuard public key is required for each engine\n", styleWarn.Render("[WARN]"))
+			continue
+		}
+
+		engines = append(engines, types.EngineEndpoint{Address: address, WGPublicKey: wgKey})
+	}
+
+	if len(engines) <= 1 {
+		return nil // user didn't add any extras
+	}
+	return engines
+}
+
 func parseTags(input string) []string {
 	input = strings.TrimSpace(input)
 	if input == "" {

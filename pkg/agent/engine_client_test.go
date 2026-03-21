@@ -47,8 +47,9 @@ func setupEngineServer(t *testing.T) (*EngineClient, storage.StateStore, func())
 	}
 
 	client := &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
+		endpoints: []string{"passthrough:///bufnet"},
+		conn:      conn,
+		client:    banyanpb.NewEngineServiceClient(conn),
 	}
 
 	cleanup := func() {
@@ -194,8 +195,9 @@ func setupFailingReportServer(t *testing.T) (*EngineClient, storage.StateStore, 
 	}
 
 	client := &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
+		endpoints: []string{"passthrough:///bufnet"},
+		conn:      conn,
+		client:    banyanpb.NewEngineServiceClient(conn),
 	}
 
 	cleanup := func() {
@@ -204,6 +206,51 @@ func setupFailingReportServer(t *testing.T) (*EngineClient, storage.StateStore, 
 	}
 
 	return client, store, cleanup
+}
+
+func TestNewEngineClientMulti(t *testing.T) {
+	t.Run("no endpoints", func(t *testing.T) {
+		_, err := NewEngineClientMulti(nil)
+		if err == nil {
+			t.Fatal("expected error for empty endpoints")
+		}
+	})
+
+	t.Run("single endpoint", func(t *testing.T) {
+		client, err := NewEngineClientMulti([]string{"localhost:50051"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer client.Close()
+		if client.CurrentEndpoint() != "localhost:50051" {
+			t.Errorf("expected localhost:50051, got %s", client.CurrentEndpoint())
+		}
+	})
+
+	t.Run("multiple endpoints", func(t *testing.T) {
+		client, err := NewEngineClientMulti([]string{"localhost:50051", "localhost:50052"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		defer client.Close()
+		if client.CurrentEndpoint() != "localhost:50051" {
+			t.Errorf("expected localhost:50051, got %s", client.CurrentEndpoint())
+		}
+		// Failover should switch to next endpoint
+		if err := client.Failover(); err != nil {
+			t.Fatalf("Failover failed: %v", err)
+		}
+		if client.CurrentEndpoint() != "localhost:50052" {
+			t.Errorf("expected localhost:50052 after failover, got %s", client.CurrentEndpoint())
+		}
+		// Failover wraps around
+		if err := client.Failover(); err != nil {
+			t.Fatalf("Failover wrap failed: %v", err)
+		}
+		if client.CurrentEndpoint() != "localhost:50051" {
+			t.Errorf("expected localhost:50051 after wrap, got %s", client.CurrentEndpoint())
+		}
+	})
 }
 
 func TestNewEngineClient(t *testing.T) {
@@ -277,8 +324,9 @@ func TestEngineClient_Register_WithVPCConfig(t *testing.T) {
 	}()
 
 	client := &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
+		endpoints: []string{"passthrough:///bufnet"},
+		conn:      conn,
+		client:    banyanpb.NewEngineServiceClient(conn),
 	}
 
 	registryURL, vpcConfig, _, registerErr := client.Register(context.Background(), RegisterRequest{
@@ -390,8 +438,9 @@ func TestEngineClient_Heartbeat_WithBackends(t *testing.T) {
 	}()
 
 	client := &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
+		endpoints: []string{"passthrough:///bufnet"},
+		conn:      conn,
+		client:    banyanpb.NewEngineServiceClient(conn),
 	}
 
 	_, backends, hbErr := client.Heartbeat(context.Background(), "worker-1", nil, metrics.SystemMetrics{})

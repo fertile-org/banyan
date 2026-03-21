@@ -18,6 +18,16 @@ import (
 
 const cliTestBufSize = 1024 * 1024
 
+// cliTestEngineServer is a minimal server that only implements Health.
+// Used by TestNewAutoEngineClient to verify the health-check failover logic.
+type cliTestEngineServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+}
+
+func (s *cliTestEngineServer) Health(_ context.Context, _ *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
 // cliTestServer is a minimal EngineService server for CLI client tests.
 type cliTestServer struct {
 	banyanpb.UnimplementedEngineServiceServer
@@ -176,30 +186,22 @@ func setupCLITestConfig(t *testing.T, engineAddr string) {
 	origConfig := configPath
 	t.Cleanup(func() { configPath = origConfig })
 
-	// Mock control tunnel so tests don't need a real kernel interface
+	// Mock control tunnel as NOT active — test connects directly to the server address.
+	// In production, the tunnel would be active and IPs derived from WG keys.
 	origTunnelFn := controlTunnelExistsFn
-	controlTunnelExistsFn = func(string) bool { return true }
+	controlTunnelExistsFn = func(string) bool { return false }
 	t.Cleanup(func() { controlTunnelExistsFn = origTunnelFn })
-
-	// Route tunnel traffic to localhost so tests connect to the local test server
-	origTunnelIP := controlTunnelEngineIP
-	controlTunnelEngineIP = "127.0.0.1"
-	t.Cleanup(func() { controlTunnelEngineIP = origTunnelIP })
 
 	tmpDir := t.TempDir()
 	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 	cfg := types.BanyanConfig{
 		CLI: types.CLIConfig{
-			EngineHost:        "127.0.0.1",
-			EnginePort:        "",                             // will be parsed from addr
-			WGPublicKey:       "dGVzdC1wdWJsaWMta2V5",         // dummy key for test auth
-			EngineWGPublicKey: "dGVzdC1lbmdpbmUtd2cta2V5Cg==", // dummy engine WG key
+			WGPublicKey: "dGVzdC1wdWJsaWMta2V5",
+			Engines: []types.EngineEndpoint{
+				{Address: engineAddr, WGPublicKey: "dGVzdC1lbmdpbmUtd2cta2V5Cg=="},
+			},
 		},
 	}
-	// Parse host:port from addr
-	host, port, _ := net.SplitHostPort(engineAddr)
-	cfg.CLI.EngineHost = host
-	cfg.CLI.EnginePort = port
 	if err := types.SaveConfig(cfgPath, &cfg); err != nil {
 		t.Fatalf("SaveConfig failed: %v", err)
 	}
@@ -438,23 +440,32 @@ var _ banyanpb.EngineServiceClient = (banyanpb.EngineServiceClient)(nil)
 
 func TestNewAutoEngineClient(t *testing.T) {
 	t.Run("connects through tunnel", func(t *testing.T) {
+		// Start a real TCP gRPC server so the health check passes
+		lis, lisErr := net.Listen("tcp", "127.0.0.1:0")
+		if lisErr != nil {
+			t.Fatalf("failed to listen: %v", lisErr)
+		}
+		_, port, _ := net.SplitHostPort(lis.Addr().String())
+		grpcSrv := grpc.NewServer()
+		banyanpb.RegisterEngineServiceServer(grpcSrv, &cliTestEngineServer{})
+		go grpcSrv.Serve(lis)
+		t.Cleanup(grpcSrv.Stop)
+
 		origConfig := configPath
 		t.Cleanup(func() { configPath = origConfig })
+		// Tunnel not active — connect directly to test server
 		origTunnelFn := controlTunnelExistsFn
-		controlTunnelExistsFn = func(string) bool { return true }
+		controlTunnelExistsFn = func(string) bool { return false }
 		t.Cleanup(func() { controlTunnelExistsFn = origTunnelFn })
-		origTunnelIP := controlTunnelEngineIP
-		controlTunnelEngineIP = "127.0.0.1"
-		t.Cleanup(func() { controlTunnelEngineIP = origTunnelIP })
 
 		tmpDir := t.TempDir()
 		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 		cfg := types.BanyanConfig{
 			CLI: types.CLIConfig{
-				EngineHost:        "127.0.0.1",
-				EnginePort:        "50051",
-				WGPublicKey:       "test-pubkey-base64",
-				EngineWGPublicKey: "test-engine-wg-key",
+				WGPublicKey: "test-pubkey-base64",
+				Engines: []types.EngineEndpoint{
+					{Address: "127.0.0.1:" + port, WGPublicKey: "test-engine-wg-key"},
+				},
 			},
 		}
 		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
@@ -462,7 +473,7 @@ func TestNewAutoEngineClient(t *testing.T) {
 		}
 		configPath = cfgPath
 
-		client, err := NewAutoEngineClient("localhost:50051")
+		client, err := NewAutoEngineClient("localhost:" + port)
 		if err != nil {
 			t.Fatalf("NewAutoEngineClient failed: %v", err)
 		}
@@ -473,7 +484,30 @@ func TestNewAutoEngineClient(t *testing.T) {
 		}
 	})
 
-	t.Run("returns error when no auth configured", func(t *testing.T) {
+	t.Run("returns error when no engines configured", func(t *testing.T) {
+		origConfig := configPath
+		t.Cleanup(func() { configPath = origConfig })
+
+		tmpDir := t.TempDir()
+		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+		cfg := types.BanyanConfig{
+			CLI: types.CLIConfig{},
+		}
+		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
+			t.Fatalf("SaveConfig failed: %v", err)
+		}
+		configPath = cfgPath
+
+		_, err := NewAutoEngineClient("localhost:50051")
+		if err == nil {
+			t.Fatal("expected error when no engines configured")
+		}
+		if !strings.Contains(err.Error(), "no engines configured") {
+			t.Errorf("expected 'no engines configured' error, got: %v", err)
+		}
+	})
+
+	t.Run("returns error when no auth and no engines", func(t *testing.T) {
 		origConfig := configPath
 		t.Cleanup(func() { configPath = origConfig })
 
@@ -483,6 +517,7 @@ func TestNewAutoEngineClient(t *testing.T) {
 			CLI: types.CLIConfig{
 				EngineHost: "127.0.0.1",
 				EnginePort: "50051",
+				// No WGPublicKey, no EngineWGPublicKey, no Engines
 			},
 		}
 		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
@@ -494,35 +529,8 @@ func TestNewAutoEngineClient(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error when no auth configured")
 		}
-		if !strings.Contains(err.Error(), "no authentication configured") {
-			t.Errorf("expected 'no authentication configured' error, got: %v", err)
-		}
-	})
-
-	t.Run("returns error when engine WG public key missing", func(t *testing.T) {
-		origConfig := configPath
-		t.Cleanup(func() { configPath = origConfig })
-
-		tmpDir := t.TempDir()
-		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
-		cfg := types.BanyanConfig{
-			CLI: types.CLIConfig{
-				EngineHost:  "127.0.0.1",
-				EnginePort:  "50051",
-				WGPublicKey: "test-pubkey-base64",
-			},
-		}
-		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
-			t.Fatalf("SaveConfig failed: %v", err)
-		}
-		configPath = cfgPath
-
-		_, err := NewAutoEngineClient("localhost:50051")
-		if err == nil {
-			t.Fatal("expected error when engine WG public key missing")
-		}
-		if !strings.Contains(err.Error(), "engine WireGuard public key not configured") {
-			t.Errorf("expected 'engine WireGuard public key not configured' error, got: %v", err)
+		if !strings.Contains(err.Error(), "no engines configured") {
+			t.Errorf("expected 'no engines configured' error, got: %v", err)
 		}
 	})
 
@@ -537,10 +545,10 @@ func TestNewAutoEngineClient(t *testing.T) {
 		cfgPath := filepath.Join(tmpDir, "banyan.yaml")
 		cfg := types.BanyanConfig{
 			CLI: types.CLIConfig{
-				EngineHost:        "127.0.0.1",
-				EnginePort:        "50051",
-				WGPublicKey:       "test-pubkey-base64",
-				EngineWGPublicKey: "test-engine-wg-key",
+				WGPublicKey: "test-pubkey-base64",
+				Engines: []types.EngineEndpoint{
+					{Address: "127.0.0.1:50051", WGPublicKey: "test-engine-wg-key"},
+				},
 			},
 		}
 		if err := types.SaveConfig(cfgPath, &cfg); err != nil {
@@ -550,10 +558,11 @@ func TestNewAutoEngineClient(t *testing.T) {
 
 		_, err := NewAutoEngineClient("localhost:50051")
 		if err == nil {
-			t.Fatal("expected error when tunnel not active")
+			t.Fatal("expected error when tunnel not active and no server running")
 		}
-		if !strings.Contains(err.Error(), "not active") {
-			t.Errorf("expected 'not active' error, got: %v", err)
+		// Without tunnel, it tries direct connection which fails (no server)
+		if !strings.Contains(err.Error(), "failed to connect") {
+			t.Errorf("expected 'failed to connect' error, got: %v", err)
 		}
 	})
 }

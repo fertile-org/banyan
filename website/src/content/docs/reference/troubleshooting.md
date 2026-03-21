@@ -28,7 +28,7 @@ Agents connect to the Engine's gRPC port (default: 50051). Check:
 
 1. The Engine is running and the gRPC server started successfully (look for "Engine gRPC server listening on :50051" in the output).
 
-2. The agent's config has the correct engine host and port. Check `/etc/banyan/banyan.yaml` on the worker:
+2. The agent's config has the correct engine host and port. Check `/etc/banyan/banyan.yaml` on the agent:
    ```yaml
    agent:
      engine_host: <engine-ip>
@@ -36,7 +36,7 @@ Agents connect to the Engine's gRPC port (default: 50051). Check:
      wg_public_key: "<base64-key>"
    ```
 
-3. Port 50051 is open in your firewall between workers and the engine.
+3. Port 50051 is open in your firewall between agents and the engine.
 
 4. The agent's public key is whitelisted on the engine. Check that a `.pub` file containing the agent's public key exists in `/etc/banyan/whitelisted-keys/` on the engine machine.
 
@@ -53,11 +53,11 @@ See [Authentication](/guides/authentication/) for details on key management.
 
 ### WireGuard overlay issues
 
-If containers on different workers cannot communicate:
+If containers on different agents cannot communicate:
 
-1. Check that `wireguard-tools` is installed on all workers: `wg --version`
+1. Check that `wireguard-tools` is installed on all agents: `wg --version`
 2. Verify WireGuard kernel support: `ip link add wg-test type wireguard && ip link delete wg-test` — if this fails, the kernel module is missing (requires Linux 5.6+ or `wireguard-dkms`).
-3. Ensure port 51820/UDP is open between workers.
+3. Ensure port 51820/UDP is open between agents.
 4. If WireGuard is unavailable, Banyan falls back to VXLAN automatically. You can also force VXLAN by setting `overlay_type: "vxlan"` in the engine config.
 
 ### Control tunnel issues
@@ -77,7 +77,7 @@ If agents or CLI cannot connect through the WireGuard control tunnel:
 
 ### "nerdctl not found"
 
-Install nerdctl on the worker node:
+Install nerdctl on the agent node:
 
 ```bash
 curl -L https://github.com/containerd/nerdctl/releases/download/v2.0.3/nerdctl-2.0.3-linux-amd64.tar.gz \
@@ -100,13 +100,13 @@ sudo apt-get install containerd
 
 ### Agent shows "ready" but tasks fail
 
-Check if the Agent can pull images. SSH into the worker and test:
+Check if the Agent can pull images. SSH into the agent and test:
 
 ```bash
 sudo nerdctl pull nginx:alpine
 ```
 
-If this fails, the worker may not have internet access or the image registry may be unreachable.
+If this fails, the agent may not have internet access or the image registry may be unreachable.
 
 ---
 
@@ -124,7 +124,7 @@ The Engine is waiting for Agents to complete their tasks. Check:
 
 Check the error message in `banyan-cli deployment`. Common causes:
 
-- **Image not found**: The image name in `banyan.yaml` is wrong or the registry is unreachable from workers.
+- **Image not found**: The image name in `banyan.yaml` is wrong or the registry is unreachable from agents.
 - **Port conflict**: Another container is already using the same host port.
 
 ### "deployment timed out"
@@ -166,7 +166,7 @@ Either deploy the dependency too (`banyan-cli up -f banyan.yaml web api`) or mak
 
 ### Containers are running but the application doesn't work
 
-Banyan deploys containers but does not manage application-level networking between services across nodes. Containers on the same worker can communicate via localhost. Containers on different workers need external networking or a load balancer.
+Banyan deploys containers but does not manage application-level networking between services across nodes. Containers on the same agent can communicate via localhost. Containers on different agents need external networking or a load balancer.
 
 ---
 
@@ -203,7 +203,7 @@ Etcd logs:
 
 ### Stopping containers manually
 
-If you need to remove containers directly on a worker:
+If you need to remove containers directly on an agent:
 
 ```bash
 sudo nerdctl rm -f <container-name>

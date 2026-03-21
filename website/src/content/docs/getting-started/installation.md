@@ -17,7 +17,7 @@ The install script detects your OS, downloads the Banyan binaries, and installs 
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role engine
 ```
 
-**Worker node** (runs your containers):
+**Agent node** (runs your containers):
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/fertile-org/banyan/main/install.sh | sudo bash -s -- --role agent
@@ -80,7 +80,7 @@ scp banyan-agent banyan-cli user@worker-server:/usr/local/bin/
 When building from source, you still need runtime dependencies on each node:
 
 - **Engine node**: etcd (Banyan can manage this for you — see [Etcd](#etcd-state-store) below), wireguard-tools (for control tunnel).
-- **Worker nodes**: containerd, nerdctl (>= 2.1.3), CNI plugins, wireguard-tools (for overlay and control tunnel), BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
+- **Agent nodes**: containerd, nerdctl (>= 2.1.3), CNI plugins, wireguard-tools (for overlay and control tunnel), BuildKit. See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for exact commands.
 
 You also need to create systemd service files manually (the install script does this automatically). See the [install script](https://github.com/fertile-org/banyan/blob/main/install.sh) for the service file contents, or run the engine/agent in the foreground with `sudo banyan-engine start`.
 
@@ -124,7 +124,7 @@ sudo banyan-engine init                    # one-time: config dirs, keypair, etc
 sudo systemctl enable --now banyan-engine  # start + enable on boot
 ```
 
-### Agent (each worker)
+### Agent
 
 ```bash
 sudo banyan-agent init                     # one-time: config dirs, keypair
@@ -154,7 +154,7 @@ sudo banyan-agent start    # runs in foreground, Ctrl+C to stop
 
 ```bash
 banyan-engine --help   # On engine node
-banyan-agent --help    # On worker nodes
+banyan-agent --help    # On agent nodes
 banyan-cli --help      # On any machine
 ```
 

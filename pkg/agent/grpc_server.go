@@ -47,7 +47,10 @@ func verifyEngineIP(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if ip != types.ControlTunnelEngineIP {
+	// Verify the caller is on the control tunnel network (10.200.0.0/16).
+	// Any engine with a valid WireGuard key will have a tunnel IP in this range.
+	_, tunnelCIDR, _ := net.ParseCIDR(types.ControlTunnelCIDR)
+	if tunnelCIDR != nil && !tunnelCIDR.Contains(net.ParseIP(ip)) {
 		return status.Errorf(codes.PermissionDenied, "only the engine can connect to the agent gRPC server")
 	}
 	return nil

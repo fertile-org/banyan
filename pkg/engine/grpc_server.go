@@ -67,11 +67,12 @@ type engineGRPCServer struct {
 	banyanpb.UnimplementedEngineServiceServer
 	store           storage.StateStore
 	registryURL     string
-	whitelistedKeys map[string]string        // publicKey → agentName
-	tunnelIPToAgent map[string]string        // tunnelIP → agentName (reverse map for identity)
-	allocator       *overlay.SubnetAllocator // VPC subnet allocator (nil if VPC disabled)
-	peerTracker     *overlay.PeerTracker     // VPC peer tracker (nil if VPC disabled)
-	vpcCIDR         string                   // VPC network CIDR (e.g., "10.0.0.0/16")
+	whitelistedKeys map[string]string                // publicKey → agentName
+	tunnelIPToAgent map[string]string                // tunnelIP → agentName (reverse map for identity)
+	allocator       overlay.SubnetAllocatorInterface // VPC subnet allocator (nil if VPC disabled)
+	peerTracker     overlay.PeerTrackerInterface     // VPC peer tracker (nil if VPC disabled)
+	vpcCIDR         string                           // VPC network CIDR (e.g., "10.0.0.0/16")
+	scheduleCh      chan<- struct{}                   // triggers immediate scheduling (nil-safe)
 	metricsRegistry *metrics.EngineMetricsRegistry
 	events          EventLog
 	limiter         *rateLimiter
@@ -85,14 +86,26 @@ type grpcServerOptions struct {
 	Port            string
 	BindAddr        string // address to bind to (default: control tunnel IP or 127.0.0.1)
 	RegistryURL     string
-	Allocator       *overlay.SubnetAllocator
-	PeerTracker     *overlay.PeerTracker
+	Allocator       overlay.SubnetAllocatorInterface
+	PeerTracker     overlay.PeerTrackerInterface
 	VPCCIDR         string
 	WhitelistedKeys map[string]string // publicKey → agentName
 	AllowInsecure   bool              // allow running without authentication
+	ScheduleCh      chan<- struct{}    // triggers immediate scheduling
 	MetricsRegistry *metrics.EngineMetricsRegistry
 	Events          EventLog
 	StartedAt       time.Time
+}
+
+// triggerSchedule signals the engine orchestration loop to process deployments immediately.
+func (s *engineGRPCServer) triggerSchedule() {
+	if s.scheduleCh == nil {
+		return
+	}
+	select {
+	case s.scheduleCh <- struct{}{}:
+	default:
+	}
 }
 
 // logger returns the gRPC server's logger, initializing it if nil (for test convenience).
@@ -130,6 +143,7 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		allocator:       opts.Allocator,
 		peerTracker:     opts.PeerTracker,
 		vpcCIDR:         opts.VPCCIDR,
+		scheduleCh:      opts.ScheduleCh,
 		metricsRegistry: opts.MetricsRegistry,
 		events:          opts.Events,
 		limiter:         newRateLimiter(100, time.Minute), // 100 requests/min per IP
@@ -221,14 +235,22 @@ func (s *engineGRPCServer) rateLimitInterceptor() grpc.UnaryServerInterceptor {
 	}
 }
 
+// isControlTunnelIP returns true if the IP is on the WireGuard control tunnel network.
+// Any IP on this network is an authenticated WG peer (the tunnel enforces this).
+func isControlTunnelIP(ip string) bool {
+	_, cidr, _ := net.ParseCIDR(types.ControlTunnelCIDR)
+	return cidr != nil && cidr.Contains(net.ParseIP(ip))
+}
+
 // auditLogInterceptor returns a unary interceptor that logs all RPC calls with peer identity.
 func (s *engineGRPCServer) auditLogInterceptor() grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req interface{}, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		peerIP, _ := banyanrpc.PeerIPFromContext(ctx)
 		agent := s.tunnelIPToAgent[peerIP]
 
-		// Log unknown peers at warn level (potential unauthorized access)
-		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" {
+		// Warn about unknown peers — but not for IPs on the control tunnel
+		// (same-host agent/CLI traffic may arrive from the engine's own tunnel IP)
+		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" && !isControlTunnelIP(peerIP) {
 			s.logger().Warn("RPC from unknown peer",
 				"method", info.FullMethod, "peer_ip", peerIP)
 		}
@@ -248,7 +270,7 @@ func (s *engineGRPCServer) auditLogStreamInterceptor() grpc.StreamServerIntercep
 		peerIP, _ := banyanrpc.PeerIPFromContext(ss.Context())
 		agent := s.tunnelIPToAgent[peerIP]
 
-		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" {
+		if len(s.tunnelIPToAgent) > 0 && agent == "" && peerIP != "" && !isControlTunnelIP(peerIP) {
 			s.logger().Warn("Stream RPC from unknown peer",
 				"method", info.FullMethod, "peer_ip", peerIP)
 		}
@@ -303,7 +325,7 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 
 	// Allocate VPC subnet for this agent
 	if s.allocator != nil && s.vpcCIDR != "" {
-		subnet, allocErr := s.allocator.Allocate(req.AgentName)
+		subnet, allocErr := s.allocator.Allocate(ctx, req.AgentName)
 		if allocErr != nil {
 			return nil, status.Errorf(codes.Internal, "failed to allocate subnet: %v", allocErr)
 		}
@@ -321,7 +343,7 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 					VTEPIP:    overlay.VTEPIP(*subnet),
 					PublicKey: req.WgPublicKey,
 				}
-				s.peerTracker.Update(req.AgentName, peer)
+				s.peerTracker.Update(ctx, req.AgentName, peer)
 			}
 		}
 	}
@@ -365,6 +387,9 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 			TaskId:        task.ID,
 		})
 	}
+
+	// New agent available — trigger scheduling for any pending deployments
+	s.triggerSchedule()
 
 	return resp, nil
 }
@@ -418,7 +443,7 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 		// Update agent info label (allocator.Allocate is idempotent)
 		subnet := ""
 		if s.allocator != nil {
-			if allocated, _ := s.allocator.Allocate(req.AgentName); allocated != nil {
+			if allocated, _ := s.allocator.Allocate(ctx, req.AgentName); allocated != nil {
 				subnet = allocated.String()
 			}
 		}
@@ -438,7 +463,7 @@ func (s *engineGRPCServer) Heartbeat(ctx context.Context, req *banyanpb.Heartbea
 		// may come through the WireGuard control tunnel (10.200.x.x), which is not
 		// the data-plane address. The correct host IP was set during Register().
 
-		peers := s.peerTracker.GetPeersExcluding(req.AgentName)
+		peers := s.peerTracker.GetPeersExcluding(ctx, req.AgentName)
 		for _, p := range peers {
 			resp.VpcPeers = append(resp.VpcPeers, &banyanpb.VPCPeer{
 				Subnet:    p.Subnet.String(),
@@ -707,6 +732,9 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 	}
 
 	s.emitEvent("deployment.created", fmt.Sprintf("Deployment %s created (%d services)", manifest.Name, len(allServices)), "info")
+
+	// Trigger immediate scheduling instead of waiting for next loop tick
+	s.triggerSchedule()
 
 	return &banyanpb.DeployRPCResponse{
 		DeploymentId: deploymentID,
@@ -1089,6 +1117,8 @@ func (s *engineGRPCServer) deployServices(ctx context.Context, appName string, a
 	if err := s.store.Save(ctx, types.KeyDeployments+deploymentID, record); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create deployment: %v", err)
 	}
+
+	s.triggerSchedule()
 
 	return &banyanpb.DeployRPCResponse{
 		DeploymentId: deploymentID,
@@ -1555,7 +1585,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 
 		// Subnet info
 		if s.allocator != nil {
-			if allocated, _ := s.allocator.Allocate(node.Name); allocated != nil {
+			if allocated, _ := s.allocator.Allocate(ctx, node.Name); allocated != nil {
 				detail.VpcSubnet = allocated.String()
 			}
 		}

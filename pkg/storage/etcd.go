@@ -11,6 +11,7 @@ import (
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/client/v3/concurrency"
 )
 
 // etcdKV abstracts the etcd client operations used by EtcdStore.
@@ -21,6 +22,7 @@ type etcdKV interface {
 	Delete(ctx context.Context, key string, opts ...clientv3.OpOption) (*clientv3.DeleteResponse, error)
 	Grant(ctx context.Context, ttl int64) (*clientv3.LeaseGrantResponse, error)
 	KeepAliveOnce(ctx context.Context, id clientv3.LeaseID) (*clientv3.LeaseKeepAliveResponse, error)
+	Txn(ctx context.Context) clientv3.Txn
 	Watch(ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan
 	Close() error
 }
@@ -36,10 +38,11 @@ type EtcdOptions struct {
 	CAFile    string // CA certificate for server verification
 }
 
-// EtcdStore implements StateStore using etcd as the backend
+// EtcdStore implements StateStore, CASStore, and LockStore using etcd as the backend.
 type EtcdStore struct {
-	client etcdKV
-	prefix string // Key prefix for all VPC data (e.g., "/banyan/vpc/")
+	client    etcdKV
+	rawClient *clientv3.Client // needed for concurrency.Session (Lock)
+	prefix    string           // Key prefix for all data (e.g., "/banyan/")
 }
 
 // NewEtcdStore creates a new EtcdStore with the given options.
@@ -91,8 +94,9 @@ func NewEtcdStore(opts *EtcdOptions) (*EtcdStore, error) {
 	}
 
 	return &EtcdStore{
-		client: client,
-		prefix: prefix,
+		client:    client,
+		rawClient: client,
+		prefix:    prefix,
 	}, nil
 }
 
@@ -297,6 +301,86 @@ func (s *EtcdStore) Close() error {
 		return s.client.Close()
 	}
 	return nil
+}
+
+// GetWithRevision retrieves a value by key and returns its etcd ModRevision.
+func (s *EtcdStore) GetWithRevision(ctx context.Context, key string, value interface{}) (int64, error) {
+	if key == "" {
+		return 0, fmt.Errorf("key cannot be empty")
+	}
+	if value == nil {
+		return 0, fmt.Errorf("value cannot be nil")
+	}
+
+	fullKey := s.prefix + key
+	resp, err := s.client.Get(ctx, fullKey)
+	if err != nil {
+		return 0, fmt.Errorf("etcd get: %w", err)
+	}
+	if len(resp.Kvs) == 0 {
+		return 0, fmt.Errorf("key not found: %s", key)
+	}
+	if err := json.Unmarshal(resp.Kvs[0].Value, value); err != nil {
+		return 0, fmt.Errorf("unmarshal: %w", err)
+	}
+	return resp.Kvs[0].ModRevision, nil
+}
+
+// SaveIfRevision performs a compare-and-swap: saves only if the key's
+// current ModRevision matches expectedRevision.
+func (s *EtcdStore) SaveIfRevision(ctx context.Context, key string, value interface{}, expectedRevision int64) error {
+	if key == "" {
+		return fmt.Errorf("key cannot be empty")
+	}
+	if value == nil {
+		return fmt.Errorf("value cannot be nil")
+	}
+
+	data, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Errorf("marshal: %w", err)
+	}
+
+	fullKey := s.prefix + key
+	txnResp, err := s.client.Txn(ctx).
+		If(clientv3.Compare(clientv3.ModRevision(fullKey), "=", expectedRevision)).
+		Then(clientv3.OpPut(fullKey, string(data))).
+		Commit()
+	if err != nil {
+		return fmt.Errorf("etcd txn: %w", err)
+	}
+	if !txnResp.Succeeded {
+		return ErrRevisionMismatch
+	}
+	return nil
+}
+
+// Lock acquires a distributed lock on the given key using etcd concurrency.
+// Returns an unlock function. The lock auto-expires after ttl.
+// Requires rawClient to be set (i.e., created via NewEtcdStore, not NewEtcdStoreWithClient).
+func (s *EtcdStore) Lock(ctx context.Context, key string, ttl time.Duration) (func(), error) {
+	if s.rawClient == nil {
+		return nil, fmt.Errorf("distributed lock requires a real etcd client (not a mock)")
+	}
+
+	session, err := concurrency.NewSession(s.rawClient, concurrency.WithTTL(int(ttl.Seconds())))
+	if err != nil {
+		return nil, fmt.Errorf("create session: %w", err)
+	}
+	mutex := concurrency.NewMutex(session, s.prefix+key)
+	if err := mutex.Lock(ctx); err != nil {
+		session.Close()
+		return nil, fmt.Errorf("acquire lock: %w", err)
+	}
+	return func() {
+		_ = mutex.Unlock(context.Background())
+		_ = session.Close()
+	}, nil
+}
+
+// Client returns the underlying etcd client for direct use.
+func (s *EtcdStore) Client() *clientv3.Client {
+	return s.rawClient
 }
 
 // KeepAlive keeps a lease alive by renewing it periodically

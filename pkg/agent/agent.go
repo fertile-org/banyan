@@ -33,15 +33,16 @@ type PortProxy interface {
 
 // Options configures the Agent.
 type Options struct {
-	AgentName      string
-	EngineEndpoint string
-	PublicKey      string // WireGuard public key (for pubkey auth)
-	WGPrivateKey   string // WireGuard private key (for overlay)
-	WGPublicKey    string // WireGuard public key (for overlay)
-	APIPort        string
-	APIAddress     string
-	PidFile        string
-	Tags           []string
+	AgentName       string
+	EngineEndpoint  string   // Primary endpoint (backward compat)
+	EngineEndpoints []string // Multiple endpoints for HA failover
+	PublicKey       string   // WireGuard public key (for pubkey auth)
+	WGPrivateKey    string   // WireGuard private key (for overlay)
+	WGPublicKey     string   // WireGuard public key (for overlay)
+	APIPort         string
+	APIAddress      string
+	PidFile         string
+	Tags            []string
 }
 
 // Agent is the Banyan data-plane worker.
@@ -119,11 +120,16 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer a.proxy.Close()
 
 	// Connect to engine via gRPC
-	a.logger().Info("Connecting to engine", "endpoint", a.opts.EngineEndpoint)
-	if a.opts.PublicKey == "" {
+	if a.opts.PublicKey == "" && len(a.opts.EngineEndpoints) == 0 {
 		return fmt.Errorf("no authentication configured (missing WireGuard public key)")
 	}
-	client, err := NewEngineClient(a.opts.EngineEndpoint)
+	// Build endpoint list: prefer explicit list, fall back to single endpoint
+	endpoints := a.opts.EngineEndpoints
+	if len(endpoints) == 0 {
+		endpoints = []string{a.opts.EngineEndpoint}
+	}
+	a.logger().Info("Connecting to engine", "endpoints", endpoints)
+	client, err := NewEngineClientMulti(endpoints)
 	if err != nil {
 		return fmt.Errorf("failed to connect to Engine: %w", err)
 	}
@@ -185,10 +191,15 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Restore proxy rules and tracking for containers that survived the restart
 	a.restoreActiveContainers(ctx, activeContainers)
 
+	// Do an immediate heartbeat to get VPC peers and service backends before
+	// starting the task loop. This ensures cross-host routes are set up before
+	// any containers are started, eliminating the 15s convergence delay.
+	a.doOneHeartbeat(ctx)
+
 	// Start the task execution loop
 	go a.agentLoop(ctx)
 
-	// Start heartbeat
+	// Start heartbeat (periodic, every 15s)
 	go a.agentHeartbeat(ctx)
 
 	// Start container health monitoring
@@ -549,6 +560,33 @@ func getContainerHealthStatus(ctx context.Context, containerName string) string 
 	return strings.TrimSpace(stdout.String())
 }
 
+// doOneHeartbeat sends a single heartbeat and reconciles peers/backends/DNS.
+// Called once at startup to get VPC peers before the task loop starts.
+func (a *Agent) doOneHeartbeat(ctx context.Context) {
+	sysMetrics := a.metricsCollector.Collect()
+	peers, backends, err := a.client.Heartbeat(ctx, a.opts.AgentName, a.opts.Tags, sysMetrics)
+	if err != nil {
+		a.logger().Warn("Initial heartbeat failed (will retry in loop)", "error", err)
+		return
+	}
+	if a.vpcEnabled && len(peers) > 0 {
+		if reconcileErr := a.reconcileVPCPeers(ctx, peers); reconcileErr != nil {
+			a.logger().Warn("Initial peer reconciliation failed", "error", reconcileErr)
+		} else {
+			a.logger().Info("VPC peers reconciled at startup", "peer_count", len(peers))
+		}
+	}
+	if a.vpcEnabled && a.proxy != nil {
+		a.reconcileRemoteBackends(backends)
+	}
+	if a.vpcEnabled {
+		a.reconcileNetworkIsolation(ctx, backends)
+	}
+	if a.dnsManager != nil {
+		a.reconcileDNS(ctx, backends)
+	}
+}
+
 func (a *Agent) agentHeartbeat(ctx context.Context) {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
@@ -746,17 +784,36 @@ func (a *Agent) waitForEngineGRPC(ctx context.Context, timeout time.Duration) er
 
 // reconnect re-registers with the engine after persistent heartbeat failures.
 // It blocks until reconnection succeeds or ctx is cancelled.
-// The heartbeat goroutine calls this — no extra goroutine is needed.
+// If multiple endpoints are configured, tries each before increasing backoff.
 func (a *Agent) reconnect(ctx context.Context) {
 	backoff := reconnectBackoffInitial
 
 	for {
-		a.logger().Info("Waiting for engine", "endpoint", a.opts.EngineEndpoint)
-		if err := a.waitForEngineGRPC(ctx, 30*time.Second); err != nil {
-			if ctx.Err() != nil {
-				return
+		// Try all endpoints before increasing backoff
+		endpoints := len(a.client.endpoints)
+		connected := false
+		for range endpoints {
+			endpoint := a.client.CurrentEndpoint()
+			a.logger().Info("Waiting for engine", "endpoint", endpoint)
+			if err := a.waitForEngineGRPC(ctx, 30*time.Second); err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				if endpoints > 1 {
+					a.logger().Info("Engine not reachable, trying next endpoint", "endpoint", endpoint)
+					if failErr := a.client.Failover(); failErr != nil {
+						a.logger().Warn("Failover failed", "error", failErr)
+					}
+					continue
+				}
+			} else {
+				connected = true
+				break
 			}
-			a.logger().Warn("Engine not ready, retrying", "error", err, "backoff", backoff)
+		}
+
+		if !connected {
+			a.logger().Warn("No reachable engine endpoint, retrying", "backoff", backoff)
 			select {
 			case <-ctx.Done():
 				return

@@ -1738,14 +1738,14 @@ func TestHeartbeat_VPCPeers(t *testing.T) {
 
 		// Manually update peer tracker with known IPs since test gRPC
 		// context doesn't have real peer addresses
-		subnet1, _ := allocator.Allocate("worker-1")
-		subnet2, _ := allocator.Allocate("worker-2")
-		peerTracker.Update("worker-1", overlay.Peer{
+		subnet1, _ := allocator.Allocate(ctx, "worker-1")
+		subnet2, _ := allocator.Allocate(ctx, "worker-2")
+		peerTracker.Update(ctx, "worker-1", overlay.Peer{
 			Subnet: *subnet1,
 			HostIP: net.ParseIP("192.168.1.10"),
 			VTEPIP: overlay.VTEPIP(*subnet1),
 		})
-		peerTracker.Update("worker-2", overlay.Peer{
+		peerTracker.Update(ctx, "worker-2", overlay.Peer{
 			Subnet: *subnet2,
 			HostIP: net.ParseIP("192.168.1.20"),
 			VTEPIP: overlay.VTEPIP(*subnet2),

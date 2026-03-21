@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Banyan installer (build from source)
 #
-# Builds banyan-cli from the current directory and installs dependencies.
+# Builds banyan binaries from the current directory and installs dependencies.
 # Requires Go 1.24+ on this machine.
 #
 # Usage:
@@ -12,84 +12,12 @@ set -euo pipefail
 #   sudo bash install-from-source.sh
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INSTALL_DIR="/usr/local/bin"
 
-# Dependency versions
-NERDCTL_VERSION="2.1.3"
-NERDCTL_MIN_VERSION="2.1.3"  # minimum for --health-cmd support
-CNI_VERSION="1.6.2"
-ETCD_VERSION="3.5.17"
-BUILDKIT_VERSION="0.19.0"
+# Source shared dependency functions
+# shellcheck source=install-deps.sh
+source "${SCRIPT_DIR}/install-deps.sh"
 
-# --- Output helpers ---
-
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-NC='\033[0m'
-
-info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
-warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
-error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
-fatal() { error "$*"; exit 1; }
-
-# --- Detection ---
-
-detect_os() {
-    if [ ! -f /etc/os-release ]; then
-        fatal "Cannot detect OS. /etc/os-release not found."
-    fi
-
-    . /etc/os-release
-    OS="$ID"
-    OS_LIKE="${ID_LIKE:-}"
-    OS_VERSION="${VERSION_ID:-unknown}"
-
-    case "$OS" in
-        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-            PKG_UPDATE="apt-get update -qq"
-            PKG_INSTALL="apt-get install -y -qq"
-            ;;
-        centos|rhel|fedora|rocky|almalinux|ol)
-            if command -v dnf &>/dev/null; then
-                PKG_UPDATE="true"
-                PKG_INSTALL="dnf install -y -q"
-            else
-                PKG_UPDATE="true"
-                PKG_INSTALL="yum install -y -q"
-            fi
-            ;;
-        *)
-            if echo "$OS_LIKE" | grep -qw "debian\|ubuntu"; then
-                PKG_UPDATE="apt-get update -qq"
-                PKG_INSTALL="apt-get install -y -qq"
-            elif echo "$OS_LIKE" | grep -qw "rhel\|fedora\|centos"; then
-                if command -v dnf &>/dev/null; then
-                    PKG_UPDATE="true"
-                    PKG_INSTALL="dnf install -y -q"
-                else
-                    PKG_UPDATE="true"
-                    PKG_INSTALL="yum install -y -q"
-                fi
-            else
-                fatal "Unsupported OS: $OS. Supported: Debian/Ubuntu-based and RHEL/Fedora-based distributions."
-            fi
-            ;;
-    esac
-
-    info "Detected OS: $OS $OS_VERSION"
-}
-
-detect_arch() {
-    case "$(uname -m)" in
-        x86_64)  ARCH="amd64" ;;
-        aarch64) ARCH="arm64" ;;
-        *)       fatal "Unsupported architecture: $(uname -m). Supported: x86_64, aarch64." ;;
-    esac
-    info "Detected architecture: $ARCH"
-}
-
-# --- Install functions ---
+# --- Build from source ---
 
 build_binary() {
     local name=$1
@@ -120,7 +48,6 @@ install_banyan() {
         fatal "Go is not installed. Install Go 1.24+ first: https://go.dev/dl/"
     fi
 
-    # Always build banyan-cli
     build_binary "banyan-cli"
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
@@ -129,286 +56,6 @@ install_banyan() {
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         build_binary "banyan-agent"
-    fi
-}
-
-install_etcd() {
-    if command -v etcd &>/dev/null; then
-        info "etcd already installed, skipping."
-        return
-    fi
-
-    info "Installing etcd..."
-
-    case "$OS" in
-        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-            $PKG_UPDATE
-            $PKG_INSTALL etcd-server
-            ;;
-        *)
-            info "Downloading etcd v${ETCD_VERSION} binary..."
-            local url="https://github.com/etcd-io/etcd/releases/download/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-${ARCH}.tar.gz"
-            local tmp
-            tmp=$(mktemp -d)
-            if ! curl -fsSL "$url" | tar -xz -C "$tmp" --strip-components=1; then
-                rm -rf "$tmp"
-                fatal "Failed to download etcd from ${url}"
-            fi
-            mv "$tmp/etcd" "$tmp/etcdctl" "${INSTALL_DIR}/"
-            rm -rf "$tmp"
-            ;;
-    esac
-
-    info "etcd installed."
-}
-
-install_containerd() {
-    if command -v containerd &>/dev/null; then
-        info "containerd already installed, skipping."
-    else
-        info "Installing containerd..."
-
-        case "$OS" in
-            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-                $PKG_UPDATE
-                $PKG_INSTALL containerd
-                ;;
-            *)
-                $PKG_INSTALL containerd.io 2>/dev/null || $PKG_INSTALL containerd
-                ;;
-        esac
-    fi
-
-    if systemctl is-active --quiet containerd 2>/dev/null; then
-        info "containerd is running."
-    else
-        info "Starting containerd..."
-        systemctl enable --now containerd
-        info "containerd started."
-    fi
-}
-
-version_ge() {
-    # Returns 0 (true) if $1 >= $2 using semantic versioning
-    printf '%s\n%s\n' "$2" "$1" | sort -V -C
-}
-
-install_nerdctl() {
-    if command -v nerdctl &>/dev/null; then
-        local current
-        current=$(nerdctl --version 2>/dev/null | grep -oP '\d+\.\d+\.\d+' | head -1)
-        if [ -n "$current" ] && version_ge "$current" "$NERDCTL_MIN_VERSION"; then
-            info "nerdctl v${current} already installed (>= ${NERDCTL_MIN_VERSION}), skipping."
-            return
-        fi
-        warn "nerdctl v${current} is below minimum v${NERDCTL_MIN_VERSION} (required for healthcheck support). Upgrading..."
-    fi
-
-    info "Installing nerdctl v${NERDCTL_VERSION}..."
-
-    local url="https://github.com/containerd/nerdctl/releases/download/v${NERDCTL_VERSION}/nerdctl-${NERDCTL_VERSION}-linux-${ARCH}.tar.gz"
-
-    if ! curl -fsSL "$url" | tar -xz -C "${INSTALL_DIR}" nerdctl; then
-        fatal "Failed to install nerdctl from ${url}"
-    fi
-
-    info "nerdctl v${NERDCTL_VERSION} installed."
-}
-
-install_cni() {
-    local cni_dir="/opt/cni/bin"
-
-    if [ -d "$cni_dir" ] && [ -n "$(ls -A "$cni_dir" 2>/dev/null)" ]; then
-        info "CNI plugins already installed, skipping."
-        return
-    fi
-
-    info "Installing CNI plugins v${CNI_VERSION}..."
-
-    mkdir -p "$cni_dir"
-    local url="https://github.com/containernetworking/plugins/releases/download/v${CNI_VERSION}/cni-plugins-linux-${ARCH}-v${CNI_VERSION}.tgz"
-
-    if ! curl -fsSL "$url" | tar -xz -C "$cni_dir"; then
-        fatal "Failed to install CNI plugins from ${url}"
-    fi
-
-    info "CNI plugins installed."
-}
-
-install_wireguard() {
-    if command -v wg &>/dev/null; then
-        info "wireguard-tools already installed, skipping."
-    else
-        info "Installing wireguard-tools..."
-
-        case "$OS" in
-            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-                $PKG_UPDATE
-                $PKG_INSTALL wireguard-tools
-                ;;
-            *)
-                $PKG_INSTALL wireguard-tools
-                ;;
-        esac
-
-        info "wireguard-tools installed."
-    fi
-
-    # Verify WireGuard kernel module is available (built-in since Linux 5.6)
-    if ip link add wg-test type wireguard 2>/dev/null; then
-        ip link delete wg-test 2>/dev/null
-        info "WireGuard kernel support: OK"
-    else
-        warn "WireGuard kernel module not available."
-        warn "  - Overlay networking will fall back to VXLAN."
-        warn "  - Control plane tunnel (encrypted gRPC) will be unavailable."
-        warn "To enable WireGuard: modprobe wireguard (requires Linux 5.6+ or wireguard-dkms)"
-    fi
-}
-
-install_buildkit() {
-    if command -v buildkitd &>/dev/null; then
-        info "BuildKit already installed, skipping."
-    else
-        info "Installing BuildKit v${BUILDKIT_VERSION}..."
-
-        local url="https://github.com/moby/buildkit/releases/download/v${BUILDKIT_VERSION}/buildkit-v${BUILDKIT_VERSION}.linux-${ARCH}.tar.gz"
-        local tmp
-        tmp=$(mktemp -d)
-        if ! curl -fsSL "$url" | tar -xz -C "$tmp"; then
-            rm -rf "$tmp"
-            fatal "Failed to download BuildKit from ${url}"
-        fi
-        mv "$tmp/bin/buildkitd" "$tmp/bin/buildctl" "${INSTALL_DIR}/"
-        rm -rf "$tmp"
-
-        info "BuildKit installed."
-    fi
-
-    # Ensure buildkitd is running via systemd
-    if ! systemctl is-active --quiet buildkit 2>/dev/null; then
-        info "Setting up buildkitd service..."
-        cat > /etc/systemd/system/buildkit.service <<'UNIT'
-[Unit]
-Description=BuildKit
-After=containerd.service
-
-[Service]
-ExecStart=/usr/local/bin/buildkitd --oci-worker=false --containerd-worker=true
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-UNIT
-        systemctl daemon-reload
-        systemctl enable --now buildkit
-        info "buildkitd started."
-    else
-        info "buildkitd is running."
-    fi
-}
-
-# --- Verify ---
-
-verify() {
-    echo ""
-    info "Verifying installation..."
-
-    local ok=true
-
-    if command -v banyan-cli &>/dev/null; then
-        info "  banyan-cli: OK"
-    else
-        error "  banyan-cli: NOT FOUND"
-        ok=false
-    fi
-
-    if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
-        if command -v banyan-engine &>/dev/null; then
-            info "  banyan-engine: OK"
-        else
-            error "  banyan-engine: NOT FOUND"
-            ok=false
-        fi
-
-        if command -v etcd &>/dev/null; then
-            info "  etcd: OK"
-        else
-            error "  etcd: NOT FOUND"
-            ok=false
-        fi
-
-        if command -v wg &>/dev/null; then
-            info "  wireguard-tools: OK (for control tunnel)"
-        else
-            warn "  wireguard-tools: NOT FOUND (control tunnel will be unavailable, gRPC falls back to unencrypted)"
-        fi
-    fi
-
-    if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
-        if command -v banyan-agent &>/dev/null; then
-            info "  banyan-agent: OK"
-        else
-            error "  banyan-agent: NOT FOUND"
-            ok=false
-        fi
-
-        if command -v containerd &>/dev/null; then
-            info "  containerd: OK"
-        else
-            error "  containerd: NOT FOUND"
-            ok=false
-        fi
-
-        if command -v nerdctl &>/dev/null; then
-            info "  nerdctl: OK"
-        else
-            error "  nerdctl: NOT FOUND"
-            ok=false
-        fi
-
-        if command -v buildkitd &>/dev/null; then
-            info "  buildkit: OK"
-        else
-            error "  buildkit: NOT FOUND"
-            ok=false
-        fi
-
-        if command -v wg &>/dev/null; then
-            info "  wireguard-tools: OK"
-        else
-            warn "  wireguard-tools: NOT FOUND (overlay falls back to VXLAN, control tunnel unavailable)"
-        fi
-
-    fi
-
-    if ! $ok; then
-        fatal "Some components failed to install. Check the errors above."
-    fi
-
-    echo ""
-    echo "========================================"
-    echo "  Installation complete!"
-    echo "========================================"
-    echo ""
-
-    if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
-        echo "  Start the Engine:"
-        echo "    sudo banyan-engine init    # generates keypair, configures etcd"
-        echo "    sudo banyan-engine start"
-        echo ""
-        echo "  Note: Engine init displays a public key — share it with agents/CLI"
-        echo "  to enable encrypted control tunnels (port 51821/UDP)."
-        echo ""
-    fi
-
-    if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
-        echo "  Start an Agent:"
-        echo "    sudo banyan-agent init     # generates keypair, asks for engine public key"
-        echo "    # Copy agent's public key to engine:"
-        echo "    #   echo '<key>' > /etc/banyan/whitelisted-keys/<name>.pub"
-        echo "    sudo banyan-agent start"
-        echo ""
     fi
 }
 
@@ -456,19 +103,8 @@ main() {
     detect_arch
 
     install_banyan
-
-    if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
-        install_etcd
-        install_wireguard  # WireGuard is used for the control tunnel (encrypted gRPC)
-    fi
-
-    if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
-        install_containerd
-        install_nerdctl
-        install_cni
-        install_wireguard  # WireGuard is used for both overlay networking and control tunnel
-        install_buildkit
-    fi
+    install_deps
+    install_systemd_services
 
     verify
 }

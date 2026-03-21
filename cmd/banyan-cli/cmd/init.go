@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
@@ -61,6 +62,7 @@ type cliInitInputs struct {
 	PrivKey        string
 	PubKey         string
 	KeysDir        string
+	Engines        []types.EngineEndpoint
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
@@ -145,6 +147,29 @@ func runInit(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("cli config input: %w", err)
 	}
 
+	// --- Additional engine endpoints for HA ---
+	var engines []types.EngineEndpoint
+	if len(existingCfg.CLI.Engines) > 0 {
+		engines = existingCfg.CLI.Engines
+		fmt.Printf("  %s HA engines already configured:\n", styleOK.Render("[OK]"))
+		for i, eng := range engines {
+			fmt.Printf("    %d. %s\n", i+1, eng.Address)
+		}
+	} else {
+		primaryAddr := engineHost + ":" + enginePort
+		engines = collectCLIEngineEndpoints(primaryAddr, engineWGPubKey)
+		if engines != nil {
+			fmt.Printf("  %s HA engines configured:\n", styleOK.Render("[OK]"))
+			for i, eng := range engines {
+				label := ""
+				if i == 0 {
+					label = " (primary)"
+				}
+				fmt.Printf("    %d. %s%s\n", i+1, eng.Address, label)
+			}
+		}
+	}
+
 	return applyCLIInit(&cliInitInputs{
 		EngineHost:     engineHost,
 		EnginePort:     enginePort,
@@ -153,6 +178,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		PrivKey:        privKey,
 		PubKey:         pubKey,
 		KeysDir:        types.DefaultKeysDir,
+		Engines:        engines,
 	})
 }
 
@@ -178,6 +204,7 @@ func applyCLIInit(inputs *cliInitInputs) error {
 		WGPrivateKeyFile:  keyPath,
 		WGPublicKey:       inputs.PubKey,
 		EngineWGPublicKey: inputs.EngineWGPubKey,
+		Engines:           inputs.Engines,
 	}
 
 	if err := types.SaveConfig(configPath, &cfg); err != nil {
@@ -193,7 +220,7 @@ func applyCLIInit(inputs *cliInitInputs) error {
 	// Display next steps for public key auth
 	fmt.Println()
 	fmt.Println(styleInfo.Render("To whitelist this CLI on the engine:"))
-	fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n", inputs.PubKey, inputs.CLIName)
+	fmt.Printf("  sudo banyan-engine add-client --name %s --pubkey '%s'\n", inputs.CLIName, inputs.PubKey)
 
 	fmt.Println()
 	fmt.Println(styleDim.Render("========================================"))
@@ -203,19 +230,96 @@ func applyCLIInit(inputs *cliInitInputs) error {
 	return nil
 }
 
-// setupCLITunnel creates the WireGuard control tunnel to the engine.
+// setupCLITunnel creates the WireGuard control tunnel to all configured engines.
 func setupCLITunnel(inputs *cliInitInputs) error {
 	myTunnelIP := types.TunnelIPFromPublicKey(inputs.PubKey)
 	fmt.Printf("\n  %s Setting up WireGuard control tunnel (%s)...\n", styleInfo.Render("[..]"), myTunnelIP)
-	engineEndpointWG := inputs.EngineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
 	if tunnelErr := setupControlTunnelFn(types.ControlIfaceCLI, inputs.PrivKey, myTunnelIP, 0); tunnelErr != nil {
 		return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure this runs with sudo and wireguard kernel module is loaded)", tunnelErr)
 	}
-	engineIP := net.ParseIP(types.ControlTunnelEngineIP)
-	if peerErr := addControlPeerFn(types.ControlIfaceCLI, inputs.EngineWGPubKey, engineEndpointWG, engineIP); peerErr != nil {
-		_ = cleanupControlTunnelFn(types.ControlIfaceCLI)
-		return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
+
+	// Add all engine peers — each engine has its own WG key and derived tunnel IP
+	engines := inputs.Engines
+	if len(engines) == 0 && inputs.EngineWGPubKey != "" {
+		// Single-engine: create a 1-entry list from old fields
+		engines = []types.EngineEndpoint{
+			{Address: inputs.EngineHost + ":50051", WGPublicKey: inputs.EngineWGPubKey},
+		}
 	}
+	for _, eng := range engines {
+		engineHost, _, _ := net.SplitHostPort(eng.Address)
+		engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
+		engineTunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
+		if peerErr := addControlPeerFn(types.ControlIfaceCLI, eng.WGPublicKey, engineEndpointWG, engineTunnelIP); peerErr != nil {
+			_ = cleanupControlTunnelFn(types.ControlIfaceCLI)
+			return fmt.Errorf("failed to add engine peer to control tunnel: %w", peerErr)
+		}
+	}
+
 	fmt.Printf("  %s Control tunnel ready (persists as kernel interface)\n", styleOK.Render("[OK]"))
 	return nil
+}
+
+// collectCLIEngineEndpoints prompts the user to add engine endpoints (address + WG key)
+// one by one for HA failover. Returns nil if the user doesn't want HA.
+func collectCLIEngineEndpoints(primaryAddr, primaryWGKey string) []types.EngineEndpoint {
+	var addMore bool
+	confirmForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Add additional engine endpoints for high availability?").
+				Description("For single-engine setups, choose No").
+				Value(&addMore),
+		),
+	)
+	if err := confirmForm.Run(); err != nil || !addMore {
+		return nil
+	}
+
+	engines := []types.EngineEndpoint{
+		{Address: primaryAddr, WGPublicKey: primaryWGKey},
+	}
+
+	for {
+		var address, wgKey string
+		epForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Engine #%d — address", len(engines)+1)).
+					Description("host:port (or leave empty to finish)").
+					Value(&address),
+			),
+		)
+		if err := epForm.Run(); err != nil {
+			break
+		}
+		address = strings.TrimSpace(address)
+		if address == "" {
+			break
+		}
+
+		keyForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title(fmt.Sprintf("Engine #%d — WireGuard public key", len(engines)+1)).
+					Description("Displayed during 'banyan-engine init' on that server").
+					Value(&wgKey),
+			),
+		)
+		if err := keyForm.Run(); err != nil {
+			break
+		}
+		wgKey = strings.TrimSpace(wgKey)
+		if wgKey == "" {
+			fmt.Printf("  %s WireGuard public key is required for each engine\n", styleInfo.Render("[WARN]"))
+			continue
+		}
+
+		engines = append(engines, types.EngineEndpoint{Address: address, WGPublicKey: wgKey})
+	}
+
+	if len(engines) <= 1 {
+		return nil
+	}
+	return engines
 }

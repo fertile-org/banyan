@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -12,26 +13,65 @@ import (
 )
 
 // EngineClient wraps the gRPC connection to the engine.
+// Supports multiple endpoints for HA failover.
 type EngineClient struct {
-	conn   *grpc.ClientConn
-	client banyanpb.EngineServiceClient
+	endpoints  []string
+	currentIdx int
+	conn       *grpc.ClientConn
+	client     banyanpb.EngineServiceClient
+	mu         sync.Mutex
 }
 
 // NewEngineClient dials the engine gRPC server.
 // Authentication is handled by WireGuard at the network layer — only peers
 // with whitelisted keys can reach the engine's control tunnel IP.
 func NewEngineClient(engineAddr string) (*EngineClient, error) {
-	conn, err := grpc.NewClient(engineAddr,
+	return NewEngineClientMulti([]string{engineAddr})
+}
+
+// NewEngineClientMulti creates an EngineClient with multiple endpoints for HA failover.
+// Connects to the first endpoint initially.
+func NewEngineClientMulti(endpoints []string) (*EngineClient, error) {
+	if len(endpoints) == 0 {
+		return nil, fmt.Errorf("no engine endpoints provided")
+	}
+	ec := &EngineClient{endpoints: endpoints}
+	if err := ec.connectTo(0); err != nil {
+		return nil, err
+	}
+	return ec, nil
+}
+
+// connectTo connects to the endpoint at the given index.
+func (ec *EngineClient) connectTo(idx int) error {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	if ec.conn != nil {
+		ec.conn.Close()
+	}
+	conn, err := grpc.NewClient(ec.endpoints[idx],
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
+		return fmt.Errorf("failed to connect to engine at %s: %w", ec.endpoints[idx], err)
 	}
+	ec.conn = conn
+	ec.client = banyanpb.NewEngineServiceClient(conn)
+	ec.currentIdx = idx
+	return nil
+}
 
-	return &EngineClient{
-		conn:   conn,
-		client: banyanpb.NewEngineServiceClient(conn),
-	}, nil
+// Failover connects to the next endpoint in the list.
+func (ec *EngineClient) Failover() error {
+	next := (ec.currentIdx + 1) % len(ec.endpoints)
+	return ec.connectTo(next)
+}
+
+// CurrentEndpoint returns the currently connected endpoint address.
+func (ec *EngineClient) CurrentEndpoint() string {
+	ec.mu.Lock()
+	defer ec.mu.Unlock()
+	return ec.endpoints[ec.currentIdx]
 }
 
 // VPCConfig holds VPC networking configuration returned by the engine during registration.
@@ -66,8 +106,8 @@ type RegisterRequest struct {
 	HostIP      string
 }
 
-func (c *EngineClient) Register(ctx context.Context, req RegisterRequest) (string, *VPCConfig, []ActiveContainer, error) {
-	resp, err := c.client.Register(ctx, &banyanpb.RegisterRequest{
+func (ec *EngineClient) Register(ctx context.Context, req RegisterRequest) (string, *VPCConfig, []ActiveContainer, error) {
+	resp, err := ec.client.Register(ctx, &banyanpb.RegisterRequest{
 		AgentName:   req.Name,
 		ApiAddress:  req.APIAddr,
 		Tags:        req.Tags,
@@ -101,8 +141,8 @@ func (c *EngineClient) Register(ctx context.Context, req RegisterRequest) (strin
 	return resp.RegistryUrl, vpcConfig, activeContainers, nil
 }
 
-func (c *EngineClient) Heartbeat(ctx context.Context, name string, tags []string, sysMetrics metrics.SystemMetrics) ([]VPCPeer, []ServiceBackend, error) {
-	resp, err := c.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
+func (ec *EngineClient) Heartbeat(ctx context.Context, name string, tags []string, sysMetrics metrics.SystemMetrics) ([]VPCPeer, []ServiceBackend, error) {
+	resp, err := ec.client.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 		AgentName: name,
 		Tags:      tags,
 		SystemMetrics: &banyanpb.SystemMetrics{
@@ -142,8 +182,8 @@ func (c *EngineClient) Heartbeat(ctx context.Context, name string, tags []string
 	return peers, backends, nil
 }
 
-func (c *EngineClient) PollTasks(ctx context.Context, name string) ([]*banyanpb.TaskRecord, error) {
-	resp, err := c.client.PollTasks(ctx, &banyanpb.PollTasksRequest{
+func (ec *EngineClient) PollTasks(ctx context.Context, name string) ([]*banyanpb.TaskRecord, error) {
+	resp, err := ec.client.PollTasks(ctx, &banyanpb.PollTasksRequest{
 		AgentName: name,
 	})
 	if err != nil {
@@ -152,8 +192,8 @@ func (c *EngineClient) PollTasks(ctx context.Context, name string) ([]*banyanpb.
 	return resp.Tasks, nil
 }
 
-func (c *EngineClient) ReportTaskResult(ctx context.Context, taskID, agentID, status, errMsg, containerName string, result *banyanpb.TaskResult) error {
-	_, err := c.client.ReportTaskResult(ctx, &banyanpb.ReportTaskResultRequest{
+func (ec *EngineClient) ReportTaskResult(ctx context.Context, taskID, agentID, status, errMsg, containerName string, result *banyanpb.TaskResult) error {
+	_, err := ec.client.ReportTaskResult(ctx, &banyanpb.ReportTaskResultRequest{
 		TaskId:        taskID,
 		AgentId:       agentID,
 		Status:        status,
@@ -167,8 +207,8 @@ func (c *EngineClient) ReportTaskResult(ctx context.Context, taskID, agentID, st
 	return nil
 }
 
-func (c *EngineClient) ReportContainerHealth(ctx context.Context, agentName string, containers []*banyanpb.ContainerStatus) error {
-	_, err := c.client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+func (ec *EngineClient) ReportContainerHealth(ctx context.Context, agentName string, containers []*banyanpb.ContainerStatus) error {
+	_, err := ec.client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName:  agentName,
 		Containers: containers,
 	})
@@ -178,16 +218,16 @@ func (c *EngineClient) ReportContainerHealth(ctx context.Context, agentName stri
 	return nil
 }
 
-func (c *EngineClient) Health(ctx context.Context) error {
-	_, err := c.client.Health(ctx, &banyanpb.HealthRequest{})
+func (ec *EngineClient) Health(ctx context.Context) error {
+	_, err := ec.client.Health(ctx, &banyanpb.HealthRequest{})
 	if err != nil {
 		return fmt.Errorf("health check failed: %w", err)
 	}
 	return nil
 }
 
-func (c *EngineClient) Close() {
-	if c.conn != nil {
-		c.conn.Close()
+func (ec *EngineClient) Close() {
+	if ec.conn != nil {
+		ec.conn.Close()
 	}
 }

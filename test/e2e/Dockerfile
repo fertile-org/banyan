@@ -41,7 +41,9 @@ RUN chmod +x /usr/local/bin/banyan-engine /usr/local/bin/banyan-agent /usr/local
 # Copy entrypoint scripts
 COPY scripts/engine-entrypoint.sh /entrypoint-engine.sh
 COPY scripts/agent-entrypoint.sh /entrypoint-agent.sh
-RUN chmod +x /entrypoint-engine.sh /entrypoint-agent.sh
+COPY scripts/engine-ha-entrypoint.sh /entrypoint-engine-ha.sh
+COPY scripts/agent-ha-entrypoint.sh /entrypoint-agent-ha.sh
+RUN chmod +x /entrypoint-engine.sh /entrypoint-agent.sh /entrypoint-engine-ha.sh /entrypoint-agent-ha.sh
 
 # Default command
 CMD ["/bin/bash"]

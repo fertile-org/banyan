@@ -193,9 +193,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Start OCI registry — either use an external URL (managed subprocess or
 	// user-provided) or fall back to the in-memory registry for dev/test.
 	if e.opts.ExternalRegistryURL != "" {
-		// External or managed-subprocess registry — URL already known
 		e.registryURL = e.opts.ExternalRegistryURL
-		e.logger().Info("Using registry", "url", e.registryURL)
 	} else {
 		// Fallback: start in-memory registry (dev/test when Distribution binary is unavailable)
 		registryBindAddr := "127.0.0.1"
@@ -222,7 +220,6 @@ func (e *Engine) Run(ctx context.Context) error {
 	if saveErr := e.store.Save(ctx, types.KeyRegistry, e.registryURL); saveErr != nil {
 		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
-	e.logger().Info("Registry URL saved to store", "url", e.registryURL)
 
 	// Start Engine gRPC server — bind to control tunnel IP when authenticated,
 	// localhost in insecure mode. In multi-engine mode with insecure, bind to
@@ -233,7 +230,6 @@ func (e *Engine) Run(ctx context.Context) error {
 	} else if e.opts.AllowInsecure && e.multiEngine {
 		grpcBindAddr = "0.0.0.0"
 	}
-	e.logger().Info("Starting gRPC server", "bind", grpcBindAddr, "port", e.opts.GRPCPort)
 	grpcSrv, err := startEngineGRPC(ctx, &grpcServerOptions{
 		Store:           e.store,
 		Port:            e.opts.GRPCPort,
@@ -253,7 +249,6 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to start gRPC server: %w", err)
 	}
 	e.grpcServer = grpcSrv
-	e.logger().Info("gRPC server listening", "port", e.opts.GRPCPort)
 
 	// Start Prometheus metrics HTTP server
 	metricsPort := e.opts.MetricsPort
@@ -263,7 +258,6 @@ func (e *Engine) Run(ctx context.Context) error {
 	if startErr := e.startMetricsHTTP(ctx, metricsPort); startErr != nil {
 		return fmt.Errorf("failed to start metrics server: %w", startErr)
 	}
-	e.logger().Info("Prometheus metrics available", "port", metricsPort)
 
 	// Register engine in etcd (for discovery by other engines / CLI)
 	grpcAddr := grpcBindAddr + ":" + e.opts.GRPCPort
@@ -271,6 +265,14 @@ func (e *Engine) Run(ctx context.Context) error {
 
 	// Start the orchestration loop
 	go e.engineLoop(ctx)
+
+	// Single summary line after all components are ready
+	e.logger().Info("Engine ready",
+		"grpc", grpcAddr,
+		"registry", e.registryURL,
+		"metrics", ":"+metricsPort,
+		"clients", len(e.opts.WhitelistedKeys),
+	)
 
 	<-ctx.Done()
 	return nil
@@ -309,8 +311,6 @@ func (e *Engine) registerEngine(ctx context.Context, grpcAddr string) {
 	}
 	if err := etcdStore.KeepAlive(ctx, types.KeyEngines+e.engineID, &record, 15*time.Second, 10*time.Second); err != nil {
 		e.logger().Warn("Failed to register engine in etcd", "error", err)
-	} else {
-		e.logger().Info("Engine registered in etcd", "engine_id", e.engineID, "grpc_addr", grpcAddr)
 	}
 }
 

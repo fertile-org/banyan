@@ -595,19 +595,16 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 
 	// Determine store backend and address
 	storeBackend, storeAddress := resolveStoreConfig(cmd)
-	log.Info("Store backend configured", "backend", storeBackend)
 
 	// Handle managed etcd
 	if cfg.Engine.ManagedEtcd {
 		etcdDataDir := filepath.Join(engineDataDir, "etcd")
-		log.Info("Starting managed etcd", "data_dir", etcdDataDir)
 		etcdCmd, etcdErr := startManagedEtcd(etcdDataDir)
 		if etcdErr != nil {
 			return fmt.Errorf("failed to start managed etcd: %w", etcdErr)
 		}
 		defer stopManagedEtcd(etcdCmd)
 		storeAddress = managedEtcdClientURL
-		log.Info("Managed etcd started", "address", storeAddress)
 	} else {
 		// Resolve default address for external etcd
 		storeAddress = resolveDefaultStoreAddress(storeBackend, storeAddress)
@@ -618,8 +615,6 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("unsupported store backend: %s (only etcd is supported)", storeBackend)
 	}
 
-	log.Info("Connecting to store", "backend", storeBackend, "address", storeAddress)
-
 	// Load whitelisted agent public keys
 	whitelistedKeysDir := cfg.Engine.WhitelistedKeysDir
 	if whitelistedKeysDir == "" {
@@ -629,12 +624,7 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	if wkErr != nil {
 		log.Warn("Failed to load whitelisted keys", "error", wkErr)
 	}
-	if len(whitelistedKeys) > 0 {
-		log.Info("Loaded whitelisted agent keys", "count", len(whitelistedKeys), "dir", whitelistedKeysDir)
-	}
-
 	// Set up WireGuard control tunnel (required when keys are configured)
-	// Engine's tunnel IP is derived from its own public key — same derivation agents/CLI use.
 	var engineTunnelIP string
 	if cfg.Engine.WGPrivateKeyFile != "" {
 		wgPrivateKey, readErr := types.ReadPrivateKeyFile(cfg.Engine.WGPrivateKeyFile)
@@ -643,22 +633,19 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		}
 		tunnelIP := types.TunnelIPFromPublicKey(cfg.Engine.WGPublicKey)
 		engineTunnelIP = tunnelIP.String()
-		log.Info("Setting up WireGuard control tunnel")
 		if tunnelErr := overlay.SetupControlTunnelExec(types.ControlIfaceEngine, wgPrivateKey, tunnelIP, types.ControlTunnelPort); tunnelErr != nil {
 			return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure wireguard kernel module is loaded)", tunnelErr)
 		}
 		defer overlay.CleanupControlTunnelExec(types.ControlIfaceEngine) //nolint:errcheck // best-effort cleanup on exit
-		log.Info("Control tunnel ready", "ip", engineTunnelIP, "port", types.ControlTunnelPort)
 
 		// Add whitelisted keys as control tunnel peers
 		for pubKey, name := range whitelistedKeys {
-			tunnelIP := types.TunnelIPFromPublicKey(pubKey)
-			if peerErr := overlay.AddControlPeerExec(types.ControlIfaceEngine, pubKey, "", tunnelIP); peerErr != nil {
+			peerTunnelIP := types.TunnelIPFromPublicKey(pubKey)
+			if peerErr := overlay.AddControlPeerExec(types.ControlIfaceEngine, pubKey, "", peerTunnelIP); peerErr != nil {
 				log.Warn("Failed to add control peer", "name", name, "error", peerErr)
-			} else {
-				log.Info("Control peer added", "name", name, "tunnel_ip", tunnelIP)
 			}
 		}
+		log.Info("WireGuard control tunnel ready", "ip", engineTunnelIP, "peers", len(whitelistedKeys))
 	}
 
 	// Validate multi-engine prerequisites
@@ -685,7 +672,6 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		if controlTunnelActive && engineTunnelIP != "" {
 			registryBindAddr = engineTunnelIP
 		}
-		log.Info("Starting managed registry", "data_dir", registryDataDir, "bind", registryBindAddr, "port", managedRegistryPort)
 		registryCmd, regErr := startManagedRegistry(registryDataDir, registryBindAddr, managedRegistryPort)
 		if regErr != nil {
 			return fmt.Errorf("failed to start managed registry: %w\n"+
@@ -784,8 +770,12 @@ func startManagedEtcd(dataDir string) (*exec.Cmd, error) {
 		"--advertise-client-urls", managedEtcdClientURL,
 		"--listen-peer-urls", "http://127.0.0.1:2380",
 	)
-	etcdCmd.Stdout = os.Stdout
-	etcdCmd.Stderr = os.Stderr
+	// Redirect etcd logs to file (avoid cluttering engine output)
+	etcdLogFile, _ := os.OpenFile(filepath.Join(dataDir, "etcd.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if etcdLogFile != nil {
+		etcdCmd.Stdout = etcdLogFile
+		etcdCmd.Stderr = etcdLogFile
+	}
 
 	if err := etcdCmd.Start(); err != nil {
 		return nil, fmt.Errorf("start etcd: %w", err)
@@ -843,8 +833,12 @@ http:
 	}
 
 	registryCmd := exec.Command("registry", "serve", regConfigPath) //nolint:gosec // config path is constructed internally
-	registryCmd.Stdout = os.Stdout
-	registryCmd.Stderr = os.Stderr
+	// Redirect registry logs to file (avoid cluttering engine output)
+	registryLogFile, _ := os.OpenFile(filepath.Join(dataDir, "registry.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if registryLogFile != nil {
+		registryCmd.Stdout = registryLogFile
+		registryCmd.Stderr = registryLogFile
+	}
 
 	if err := registryCmd.Start(); err != nil {
 		return nil, fmt.Errorf("start registry: %w", err)

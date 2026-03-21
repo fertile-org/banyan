@@ -220,7 +220,7 @@ func applyCLIInit(inputs *cliInitInputs) error {
 	// Display next steps for public key auth
 	fmt.Println()
 	fmt.Println(styleInfo.Render("To whitelist this CLI on the engine:"))
-	fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n", inputs.PubKey, inputs.CLIName)
+	fmt.Printf("  sudo banyan-engine add-client --name %s --pubkey '%s'\n", inputs.CLIName, inputs.PubKey)
 
 	fmt.Println()
 	fmt.Println(styleDim.Render("========================================"))

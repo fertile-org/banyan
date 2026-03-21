@@ -305,9 +305,9 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Println()
 		fmt.Println(styleInfo.Render("To whitelist this agent on the engine:"))
-		fmt.Printf("  echo '%s' > /etc/banyan/whitelisted-keys/%s.pub\n",
-			existingCfg.Agent.WGPublicKey,
-			keyFileName)
+		fmt.Printf("  sudo banyan-engine add-client --name %s --pubkey '%s'\n",
+			keyFileName,
+			existingCfg.Agent.WGPublicKey)
 	}
 
 	fmt.Println()

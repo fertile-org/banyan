@@ -152,9 +152,9 @@ func (e *Engine) Run(ctx context.Context) error {
 	} else if e.opts.AllowInsecure {
 		e.logger().Warn("SECURITY WARNING: Running without authentication (--allow-insecure). Do NOT use in production.")
 	} else {
-		return fmt.Errorf("no whitelisted public keys configured, cannot start without authentication. " +
-			"Add agent keys with: banyan-engine init\n" +
-			"Or use --allow-insecure for development only (NOT for production)")
+		return fmt.Errorf("no whitelisted public keys configured, cannot start without authentication.\n" +
+			"  Add client keys with: sudo banyan-engine add-client --name <name> --pubkey <key>\n" +
+			"  Or use --allow-insecure for development only (NOT for production)")
 	}
 
 	// Initialize VPC overlay networking (subnet allocation + peer tracking)

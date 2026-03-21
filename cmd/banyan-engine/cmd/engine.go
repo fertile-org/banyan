@@ -79,11 +79,29 @@ var statusCmd = &cobra.Command{
 	RunE:  runEngineStatus,
 }
 
+var addClientCmd = &cobra.Command{
+	Use:   "add-client",
+	Short: "Whitelist a client (agent or CLI) public key",
+	Long:  "Add a client's WireGuard public key to the whitelist so it can connect to this engine.",
+	RunE:  runAddClient,
+}
+
+var (
+	addClientName   string
+	addClientPubkey string
+)
+
 func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(startCmd)
 	rootCmd.AddCommand(stopCmd)
 	rootCmd.AddCommand(statusCmd)
+	rootCmd.AddCommand(addClientCmd)
+
+	addClientCmd.Flags().StringVar(&addClientName, "name", "", "Client name (e.g., worker-1, cli-deploy)")
+	addClientCmd.Flags().StringVar(&addClientPubkey, "pubkey", "", "Client's WireGuard public key")
+	_ = addClientCmd.MarkFlagRequired("name")
+	_ = addClientCmd.MarkFlagRequired("pubkey")
 
 	rootCmd.PersistentFlags().StringVar(&engineDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
@@ -556,6 +574,20 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		log.Warn("Failed to load config", "error", err)
 	}
 
+	// Early auth check — fail fast before starting etcd, WireGuard, registry, etc.
+	if !engineAllowInsecure {
+		whitelistedKeysDir := cfg.Engine.WhitelistedKeysDir
+		if whitelistedKeysDir == "" {
+			whitelistedKeysDir = types.DefaultWhitelistedKeysDir
+		}
+		earlyKeys, _ := types.LoadWhitelistedKeys(whitelistedKeysDir)
+		if len(earlyKeys) == 0 {
+			return fmt.Errorf("no whitelisted client keys found in %s\n"+
+				"  Add client keys with: sudo banyan-engine add-client --name <name> --pubkey <key>\n"+
+				"  Or use --allow-insecure for development only (NOT for production)", whitelistedKeysDir)
+		}
+	}
+
 	// Read gRPC port from config if not overridden by flags
 	if !cmd.Flags().Changed("grpc-port") && cfg.Engine.GRPCPort != "" {
 		engineGRPCPort = cfg.Engine.GRPCPort
@@ -884,6 +916,33 @@ func stopManagedEtcd(cmd *exec.Cmd) {
 
 func runEngineStop(cmd *cobra.Command, args []string) error {
 	fmt.Println("Banyan Engine stopped.")
+	return nil
+}
+
+func runAddClient(cmd *cobra.Command, args []string) error {
+	if os.Geteuid() != 0 {
+		return fmt.Errorf("add-client must be run as root: sudo banyan-engine add-client --name <name> --pubkey <key>")
+	}
+
+	cfg, _ := types.LoadConfig(configPath)
+	keysDir := cfg.Engine.WhitelistedKeysDir
+	if keysDir == "" {
+		keysDir = types.DefaultWhitelistedKeysDir
+	}
+	if err := os.MkdirAll(keysDir, 0o700); err != nil {
+		return fmt.Errorf("failed to create keys directory: %w", err)
+	}
+
+	name := strings.TrimSpace(addClientName)
+	pubkey := strings.TrimSpace(addClientPubkey)
+
+	keyFile := filepath.Join(keysDir, name+".pub")
+	if err := os.WriteFile(keyFile, []byte(pubkey+"\n"), 0o600); err != nil {
+		return fmt.Errorf("failed to write key file: %w", err)
+	}
+
+	fmt.Printf("Client %q whitelisted at %s\n", name, keyFile)
+	fmt.Println("Restart the engine for the change to take effect.")
 	return nil
 }
 

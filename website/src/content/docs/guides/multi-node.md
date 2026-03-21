@@ -57,7 +57,7 @@ sudo banyan-cli init
 # It generates a WireGuard keypair and displays the public key
 
 # Copy the CLI's public key to the engine
-echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
+sudo banyan-engine add-client --name deploy-machine --pubkey '<cli-public-key>'
 ```
 
 Verify the connection:
@@ -102,7 +102,7 @@ During init, Banyan generates a WireGuard keypair and displays the agent's publi
 
 ```bash
 # On the engine machine
-echo '<worker-1-public-key>' > /etc/banyan/whitelisted-keys/worker-1.pub
+sudo banyan-engine add-client --name worker-1 --pubkey '<worker-1-public-key>'
 ```
 
 On Agent 2 (`192.168.1.12`):
@@ -202,7 +202,7 @@ sudo banyan-cli init
 # Enter the engine host and port — generates a keypair and displays the public key
 
 # Copy the CLI's public key to the engine
-echo '<cli-public-key>' > /etc/banyan/whitelisted-keys/deploy-machine.pub
+sudo banyan-engine add-client --name deploy-machine --pubkey '<cli-public-key>'
 
 # Deploy from anywhere
 banyan-cli up -f banyan.yaml
@@ -214,7 +214,7 @@ After a machine reboot, run `sudo banyan-cli login` to re-establish the WireGuar
 
 1. Install `banyan-agent`, containerd, nerdctl, and wireguard-tools on the new server.
 2. Run `sudo banyan-agent init` (enter engine host, port, and node name).
-3. Copy the agent's public key to the engine: `echo '<pubkey>' > /etc/banyan/whitelisted-keys/<name>.pub`
+3. Whitelist the agent's public key: `sudo banyan-engine add-client --name <name> --pubkey <key>`
 4. Run `sudo systemctl enable --now banyan-agent`
 
 The new agent appears in `banyan-cli agent` within seconds. Future deployments include it automatically.

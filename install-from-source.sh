@@ -19,6 +19,7 @@ NERDCTL_VERSION="2.1.3"
 NERDCTL_MIN_VERSION="2.1.3"  # minimum for --health-cmd support
 CNI_VERSION="1.6.2"
 ETCD_VERSION="3.5.17"
+REGISTRY_VERSION="2.8.3"
 BUILDKIT_VERSION="0.19.0"
 
 # --- Output helpers ---
@@ -160,6 +161,28 @@ install_etcd() {
     esac
 
     info "etcd installed."
+}
+
+install_registry() {
+    if command -v registry &>/dev/null; then
+        info "Distribution registry already installed, skipping."
+        return
+    fi
+
+    info "Installing Distribution registry v${REGISTRY_VERSION}..."
+
+    local url="https://github.com/distribution/distribution/releases/download/v${REGISTRY_VERSION}/registry_${REGISTRY_VERSION}_linux_${ARCH}.tar.gz"
+    local tmp
+    tmp=$(mktemp -d)
+    if ! curl -fsSL "$url" | tar -xz -C "$tmp"; then
+        rm -rf "$tmp"
+        fatal "Failed to download Distribution registry from ${url}"
+    fi
+    mv "$tmp/registry" "${INSTALL_DIR}/"
+    chmod +x "${INSTALL_DIR}/registry"
+    rm -rf "$tmp"
+
+    info "Distribution registry v${REGISTRY_VERSION} installed."
 }
 
 install_containerd() {
@@ -338,6 +361,13 @@ verify() {
             ok=false
         fi
 
+        if command -v registry &>/dev/null; then
+            info "  registry: OK"
+        else
+            error "  registry: NOT FOUND (managed registry will not work)"
+            ok=false
+        fi
+
         if command -v wg &>/dev/null; then
             info "  wireguard-tools: OK (for control tunnel)"
         else
@@ -405,8 +435,8 @@ verify() {
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         echo "  Start an Agent:"
         echo "    sudo banyan-agent init     # generates keypair, asks for engine public key"
-        echo "    # Copy agent's public key to engine:"
-        echo "    #   echo '<key>' > /etc/banyan/whitelisted-keys/<name>.pub"
+        echo "    # Whitelist agent on the engine:"
+        echo "    #   sudo banyan-engine add-client --name <name> --pubkey <key>"
         echo "    sudo banyan-agent start"
         echo ""
     fi
@@ -459,6 +489,7 @@ main() {
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
         install_etcd
+        install_registry   # Distribution (Docker Registry v2) for persistent image storage
         install_wireguard  # WireGuard is used for the control tunnel (encrypted gRPC)
     fi
 

@@ -541,8 +541,8 @@ verify() {
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
         echo "  Agent:"
         echo "    sudo banyan-agent init                     # one-time setup"
-        echo "    # Copy agent's public key to engine:"
-        echo "    #   echo '<key>' > /etc/banyan/whitelisted-keys/<name>.pub"
+        echo "    # Whitelist agent on the engine:"
+        echo "    #   sudo banyan-engine add-client --name <name> --pubkey <key>"
         echo "    sudo systemctl enable --now banyan-agent   # start + enable on boot"
         echo ""
     fi

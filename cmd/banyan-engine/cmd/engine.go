@@ -688,9 +688,11 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		log.Info("Starting managed registry", "data_dir", registryDataDir, "bind", registryBindAddr, "port", managedRegistryPort)
 		registryCmd, regErr := startManagedRegistry(registryDataDir, registryBindAddr, managedRegistryPort)
 		if regErr != nil {
-			// Fall back to in-memory registry if Distribution binary is not installed
-			log.Warn("Managed registry failed to start, falling back to in-memory registry", "error", regErr)
-		} else {
+			return fmt.Errorf("failed to start managed registry: %w\n"+
+				"  Install the registry binary: sudo bash install.sh --role engine\n"+
+				"  Or use an external registry: set managed_registry: false and external_registry_url in config", regErr)
+		}
+		{
 			defer stopManagedRegistry(registryCmd)
 
 			registryHost := registryBindAddr

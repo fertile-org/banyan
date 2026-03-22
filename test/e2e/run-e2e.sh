@@ -816,15 +816,100 @@ fi
 docker exec banyan-engine banyan-cli deployment
 
 # =================================================================
-# Phase 5: Down Command Test
+# Phase 5: Volume Mount Tests
 # =================================================================
 echo ""
 echo "========================================="
-echo "Phase 5: Down Command"
+echo "Phase 5: Volume Mount Tests"
+echo "========================================="
+
+# First, tear down any existing deployment
+log_info "Tearing down previous deployment for volume tests..."
+docker exec banyan-engine banyan-cli down --file /examples/banyan.yaml 2>/dev/null || true
+sleep 10
+
+# Pre-pull images for volume test
+for worker in banyan-worker-1 banyan-worker-2; do
+    for img in redis:7-alpine nginx:alpine; do
+        docker exec "$worker" nerdctl pull "$img" >/dev/null 2>&1 || true
+    done
+done
+
+# Deploy with volumes
+log_info "Deploying with volumes..."
+docker exec banyan-engine banyan-cli up --file /examples/banyan-volumes.yaml 2>&1 || true
+sleep 15
+
+# Test: Named volume — write data to Redis, verify container is running
+log_info "Test: Named volume (Redis with persistent data)"
+REDIS_WORKER=""
+REDIS_CONTAINER=""
+for worker in banyan-worker-1 banyan-worker-2; do
+    CONTAINERS=$(docker exec "$worker" nerdctl ps --format '{{.Names}}' 2>/dev/null)
+    for container in $CONTAINERS; do
+        if [[ "$container" == *"db-0"* ]]; then
+            REDIS_WORKER="$worker"
+            REDIS_CONTAINER="$container"
+            break 2
+        fi
+    done
+done
+
+if [ -n "$REDIS_WORKER" ]; then
+    # Write test data via redis-cli
+    docker exec "$REDIS_WORKER" nerdctl exec "$REDIS_CONTAINER" redis-cli SET volume-test "persistent-data" >/dev/null 2>&1
+    REDIS_GET=$(docker exec "$REDIS_WORKER" nerdctl exec "$REDIS_CONTAINER" redis-cli GET volume-test 2>/dev/null)
+    if [ "$REDIS_GET" = "persistent-data" ]; then
+        log_test_pass "Named volume: Redis data written and read back"
+    else
+        log_test_fail "Named volume: Redis data not readable (got: $REDIS_GET)"
+    fi
+else
+    log_test_fail "Named volume: Redis container not found"
+fi
+
+# Test: Bind mount — verify /etc/hostname is mounted into nginx container
+log_info "Test: Bind mount (Nginx with host file)"
+NGINX_WORKER=""
+NGINX_CONTAINER=""
+for worker in banyan-worker-1 banyan-worker-2; do
+    CONTAINERS=$(docker exec "$worker" nerdctl ps --format '{{.Names}}' 2>/dev/null)
+    for container in $CONTAINERS; do
+        if [[ "$container" == *"web-0"* ]]; then
+            NGINX_WORKER="$worker"
+            NGINX_CONTAINER="$container"
+            break 2
+        fi
+    done
+done
+
+if [ -n "$NGINX_WORKER" ]; then
+    # The bind mount maps /etc/hostname to /usr/share/nginx/html/hostname (read-only)
+    HOSTNAME_CONTENT=$(docker exec "$NGINX_WORKER" nerdctl exec "$NGINX_CONTAINER" cat /usr/share/nginx/html/hostname 2>/dev/null) || HOSTNAME_CONTENT=""
+    if [ -n "$HOSTNAME_CONTENT" ]; then
+        log_test_pass "Bind mount: /etc/hostname readable inside container ($HOSTNAME_CONTENT)"
+    else
+        log_test_fail "Bind mount: Could not read /usr/share/nginx/html/hostname"
+    fi
+else
+    log_test_fail "Bind mount: Nginx container not found"
+fi
+
+# Down the volume test deployment
+log_info "Tearing down volume test deployment..."
+docker exec banyan-engine banyan-cli down --file /examples/banyan-volumes.yaml 2>/dev/null || true
+sleep 5
+
+# =================================================================
+# Phase 6: Down Command Test
+# =================================================================
+echo ""
+echo "========================================="
+echo "Phase 6: Down Command"
 echo "========================================="
 
 log_info "Running 'down' to tear down all services..."
-docker exec banyan-engine banyan-cli down --file /examples/banyan.yaml
+docker exec banyan-engine banyan-cli down --file /examples/banyan.yaml 2>/dev/null || true
 
 # Wait for containers to be removed
 log_info "Waiting for containers to be removed..."

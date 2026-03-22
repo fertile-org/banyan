@@ -1,0 +1,16 @@
+name: e2e-volume-test
+
+services:
+  db:
+    image: redis:7-alpine
+    volumes:
+      - db-data:/data
+    command: ["redis-server", "--appendonly", "yes", "--dir", "/data"]
+
+  web:
+    image: nginx:alpine
+    volumes:
+      - /etc/hostname:/usr/share/nginx/html/hostname:ro
+
+volumes:
+  db-data:

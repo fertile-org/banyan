@@ -1257,38 +1257,6 @@ func TestSchedulePendingDeployment_SaveDeploymentError(t *testing.T) {
 	}
 }
 
-// --- Tests for startRegistry ---
-
-func TestStartRegistry(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Use port 0 to let OS assign a random port
-	lis, err := startRegistry(ctx, "127.0.0.1", "0")
-	if err != nil {
-		t.Fatalf("startRegistry failed: %v", err)
-	}
-	if lis == nil {
-		t.Fatal("expected non-nil listener")
-	}
-
-	addr := lis.Addr().String()
-	if addr == "" {
-		t.Error("expected non-empty listener address")
-	}
-
-	cancel()
-}
-
-func TestStartRegistry_InvalidPort(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	_, err := startRegistry(ctx, "127.0.0.1", "99999")
-	if err == nil {
-		t.Fatal("expected error for invalid port")
-	}
-}
-
 // --- Tests for findNonLoopbackIPv4 ---
 
 // mockAddr implements net.Addr but is NOT a *net.IPNet.

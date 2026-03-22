@@ -153,6 +153,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to resolve env_file: %w", resolveErr)
 	}
 
+	// Resolve volume paths: relative bind mounts → absolute, NFS named volumes → nfs type
+	types.ResolveManifestVolumes(manifestDir, &manifest)
+
 	if deployDryRun {
 		services := types.BuildServiceRecords(manifest.Services)
 		fmt.Printf("Application: %s\n", manifest.Name)

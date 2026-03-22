@@ -9,7 +9,6 @@ require (
 	github.com/fertile-org/banyan/pkg/storage v0.0.0
 	github.com/fertile-org/banyan/pkg/types v0.0.0
 	github.com/fertile-org/banyan/pkg/vpc/overlay v0.0.0
-	github.com/google/go-containerregistry v0.20.7
 	google.golang.org/grpc v1.72.1
 )
 

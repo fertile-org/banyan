@@ -378,6 +378,15 @@ func executeTask(ctx context.Context, task *types.TaskRecord) (*types.TaskResult
 }
 
 func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
+	// Resolve NFS volumes to local host mounts before building nerdctl args
+	if len(task.Volumes) > 0 {
+		resolved, nfsErr := ResolveNFSVolumes(ctx, task.Volumes)
+		if nfsErr != nil {
+			return nil, nfsErr
+		}
+		task.Volumes = resolved
+	}
+
 	logging.Info("Pulling image", "image", task.Image)
 	if err := commandRunner(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
 		return nil, fmt.Errorf("failed to pull image %s: %w", task.Image, err)

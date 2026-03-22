@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -177,6 +178,55 @@ func (v *VolumeMounts) UnmarshalYAML(value *yaml.Node) error {
 	}
 	*v = mounts
 	return nil
+}
+
+// ResolveManifestVolumes resolves volume paths and top-level NFS references.
+// Relative bind mount paths are resolved against basePath (the manifest directory).
+// Named volumes with NFS driver_opts are converted to type "nfs" with the
+// NFS source (addr:device) in the Source field.
+func ResolveManifestVolumes(basePath string, manifest *BanyanManifest) {
+	for svcName := range manifest.Services {
+		svc := manifest.Services[svcName]
+		for i, vol := range svc.Volumes {
+			// Resolve relative bind mount paths
+			if vol.Type == "bind" && !strings.HasPrefix(vol.Source, "/") {
+				svc.Volumes[i].Source = filepath.Join(basePath, vol.Source)
+			}
+			// Resolve named volumes with NFS driver_opts
+			if vol.Type == "volume" && len(manifest.Volumes) > 0 {
+				vc, ok := manifest.Volumes[vol.Source]
+				if ok && vc.DriverOpts["type"] == "nfs" {
+					device := vc.DriverOpts["device"]
+					opts := vc.DriverOpts["o"]
+					addr, otherOpts := parseNFSOpts(opts)
+					if addr != "" && device != "" {
+						// Device in Docker Compose NFS has format ":/path" — strip leading colon
+						device = strings.TrimPrefix(device, ":")
+						svc.Volumes[i].Type = "nfs"
+						svc.Volumes[i].Source = addr + ":" + device
+						if otherOpts != "" {
+							svc.Volumes[i].Tmpfs = &TmpfsOpt{Size: otherOpts}
+						}
+					}
+				}
+			}
+		}
+		manifest.Services[svcName] = svc
+	}
+}
+
+// parseNFSOpts extracts addr and remaining options from an NFS mount options string.
+func parseNFSOpts(opts string) (addr, remaining string) {
+	var others []string
+	for _, opt := range strings.Split(opts, ",") {
+		opt = strings.TrimSpace(opt)
+		if strings.HasPrefix(opt, "addr=") {
+			addr = strings.TrimPrefix(opt, "addr=")
+		} else if opt != "" {
+			others = append(others, opt)
+		}
+	}
+	return addr, strings.Join(others, ",")
 }
 
 // parseVolumeShortSyntax parses "source:target[:mode]" into a VolumeMount.

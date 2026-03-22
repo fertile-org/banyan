@@ -31,6 +31,10 @@ RUN curl -L https://github.com/containernetworking/plugins/releases/download/v1.
 RUN curl -L https://github.com/containerd/nerdctl/releases/download/v2.1.3/nerdctl-2.1.3-linux-amd64.tar.gz \
     | tar -xz -C /usr/local/bin nerdctl
 
+# Download Distribution registry (OCI image storage for engine)
+RUN curl -L https://github.com/distribution/distribution/releases/download/v2.8.3/registry_2.8.3_linux_amd64.tar.gz \
+    | tar -xz -C /usr/local/bin registry && chmod +x /usr/local/bin/registry
+
 # Copy pre-built binaries (cache-bust file forces rebuild when binaries change)
 COPY bin/.cache-bust /tmp/.cache-bust
 COPY bin/banyan-engine /usr/local/bin/banyan-engine

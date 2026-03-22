@@ -80,8 +80,11 @@ var (
 	containerIDGetter         = getContainerID
 	containerRemover          = removeContainer
 	containerIPGetter         = getContainerIP
-	vpcNetworkEnabled         bool   // set by Agent.Run() after VPC init
-	dnsGatewayIPAddr          string // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
+	vpcNetworkEnabled         bool           // set by Agent.Run() after VPC init
+	dnsGatewayIPAddr          string         // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
+	heartbeatInterval         = 15 * time.Second // overridable in tests
+	taskPollInterval          = 2 * time.Second  // overridable in tests
+	healthCheckInterval       = 10 * time.Second // overridable in tests
 )
 
 // New creates a new Agent.
@@ -233,7 +236,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 // agentLoop polls the engine for tasks assigned to this agent and executes them.
 func (a *Agent) agentLoop(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(taskPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -588,7 +591,7 @@ func (a *Agent) doOneHeartbeat(ctx context.Context) {
 }
 
 func (a *Agent) agentHeartbeat(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	var consecutiveFails int
@@ -639,7 +642,7 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 }
 
 func (a *Agent) containerHealthLoop(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
 
 	for {

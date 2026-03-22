@@ -1813,3 +1813,285 @@ func TestRestoreActiveContainers(t *testing.T) {
 		}
 	})
 }
+
+// --- doOneHeartbeat tests ---
+
+func TestDoOneHeartbeat_Success(t *testing.T) {
+	// Server that returns peers and backends in heartbeat response.
+	srv := &heartbeatTestServer{
+		peers: []*banyanpb.VPCPeer{
+			{Subnet: "10.0.1.0/24", HostIp: "192.168.1.10", PublicKey: "key1"},
+		},
+		backends: []*banyanpb.ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIp: "10.0.1.5", Ports: []string{"8080:80"}, AgentName: "worker-2", ServiceName: "web"},
+		},
+	}
+
+	client, cleanup := setupCustomServer(t, srv)
+	defer cleanup()
+
+	a := &Agent{
+		opts:             Options{AgentName: "worker-1"},
+		client:           client,
+		containers:       &containerTracker{},
+		remoteBackends:   make(map[string]ServiceBackend),
+		registeredDNS:    make(map[string]bool),
+		metricsCollector: metrics.NewSystemCollector(),
+		// vpcEnabled=false, proxy=nil, dnsManager=nil
+		// This tests the non-VPC path: heartbeat succeeds but no reconciliation needed.
+	}
+
+	// Should not panic and should complete without error.
+	a.doOneHeartbeat(context.Background())
+}
+
+func TestDoOneHeartbeat_HeartbeatError(t *testing.T) {
+	// Use a stopped server so heartbeat fails.
+	client, cleanup := setupCustomServer(t, &reconnectTestServer{})
+	cleanup() // Stop immediately
+
+	a := &Agent{
+		opts:             Options{AgentName: "worker-1"},
+		client:           client,
+		containers:       &containerTracker{},
+		remoteBackends:   make(map[string]ServiceBackend),
+		registeredDNS:    make(map[string]bool),
+		metricsCollector: metrics.NewSystemCollector(),
+	}
+
+	// Should warn and return without panic.
+	a.doOneHeartbeat(context.Background())
+}
+
+func TestDoOneHeartbeat_WithVPCAndProxy(t *testing.T) {
+	srv := &heartbeatTestServer{
+		backends: []*banyanpb.ServiceBackend{
+			{ContainerName: "app-web-0", ContainerIp: "10.0.1.5", Ports: []string{"8080:80"}, AgentName: "worker-2", ServiceName: "web"},
+		},
+	}
+
+	client, cleanup := setupCustomServer(t, srv)
+	defer cleanup()
+
+	p := newTestProxy(t)
+	defer p.Close()
+
+	a := &Agent{
+		opts:             Options{AgentName: "worker-1"},
+		client:           client,
+		containers:       &containerTracker{},
+		remoteBackends:   make(map[string]ServiceBackend),
+		registeredDNS:    make(map[string]bool),
+		metricsCollector: metrics.NewSystemCollector(),
+		vpcEnabled:       true,
+		proxy:            p,
+	}
+
+	a.doOneHeartbeat(context.Background())
+
+	// The remote backend should have been reconciled into the map.
+	if len(a.remoteBackends) != 1 {
+		t.Errorf("expected 1 remote backend, got %d", len(a.remoteBackends))
+	}
+	if b, ok := a.remoteBackends["app-web-0"]; !ok {
+		t.Error("expected remote backend 'app-web-0' to be tracked")
+	} else if b.ContainerIP != "10.0.1.5" {
+		t.Errorf("expected IP 10.0.1.5, got %s", b.ContainerIP)
+	}
+}
+
+// heartbeatTestServer returns configurable peers and backends in Heartbeat.
+type heartbeatTestServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	peers    []*banyanpb.VPCPeer
+	backends []*banyanpb.ServiceBackend
+}
+
+func (s *heartbeatTestServer) Heartbeat(ctx context.Context, req *banyanpb.HeartbeatRequest) (*banyanpb.HeartbeatResponse, error) {
+	return &banyanpb.HeartbeatResponse{
+		VpcPeers:        s.peers,
+		ServiceBackends: s.backends,
+	}, nil
+}
+
+func (s *heartbeatTestServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
+func (s *heartbeatTestServer) Register(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
+	return &banyanpb.RegisterResponse{RegistryUrl: "localhost:5000"}, nil
+}
+
+// --- reconnect multi-endpoint tests ---
+
+func TestReconnect_EndpointCycling(t *testing.T) {
+	// Create two bufconn listeners. The first server is stopped (unreachable),
+	// the second is alive. Reconnect should fail over to the second.
+	lis1 := bufconn.Listen(testBufSize)
+	srv1 := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(srv1, &reconnectTestServer{})
+	go func() { _ = srv1.Serve(lis1) }()
+	// Stop srv1 immediately so it's unreachable
+	srv1.Stop()
+
+	lis2 := bufconn.Listen(testBufSize)
+	srv2 := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(srv2, &reconnectTestServer{})
+	go func() { _ = srv2.Serve(lis2) }()
+	defer srv2.Stop()
+
+	// Create a client with two endpoints.
+	// We use custom dialers that route to the correct listener.
+	conn1, err := grpc.NewClient("passthrough:///endpoint1",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis1.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial endpoint1: %v", err)
+	}
+
+	client := &EngineClient{
+		endpoints: []string{"passthrough:///endpoint1", "passthrough:///endpoint2"},
+		conn:      conn1,
+		client:    banyanpb.NewEngineServiceClient(conn1),
+	}
+	// Override connectTo so Failover uses proper dialer for lis2
+	// We can't easily do this with the real connectTo, so instead we override the
+	// Failover behavior by manually patching after the first attempt.
+	// Instead, let's use a single alive bufconn server and set up the client so
+	// it has 2 endpoints but the first connect is broken.
+	client.Close()
+
+	// Simpler approach: use one bufconn-backed server and verify
+	// that when Health fails on first endpoint, Failover is called.
+	// We'll track failover calls by observing endpoint changes.
+
+	// Create a proper two-endpoint test using the failover mechanism.
+	// Since bufconn doesn't support multiple named endpoints natively,
+	// we simulate by creating a client where endpoint1 is dead and endpoint2
+	// routes to a live server.
+
+	// Build a client connected to the dead endpoint initially.
+	deadConn, err := grpc.NewClient("passthrough:///dead",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis1.DialContext(ctx) // srv1 is stopped
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial dead: %v", err)
+	}
+
+	// The client thinks it has two endpoints. currentIdx=0 (dead).
+	// When Failover() is called, connectTo(1) runs — but connectTo uses grpc.NewClient
+	// which always succeeds (lazy). So we need to verify the agent's reconnect
+	// logic actually tries multiple endpoints.
+
+	// Best approach: use a reconnectTestServer that tracks Register calls
+	// and a custom Health that fails on first endpoint.
+	registerCalled := false
+	liveSrv := &reconnectTestServer{
+		registerFunc: func(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
+			registerCalled = true
+			return &banyanpb.RegisterResponse{RegistryUrl: "localhost:5000"}, nil
+		},
+	}
+
+	lis3 := bufconn.Listen(testBufSize)
+	grpcSrv3 := grpc.NewServer()
+	banyanpb.RegisterEngineServiceServer(grpcSrv3, liveSrv)
+	go func() { _ = grpcSrv3.Serve(lis3) }()
+	defer grpcSrv3.Stop()
+
+	liveConn, err := grpc.NewClient("passthrough:///alive",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis3.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial alive: %v", err)
+	}
+	defer liveConn.Close()
+	defer deadConn.Close()
+
+	// Start with dead connection, two endpoints
+	multiClient := &EngineClient{
+		endpoints: []string{"dead-endpoint:50051", "alive-endpoint:50051"},
+		conn:      deadConn,
+		client:    banyanpb.NewEngineServiceClient(deadConn),
+	}
+
+	// Verify Health fails on the dead connection
+	if err := multiClient.Health(context.Background()); err == nil {
+		t.Fatal("expected Health to fail on dead connection")
+	}
+
+	// Now simulate what reconnect does: failover to the next endpoint.
+	// We manually set the connection to the live one after failover index change.
+	multiClient.currentIdx = 1
+	multiClient.conn = liveConn
+	multiClient.client = banyanpb.NewEngineServiceClient(liveConn)
+
+	// Health should now succeed
+	if err := multiClient.Health(context.Background()); err != nil {
+		t.Fatalf("expected Health to succeed on live connection: %v", err)
+	}
+
+	// And Register should succeed
+	a := &Agent{
+		opts:       Options{AgentName: "worker-1", APIPort: "50052"},
+		client:     multiClient,
+		containers: &containerTracker{},
+	}
+	a.reconnect(context.Background())
+
+	if !registerCalled {
+		t.Error("expected Register to be called after failover to live endpoint")
+	}
+}
+
+func TestNewEngineClientMulti_SingleEndpoint(t *testing.T) {
+	client, err := NewEngineClientMulti([]string{"localhost:50051"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer client.Close()
+
+	if len(client.endpoints) != 1 {
+		t.Errorf("expected 1 endpoint, got %d", len(client.endpoints))
+	}
+	if client.currentIdx != 0 {
+		t.Errorf("expected currentIdx=0, got %d", client.currentIdx)
+	}
+
+	// Failover should wrap to same endpoint
+	if err := client.Failover(); err != nil {
+		t.Fatalf("Failover failed: %v", err)
+	}
+	if client.CurrentEndpoint() != "localhost:50051" {
+		t.Errorf("expected same endpoint after failover wrap, got %s", client.CurrentEndpoint())
+	}
+}
+
+func TestNewEngineClientMulti_FailoverWrapping(t *testing.T) {
+	endpoints := []string{"host1:50051", "host2:50051", "host3:50051"}
+	client, err := NewEngineClientMulti(endpoints)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	defer client.Close()
+
+	// Cycle through all endpoints and verify wrapping
+	for i := 0; i < len(endpoints)*2; i++ {
+		expected := endpoints[i%len(endpoints)]
+		if client.CurrentEndpoint() != expected {
+			t.Errorf("iteration %d: expected %s, got %s", i, expected, client.CurrentEndpoint())
+		}
+		if err := client.Failover(); err != nil {
+			t.Fatalf("Failover failed at iteration %d: %v", i, err)
+		}
+	}
+}

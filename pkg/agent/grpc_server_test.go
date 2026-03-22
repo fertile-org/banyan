@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	grpcpeer "google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 )
@@ -222,6 +223,66 @@ func TestStreamLogs(t *testing.T) {
 
 	})
 }
+
+func TestVerifyEngineIP(t *testing.T) {
+	t.Run("control tunnel IP passes", func(t *testing.T) {
+		// Create a context with peer info from the control tunnel range (10.200.x.x)
+		ctx := peerContext("10.200.0.1:50051")
+		if err := verifyEngineIP(ctx); err != nil {
+			t.Fatalf("expected control tunnel IP to pass, got: %v", err)
+		}
+	})
+
+	t.Run("another control tunnel IP passes", func(t *testing.T) {
+		ctx := peerContext("10.200.5.42:12345")
+		if err := verifyEngineIP(ctx); err != nil {
+			t.Fatalf("expected control tunnel IP to pass, got: %v", err)
+		}
+	})
+
+	t.Run("non-tunnel IP is rejected", func(t *testing.T) {
+		ctx := peerContext("192.168.1.100:50051")
+		err := verifyEngineIP(ctx)
+		if err == nil {
+			t.Fatal("expected non-tunnel IP to be rejected")
+		}
+		if status.Code(err) != codes.PermissionDenied {
+			t.Errorf("expected PermissionDenied, got %v", status.Code(err))
+		}
+	})
+
+	t.Run("localhost is rejected", func(t *testing.T) {
+		ctx := peerContext("127.0.0.1:50051")
+		err := verifyEngineIP(ctx)
+		if err == nil {
+			t.Fatal("expected localhost to be rejected")
+		}
+		if status.Code(err) != codes.PermissionDenied {
+			t.Errorf("expected PermissionDenied, got %v", status.Code(err))
+		}
+	})
+
+	t.Run("empty context with no peer info fails", func(t *testing.T) {
+		ctx := context.Background()
+		err := verifyEngineIP(ctx)
+		if err == nil {
+			t.Fatal("expected error for context without peer info")
+		}
+	})
+}
+
+// peerContext creates a context with gRPC peer info set to the given address.
+func peerContext(addr string) context.Context {
+	return grpcpeer.NewContext(context.Background(), &grpcpeer.Peer{
+		Addr: netAddr(addr),
+	})
+}
+
+// netAddr is a simple net.Addr implementation for testing.
+type netAddr string
+
+func (a netAddr) Network() string { return "tcp" }
+func (a netAddr) String() string  { return string(a) }
 
 func TestStartAgentGRPC(t *testing.T) {
 	t.Run("starts and stops without panic", func(t *testing.T) {

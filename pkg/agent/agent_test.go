@@ -187,6 +187,33 @@ func TestBuildNerdctlRunArgs(t *testing.T) {
 		}
 	})
 
+	t.Run("with volumes", func(t *testing.T) {
+		task := &types.TaskRecord{
+			ContainerName: "myapp-db-0",
+			Image:         "postgres:15",
+			Volumes: []types.VolumeMount{
+				{Type: "volume", Source: "db-data", Target: "/var/lib/postgresql/data"},
+				{Type: "bind", Source: "/host/config", Target: "/etc/app/config", ReadOnly: true},
+				{Type: "tmpfs", Target: "/tmp", Tmpfs: &types.TmpfsOpt{Size: "512m"}},
+			},
+		}
+		args := buildNerdctlRunArgs(task, false)
+		argsStr := strings.Join(args, " ")
+
+		// Named volume
+		if !strings.Contains(argsStr, "-v db-data:/var/lib/postgresql/data") {
+			t.Errorf("expected named volume flag, got: %s", argsStr)
+		}
+		// Bind mount read-only
+		if !strings.Contains(argsStr, "-v /host/config:/etc/app/config:ro") {
+			t.Errorf("expected ro bind mount flag, got: %s", argsStr)
+		}
+		// tmpfs
+		if !strings.Contains(argsStr, "--mount type=tmpfs,target=/tmp,tmpfs-size=512m") {
+			t.Errorf("expected tmpfs mount flag, got: %s", argsStr)
+		}
+	})
+
 	t.Run("with restart policy", func(t *testing.T) {
 		task := &types.TaskRecord{
 			ContainerName: "myapp-web-0",

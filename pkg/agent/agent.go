@@ -354,6 +354,15 @@ func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
 			Disable:     pb.Healthcheck.Disable,
 		}
 	}
+	for _, vol := range pb.Volumes {
+		vm := types.VolumeMount{
+			Type: vol.Type, Source: vol.Source, Target: vol.Target, ReadOnly: vol.ReadOnly,
+		}
+		if vol.Tmpfs != nil {
+			vm.Tmpfs = &types.TmpfsOpt{Size: vol.Tmpfs.Size}
+		}
+		task.Volumes = append(task.Volumes, vm)
+	}
 	return task
 }
 
@@ -519,6 +528,24 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
+	}
+
+	// Volume mounts
+	for _, vol := range task.Volumes {
+		switch vol.Type {
+		case "tmpfs":
+			mount := "type=tmpfs,target=" + vol.Target
+			if vol.Tmpfs != nil && vol.Tmpfs.Size != "" {
+				mount += ",tmpfs-size=" + vol.Tmpfs.Size
+			}
+			args = append(args, "--mount", mount)
+		default: // "volume", "bind", or empty (default to bind/volume based on source)
+			flag := vol.Source + ":" + vol.Target
+			if vol.ReadOnly {
+				flag += ":ro"
+			}
+			args = append(args, "-v", flag)
+		}
 	}
 
 	if len(task.Entrypoint) > 0 {

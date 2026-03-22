@@ -657,3 +657,188 @@ services:
 		}
 	})
 }
+
+func TestVolumeMount_ShortSyntax(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected VolumeMount
+	}{
+		{
+			name:  "named volume",
+			input: "db-data:/var/lib/postgresql/data",
+			expected: VolumeMount{
+				Type: "volume", Source: "db-data", Target: "/var/lib/postgresql/data",
+			},
+		},
+		{
+			name:  "named volume read-only",
+			input: "db-data:/var/lib/postgresql/data:ro",
+			expected: VolumeMount{
+				Type: "volume", Source: "db-data", Target: "/var/lib/postgresql/data", ReadOnly: true,
+			},
+		},
+		{
+			name:  "absolute bind mount",
+			input: "/host/path:/container/path",
+			expected: VolumeMount{
+				Type: "bind", Source: "/host/path", Target: "/container/path",
+			},
+		},
+		{
+			name:  "relative bind mount",
+			input: "./config:/etc/app/config",
+			expected: VolumeMount{
+				Type: "bind", Source: "./config", Target: "/etc/app/config",
+			},
+		},
+		{
+			name:  "relative bind mount read-only",
+			input: "./config:/etc/app/config:ro",
+			expected: VolumeMount{
+				Type: "bind", Source: "./config", Target: "/etc/app/config", ReadOnly: true,
+			},
+		},
+		{
+			name:  "parent path bind mount",
+			input: "../shared:/app/shared",
+			expected: VolumeMount{
+				Type: "bind", Source: "../shared", Target: "/app/shared",
+			},
+		},
+		{
+			name:  "named volume rw explicit",
+			input: "data:/data:rw",
+			expected: VolumeMount{
+				Type: "volume", Source: "data", Target: "/data", ReadOnly: false,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := parseVolumeShortSyntax(tt.input)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result.Type != tt.expected.Type {
+				t.Errorf("type: got %q, want %q", result.Type, tt.expected.Type)
+			}
+			if result.Source != tt.expected.Source {
+				t.Errorf("source: got %q, want %q", result.Source, tt.expected.Source)
+			}
+			if result.Target != tt.expected.Target {
+				t.Errorf("target: got %q, want %q", result.Target, tt.expected.Target)
+			}
+			if result.ReadOnly != tt.expected.ReadOnly {
+				t.Errorf("read_only: got %v, want %v", result.ReadOnly, tt.expected.ReadOnly)
+			}
+		})
+	}
+}
+
+func TestVolumeMount_ShortSyntaxErrors(t *testing.T) {
+	_, err := parseVolumeShortSyntax("nocolon")
+	if err == nil {
+		t.Fatal("expected error for missing colon")
+	}
+}
+
+func TestVolumeMount_YAMLParsing(t *testing.T) {
+	yamlInput := `
+name: test-app
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 512m
+      - type: bind
+        source: /host/logs
+        target: /var/log/app
+        read_only: true
+
+volumes:
+  db-data:
+    driver: local
+  shared:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=nfs.internal,vers=4"
+      device: ":/exports"
+`
+	var manifest BanyanManifest
+	if err := yaml.Unmarshal([]byte(yamlInput), &manifest); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+
+	// Check service volumes
+	db := manifest.Services["db"]
+	if len(db.Volumes) != 4 {
+		t.Fatalf("expected 4 volumes, got %d", len(db.Volumes))
+	}
+
+	// Short syntax: named volume
+	if db.Volumes[0].Type != "volume" || db.Volumes[0].Source != "db-data" {
+		t.Errorf("vol[0]: expected named volume db-data, got %+v", db.Volumes[0])
+	}
+
+	// Short syntax: bind mount read-only
+	if db.Volumes[1].Type != "bind" || !db.Volumes[1].ReadOnly {
+		t.Errorf("vol[1]: expected ro bind mount, got %+v", db.Volumes[1])
+	}
+
+	// Long syntax: tmpfs
+	if db.Volumes[2].Type != "tmpfs" || db.Volumes[2].Tmpfs == nil || db.Volumes[2].Tmpfs.Size != "512m" {
+		t.Errorf("vol[2]: expected tmpfs with 512m, got %+v", db.Volumes[2])
+	}
+
+	// Long syntax: bind with read_only
+	if db.Volumes[3].Type != "bind" || db.Volumes[3].Source != "/host/logs" || !db.Volumes[3].ReadOnly {
+		t.Errorf("vol[3]: expected ro bind /host/logs, got %+v", db.Volumes[3])
+	}
+
+	// Check top-level volumes
+	if len(manifest.Volumes) != 2 {
+		t.Fatalf("expected 2 top-level volumes, got %d", len(manifest.Volumes))
+	}
+	if manifest.Volumes["db-data"].Driver != "local" {
+		t.Errorf("db-data driver: got %q, want local", manifest.Volumes["db-data"].Driver)
+	}
+	shared := manifest.Volumes["shared"]
+	if shared.DriverOpts["type"] != "nfs" {
+		t.Errorf("shared driver_opts.type: got %q, want nfs", shared.DriverOpts["type"])
+	}
+	if shared.DriverOpts["device"] != ":/exports" {
+		t.Errorf("shared driver_opts.device: got %q, want :/exports", shared.DriverOpts["device"])
+	}
+}
+
+func TestVolumeMount_BuildServiceRecords(t *testing.T) {
+	manifest := map[string]ManifestService{
+		"db": {
+			Image: "postgres:15",
+			Volumes: VolumeMounts{
+				{Type: "volume", Source: "data", Target: "/data"},
+				{Type: "bind", Source: "/host", Target: "/container", ReadOnly: true},
+			},
+		},
+	}
+
+	records := BuildServiceRecords(manifest)
+	db := records["db"]
+	if len(db.Volumes) != 2 {
+		t.Fatalf("expected 2 volumes in service record, got %d", len(db.Volumes))
+	}
+	if db.Volumes[0].Source != "data" {
+		t.Errorf("expected source 'data', got %q", db.Volumes[0].Source)
+	}
+	if !db.Volumes[1].ReadOnly {
+		t.Error("expected second volume to be read-only")
+	}
+}

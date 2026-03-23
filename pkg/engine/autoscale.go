@@ -204,15 +204,15 @@ var rebalanceMigrationCooldown = make(map[string]time.Time)
 // rebalanceCooldownDuration is the minimum time before a container can be migrated again.
 const rebalanceCooldownDuration = 10 * time.Minute
 
-// rebalanceOverloadThreshold is the CPU% above which an agent is considered overloaded.
-// Set high (95%) because high CPU is often fine — only intervene when it's truly problematic.
+// rebalanceOverloadThreshold is the percentage above which an agent is considered overloaded.
+// Applies to both CPU and memory. Set high (95%) — only intervene when truly problematic.
 const rebalanceOverloadThreshold = 95.0
 
-// rebalanceTargetMaxCPU is the max CPU% the target agent should have AFTER migration.
+// rebalanceTargetMaxLoad is the max load% the target agent should have AFTER migration.
 // Prevents migrating a container to an agent that would also become overloaded.
-const rebalanceTargetMaxCPU = 70.0
+const rebalanceTargetMaxLoad = 70.0
 
-// rebalanceMinImbalance is the minimum CPU% difference between source and target
+// rebalanceMinImbalance is the minimum load% difference between source and target
 // required before a migration is considered worthwhile.
 const rebalanceMinImbalance = 30.0
 
@@ -231,8 +231,10 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 	}
 
 	type agentInfo struct {
-		node types.NodeRecord
-		cpu  float64
+		node   types.NodeRecord
+		cpu    float64 // CPU usage percent (0-100)
+		memory float64 // memory usage percent (0-100)
+		load   float64 // max(cpu, memory) — the dominant constraint
 	}
 
 	var agents []agentInfo
@@ -244,19 +246,29 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 		if node.Status != "ready" || time.Since(node.LastSeen) > 60*time.Second {
 			continue
 		}
-		agents = append(agents, agentInfo{node: node, cpu: node.CPUUsageRatio * 100})
+		cpu := node.CPUUsageRatio * 100
+		var mem float64
+		if node.MemoryTotalBytes > 0 {
+			mem = float64(node.MemoryUsedBytes) / float64(node.MemoryTotalBytes) * 100
+		}
+		// Load = whichever resource is more constrained
+		load := cpu
+		if mem > load {
+			load = mem
+		}
+		agents = append(agents, agentInfo{node: node, cpu: cpu, memory: mem, load: load})
 	}
 
 	if len(agents) < 2 {
 		return
 	}
 
-	// Find overloaded and underloaded agents
+	// Find overloaded (CPU OR memory > threshold) and underloaded agents
 	var overloaded, underloaded []agentInfo
 	for _, a := range agents {
-		if a.cpu > rebalanceOverloadThreshold {
+		if a.load > rebalanceOverloadThreshold {
 			overloaded = append(overloaded, a)
-		} else if a.cpu < rebalanceTargetMaxCPU {
+		} else if a.load < rebalanceTargetMaxLoad {
 			underloaded = append(underloaded, a)
 		}
 	}
@@ -296,16 +308,15 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 		var bestTarget *agentInfo
 		for i := range underloaded {
 			// Safeguard: require minimum imbalance between source and target
-			if over.cpu-underloaded[i].cpu < rebalanceMinImbalance {
+			if over.load-underloaded[i].load < rebalanceMinImbalance {
 				continue
 			}
-			// Safeguard: estimate target CPU after migration — don't overload it
-			// (rough estimate: add container's CPU% to target agent)
-			estimatedTargetCPU := underloaded[i].cpu + candidate.CPUPercent
-			if estimatedTargetCPU > rebalanceTargetMaxCPU {
+			// Safeguard: estimate target load after migration — don't overload it
+			estimatedTargetLoad := underloaded[i].load + candidate.CPUPercent
+			if estimatedTargetLoad > rebalanceTargetMaxLoad {
 				continue // would overload the target
 			}
-			if bestTarget == nil || underloaded[i].cpu < bestTarget.cpu {
+			if bestTarget == nil || underloaded[i].load < bestTarget.load {
 				bestTarget = &underloaded[i]
 			}
 		}
@@ -316,9 +327,8 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 		e.logger().Info("Rebalance: migrating container",
 			"container", candidate.ContainerName,
 			"from", over.node.Name, "to", bestTarget.node.Name,
-			"from_cpu", fmt.Sprintf("%.1f%%", over.cpu),
-			"to_cpu", fmt.Sprintf("%.1f%%", bestTarget.cpu),
-			"container_cpu", fmt.Sprintf("%.1f%%", candidate.CPUPercent))
+			"from_load", fmt.Sprintf("%.0f%% (cpu:%.0f%% mem:%.0f%%)", over.load, over.cpu, over.memory),
+			"to_load", fmt.Sprintf("%.0f%% (cpu:%.0f%% mem:%.0f%%)", bestTarget.load, bestTarget.cpu, bestTarget.memory))
 
 		e.migrateTask(ctx, candidate, over.node.Name, bestTarget.node.Name)
 		migrated[over.node.Name] = true

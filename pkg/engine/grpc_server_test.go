@@ -273,6 +273,47 @@ func TestPollTasks(t *testing.T) {
 			t.Errorf("expected InvalidArgument, got %v", status.Code(err))
 		}
 	})
+
+	t.Run("returns volumes in tasks", func(t *testing.T) {
+		srv.store.Save(ctx, types.KeyTasks+"worker-vol/task-vol-1", &types.TaskRecord{
+			ID: "task-vol-1", AgentID: "worker-vol", DeploymentID: "deploy-vol",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusPending,
+			Image: "postgres:15", ContainerName: "app-db-0",
+			ServiceName: "db",
+			Volumes: []types.VolumeMount{
+				{Type: "bind", Source: "/host/data", Target: "/data", ReadOnly: false},
+				{Type: "tmpfs", Target: "/tmp", Tmpfs: &types.TmpfsOpt{Size: "128m"}},
+				{Type: "nfs", Source: "10.0.0.1:/exports", Target: "/nfs", ReadOnly: true},
+			},
+		})
+
+		resp, err := client.PollTasks(ctx, &banyanpb.PollTasksRequest{AgentName: "worker-vol"})
+		if err != nil {
+			t.Fatalf("PollTasks failed: %v", err)
+		}
+		if len(resp.Tasks) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(resp.Tasks))
+		}
+		task := resp.Tasks[0]
+		if len(task.Volumes) != 3 {
+			t.Fatalf("expected 3 volumes, got %d", len(task.Volumes))
+		}
+		// bind mount
+		if task.Volumes[0].Type != "bind" || task.Volumes[0].Source != "/host/data" {
+			t.Errorf("vol[0]: got type=%q source=%q", task.Volumes[0].Type, task.Volumes[0].Source)
+		}
+		// tmpfs with size
+		if task.Volumes[1].Type != "tmpfs" || task.Volumes[1].Target != "/tmp" {
+			t.Errorf("vol[1]: got type=%q target=%q", task.Volumes[1].Type, task.Volumes[1].Target)
+		}
+		if task.Volumes[1].Tmpfs == nil || task.Volumes[1].Tmpfs.Size != "128m" {
+			t.Errorf("vol[1]: expected tmpfs size '128m', got %+v", task.Volumes[1].Tmpfs)
+		}
+		// nfs volume
+		if task.Volumes[2].Type != "nfs" || !task.Volumes[2].ReadOnly {
+			t.Errorf("vol[2]: got type=%q ro=%v", task.Volumes[2].Type, task.Volumes[2].ReadOnly)
+		}
+	})
 }
 
 func TestReportTaskResult(t *testing.T) {
@@ -888,6 +929,81 @@ func TestProtoToManifest(t *testing.T) {
 		}
 		if svc.Deploy.Replicas != 3 {
 			t.Errorf("expected 3 replicas, got %d", svc.Deploy.Replicas)
+		}
+	})
+
+	t.Run("with volumes", func(t *testing.T) {
+		proto := &banyanpb.Manifest{
+			Name: "my-app",
+			Services: map[string]*banyanpb.ManifestService{
+				"db": {
+					Image: "postgres:15",
+					Volumes: []*banyanpb.VolumeMount{
+						{
+							Type:     "bind",
+							Source:   "/host/data",
+							Target:   "/var/lib/postgresql/data",
+							ReadOnly: false,
+						},
+						{
+							Type:     "volume",
+							Source:   "cache",
+							Target:   "/cache",
+							ReadOnly: true,
+						},
+						{
+							Type:   "tmpfs",
+							Target: "/tmp",
+							Tmpfs:  &banyanpb.TmpfsOpt{Size: "256m"},
+						},
+					},
+				},
+			},
+			Volumes: map[string]*banyanpb.VolumeConfig{
+				"cache": {
+					Driver:     "local",
+					DriverOpts: map[string]string{"type": "nfs"},
+					External:   false,
+					Name:       "my-cache",
+				},
+			},
+		}
+		result := protoToManifest(proto)
+		svc := result.Services["db"]
+		if len(svc.Volumes) != 3 {
+			t.Fatalf("expected 3 volumes, got %d", len(svc.Volumes))
+		}
+		// bind mount
+		if svc.Volumes[0].Type != "bind" || svc.Volumes[0].Source != "/host/data" {
+			t.Errorf("vol[0]: expected bind /host/data, got %+v", svc.Volumes[0])
+		}
+		if svc.Volumes[0].ReadOnly {
+			t.Error("vol[0] should not be read-only")
+		}
+		// named volume
+		if svc.Volumes[1].Type != "volume" || !svc.Volumes[1].ReadOnly {
+			t.Errorf("vol[1]: expected read-only volume, got %+v", svc.Volumes[1])
+		}
+		// tmpfs
+		if svc.Volumes[2].Type != "tmpfs" || svc.Volumes[2].Target != "/tmp" {
+			t.Errorf("vol[2]: expected tmpfs /tmp, got %+v", svc.Volumes[2])
+		}
+		if svc.Volumes[2].Tmpfs == nil || svc.Volumes[2].Tmpfs.Size != "256m" {
+			t.Errorf("vol[2]: expected tmpfs size '256m', got %+v", svc.Volumes[2].Tmpfs)
+		}
+		// top-level volumes
+		if len(result.Volumes) != 1 {
+			t.Fatalf("expected 1 top-level volume, got %d", len(result.Volumes))
+		}
+		vc := result.Volumes["cache"]
+		if vc.Driver != "local" {
+			t.Errorf("expected driver 'local', got %q", vc.Driver)
+		}
+		if vc.Name != "my-cache" {
+			t.Errorf("expected name 'my-cache', got %q", vc.Name)
+		}
+		if vc.DriverOpts["type"] != "nfs" {
+			t.Errorf("expected driver_opts type 'nfs', got %q", vc.DriverOpts["type"])
 		}
 	})
 }

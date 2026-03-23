@@ -383,6 +383,89 @@ func TestManifestToProto(t *testing.T) {
 			t.Error("expected nil Deploy")
 		}
 	})
+
+	t.Run("with volumes including tmpfs", func(t *testing.T) {
+		manifest := types.BanyanManifest{
+			Name: "my-app",
+			Services: map[string]types.ManifestService{
+				"db": {
+					Image: "postgres:15",
+					Volumes: types.VolumeMounts{
+						{Type: "bind", Source: "/host/data", Target: "/data", ReadOnly: false},
+						{Type: "volume", Source: "cache", Target: "/cache", ReadOnly: true},
+						{Type: "tmpfs", Target: "/tmp", Tmpfs: &types.TmpfsOpt{Size: "512m"}},
+						{Type: "nfs", Source: "nfs.internal:/exports", Target: "/nfs"},
+					},
+				},
+			},
+			Volumes: map[string]types.VolumeConfig{
+				"cache": {
+					Driver:     "local",
+					DriverOpts: map[string]string{"type": "nfs", "o": "addr=10.0.0.1"},
+					External:   true,
+					Name:       "my-cache",
+				},
+			},
+		}
+
+		proto := manifestToProto(manifest)
+		svc := proto.Services["db"]
+		if svc == nil {
+			t.Fatal("expected service 'db'")
+		}
+		if len(svc.Volumes) != 4 {
+			t.Fatalf("expected 4 volumes, got %d", len(svc.Volumes))
+		}
+		// bind mount
+		if svc.Volumes[0].Type != "bind" || svc.Volumes[0].Source != "/host/data" {
+			t.Errorf("vol[0]: expected bind /host/data, got type=%q source=%q", svc.Volumes[0].Type, svc.Volumes[0].Source)
+		}
+		if svc.Volumes[0].ReadOnly {
+			t.Error("vol[0] should not be read-only")
+		}
+		// named volume
+		if svc.Volumes[1].Type != "volume" || !svc.Volumes[1].ReadOnly {
+			t.Errorf("vol[1]: expected read-only volume, got type=%q ro=%v", svc.Volumes[1].Type, svc.Volumes[1].ReadOnly)
+		}
+		// tmpfs with size
+		if svc.Volumes[2].Type != "tmpfs" || svc.Volumes[2].Target != "/tmp" {
+			t.Errorf("vol[2]: expected tmpfs /tmp, got type=%q target=%q", svc.Volumes[2].Type, svc.Volumes[2].Target)
+		}
+		if svc.Volumes[2].Tmpfs == nil {
+			t.Fatal("vol[2]: expected non-nil Tmpfs")
+		}
+		if svc.Volumes[2].Tmpfs.Size != "512m" {
+			t.Errorf("vol[2]: expected tmpfs size '512m', got %q", svc.Volumes[2].Tmpfs.Size)
+		}
+		// nfs volume
+		if svc.Volumes[3].Type != "nfs" || svc.Volumes[3].Source != "nfs.internal:/exports" {
+			t.Errorf("vol[3]: expected nfs nfs.internal:/exports, got type=%q source=%q", svc.Volumes[3].Type, svc.Volumes[3].Source)
+		}
+		// volume without tmpfs should have nil Tmpfs
+		if svc.Volumes[0].Tmpfs != nil {
+			t.Error("vol[0]: expected nil Tmpfs for bind mount")
+		}
+		// top-level volumes
+		if len(proto.Volumes) != 1 {
+			t.Fatalf("expected 1 top-level volume, got %d", len(proto.Volumes))
+		}
+		vc := proto.Volumes["cache"]
+		if vc == nil {
+			t.Fatal("expected top-level volume 'cache'")
+		}
+		if vc.Driver != "local" {
+			t.Errorf("expected driver 'local', got %q", vc.Driver)
+		}
+		if !vc.External {
+			t.Error("expected external=true")
+		}
+		if vc.Name != "my-cache" {
+			t.Errorf("expected name 'my-cache', got %q", vc.Name)
+		}
+		if vc.DriverOpts["type"] != "nfs" {
+			t.Errorf("expected driver_opts type 'nfs', got %q", vc.DriverOpts["type"])
+		}
+	})
 }
 
 func TestGrpcLogStreamReader_Read(t *testing.T) {

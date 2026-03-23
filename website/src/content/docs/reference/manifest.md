@@ -26,7 +26,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Entrypoint | `entrypoint:` | `entrypoint:` | Same |
 | Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus). Also used for scheduling decisions. |
 | Healthcheck | `healthcheck:` | `healthcheck:` | Same (test, interval, timeout, retries, start_period, disable) |
-| Volumes | `volumes:` | -- | Planned |
+| Volumes | `volumes:` | `volumes:` | Same (named volumes, bind mounts, tmpfs, NFS). See [Volumes](#volumes). |
 | Networks | `networks:` | -- | Managed automatically |
 | Labels | `labels:` | -- | Not supported — Banyan uses built-in service DNS and load balancing instead of label-based service discovery |
 

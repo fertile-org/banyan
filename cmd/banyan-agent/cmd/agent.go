@@ -405,18 +405,8 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build engine list from config — always use the `engines` field.
-	// Single-engine configs that still use old fields are converted to a 1-entry list.
-	engines := cfg.Agent.Engines
-	if len(engines) == 0 && cfg.Agent.EngineWGPublicKey != "" {
-		enginePort := cfg.Agent.EnginePort
-		if enginePort == "" {
-			enginePort = "50051"
-		}
-		engines = []types.EngineEndpoint{
-			{Address: cfg.Agent.EngineHost + ":" + enginePort, WGPublicKey: cfg.Agent.EngineWGPublicKey},
-		}
-	}
+	// Build engine list from config
+	engines, _ := types.ResolveAgentEngines(&cfg.Agent)
 
 	// Set up WireGuard control tunnel with all engine peers
 	controlTunnelActive := false
@@ -440,16 +430,7 @@ func runAgentStart(cmd *cobra.Command, args []string) error {
 	}
 
 	// Build gRPC endpoint list
-	var grpcEndpoints []string
-	for _, eng := range engines {
-		if controlTunnelActive {
-			_, port, _ := net.SplitHostPort(eng.Address)
-			tunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
-			grpcEndpoints = append(grpcEndpoints, tunnelIP.String()+":"+port)
-		} else {
-			grpcEndpoints = append(grpcEndpoints, eng.Address)
-		}
-	}
+	grpcEndpoints := types.BuildGRPCEndpoints(engines, controlTunnelActive)
 	if len(grpcEndpoints) > 0 {
 		agentEngineEndpoint = grpcEndpoints[0]
 	}

@@ -1,0 +1,15 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 80%
+    patch:
+      default:
+        target: 70%
+
+ignore:
+  - "cmd/*/main.go"           # main() entry points — untestable
+  - "cmd/*/cmd/root.go"       # cobra root commands — untestable
+  - "cmd/banyan-engine/cmd/"  # engine cmd — interactive wizards, subprocess management, WG setup
+  - "cmd/banyan-agent/cmd/"   # agent cmd — interactive wizards, WG tunnel setup
+  - "cmd/banyan-cli/cmd/init.go"  # CLI init wizard — interactive prompts

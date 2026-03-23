@@ -81,7 +81,8 @@ var (
 	containerIDGetter         = getContainerID
 	containerRemover          = removeContainer
 	containerIPGetter         = getContainerIP
-	vpcNetworkEnabled         bool           // set by Agent.Run() after VPC init
+	containerMetricsCollector = collectContainerMetrics // mockable in tests
+	vpcNetworkEnabled         bool                     // set by Agent.Run() after VPC init
 	dnsGatewayIPAddr          string         // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
 	bindMountDataDir          = "/var/lib/banyan/data" // base dir for relative bind mount paths
 	heartbeatInterval         = 15 * time.Second // overridable in tests
@@ -267,10 +268,25 @@ func (a *Agent) processTasks(ctx context.Context) {
 			a.logger().Warn("Failed to report running for task", "task_id", pbTask.Id, "error", err)
 		}
 
-		// Remove proxy backends before stopping a container
-		if pbTask.Type == types.TaskTypeStopAndRemove && a.proxy != nil {
-			if removeErr := a.proxy.RemoveBackend(pbTask.ContainerName); removeErr != nil {
-				a.logger().Warn("Failed to remove proxy backend", "container", pbTask.ContainerName, "error", removeErr)
+		// Graceful drain before stopping a container:
+		// 1. Remove from proxy (no new traffic)
+		// 2. Remove from DNS
+		// 3. Wait drain period for in-flight requests
+		if pbTask.Type == types.TaskTypeStopAndRemove {
+			if a.proxy != nil {
+				if removeErr := a.proxy.RemoveBackend(pbTask.ContainerName); removeErr != nil {
+					a.logger().Warn("Failed to remove proxy backend", "container", pbTask.ContainerName, "error", removeErr)
+				}
+			}
+			if a.dnsManager != nil && pbTask.ServiceName != "" && pbTask.DeploymentName != "" {
+				fqdn := pbTask.ServiceName + "." + pbTask.DeploymentName + ".internal"
+				a.dnsManager.UnregisterHost(ctx, fqdn) //nolint:errcheck // best-effort
+			}
+			// Wait drain period (default 5s) for in-flight requests to complete
+			drainPeriod := 5 * time.Second
+			select {
+			case <-time.After(drainPeriod):
+			case <-ctx.Done():
 			}
 		}
 
@@ -698,6 +714,78 @@ func (a *Agent) containerHealthLoop(ctx context.Context) {
 	}
 }
 
+// ContainerMetrics holds per-container resource usage.
+type ContainerMetrics struct {
+	CPUPercent   float64
+	MemoryUsed  uint64
+	MemoryLimit uint64
+}
+
+// collectContainerMetrics runs "nerdctl stats --no-stream" and parses per-container metrics.
+func collectContainerMetrics(ctx context.Context, names []string) map[string]ContainerMetrics {
+	if len(names) == 0 {
+		return nil
+	}
+	args := append([]string{"stats", "--no-stream", "--format",
+		"{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"}, names...)
+	cmd := exec.CommandContext(ctx, "nerdctl", args...)
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return nil
+	}
+
+	result := make(map[string]ContainerMetrics)
+	for _, line := range strings.Split(stdout.String(), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 3)
+		if len(parts) < 3 {
+			continue
+		}
+		name := strings.TrimSpace(parts[0])
+		cpuStr := strings.TrimSuffix(strings.TrimSpace(parts[1]), "%")
+		cpuPercent, _ := strconv.ParseFloat(cpuStr, 64)
+
+		// Parse memory: "123.4MiB / 1.5GiB" or "123456 / 987654"
+		memParts := strings.SplitN(parts[2], "/", 2)
+		memUsed := parseMemoryValue(strings.TrimSpace(memParts[0]))
+		var memLimit uint64
+		if len(memParts) > 1 {
+			memLimit = parseMemoryValue(strings.TrimSpace(memParts[1]))
+		}
+
+		result[name] = ContainerMetrics{
+			CPUPercent:  cpuPercent,
+			MemoryUsed:  memUsed,
+			MemoryLimit: memLimit,
+		}
+	}
+	return result
+}
+
+// parseMemoryValue parses memory strings like "123.4MiB", "1.5GiB", "123456".
+func parseMemoryValue(s string) uint64 {
+	s = strings.TrimSpace(s)
+	multiplier := uint64(1)
+	if strings.HasSuffix(s, "GiB") {
+		s = strings.TrimSuffix(s, "GiB")
+		multiplier = 1024 * 1024 * 1024
+	} else if strings.HasSuffix(s, "MiB") {
+		s = strings.TrimSuffix(s, "MiB")
+		multiplier = 1024 * 1024
+	} else if strings.HasSuffix(s, "KiB") {
+		s = strings.TrimSuffix(s, "KiB")
+		multiplier = 1024
+	} else if strings.HasSuffix(s, "B") {
+		s = strings.TrimSuffix(s, "B")
+	}
+	val, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	return uint64(val * float64(multiplier)) //nolint:gosec // memory values are always positive
+}
+
 func (a *Agent) checkContainerHealth(ctx context.Context) {
 	if !a.connected.Load() {
 		return
@@ -706,6 +794,13 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 	if len(tracked) == 0 {
 		return
 	}
+
+	// Collect per-container resource metrics
+	var names []string
+	for _, c := range tracked {
+		names = append(names, c.containerName)
+	}
+	metrics := containerMetricsCollector(ctx, names)
 
 	var statuses []*banyanpb.ContainerStatus
 	for _, c := range tracked {
@@ -717,6 +812,12 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 		}
 		if hs := containerHealthStatusFunc(ctx, c.containerName); hs != "" {
 			cs.HealthStatus = hs
+		}
+		// Add resource metrics if available
+		if m, ok := metrics[c.containerName]; ok {
+			cs.CpuPercent = m.CPUPercent
+			cs.MemoryUsedBytes = m.MemoryUsed
+			cs.MemoryLimitBytes = m.MemoryLimit
 		}
 		statuses = append(statuses, cs)
 	}

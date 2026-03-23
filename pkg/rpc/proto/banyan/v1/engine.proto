@@ -18,9 +18,22 @@ service EngineService {
   rpc GetLogs(GetLogsRequest) returns (stream GetLogsResponse);
   rpc GetInfo(GetInfoRequest) returns (GetInfoResponse);
   rpc Health(HealthRequest) returns (HealthResponse);
+  rpc Scale(ScaleRequest) returns (ScaleResponse);
 
   // Dashboard RPCs
   rpc GetDashboardData(GetDashboardDataRequest) returns (GetDashboardDataResponse);
+}
+
+message ScaleRequest {
+  string name = 1;                      // deployment name
+  map<string, int32> replicas = 2;      // service → target replica count
+  repeated string tags = 3;
+}
+
+message ScaleResponse {
+  string deployment_id = 1;
+  map<string, int32> previous = 2;      // service → old count
+  map<string, int32> current = 3;       // service → new count
 }
 
 // --- Shared messages ---
@@ -117,6 +130,9 @@ message ContainerStatus {
   string status = 2;
   string ip = 3;                              // container's overlay IP
   string health_status = 4;                   // "", "starting", "healthy", "unhealthy"
+  double cpu_percent = 5;                     // 0.0-100.0 (from nerdctl stats)
+  uint64 memory_used_bytes = 6;
+  uint64 memory_limit_bytes = 7;
 }
 
 message ServiceBackend {
@@ -228,6 +244,15 @@ message ManifestDeploy {
   int32 replicas = 1;
   ManifestPlacement placement = 2;
   ManifestResources resources = 3;
+  ManifestAutoscale autoscale = 4;
+  string stop_grace_period = 5;
+}
+
+message ManifestAutoscale {
+  int32 min = 1;
+  int32 max = 2;
+  int32 target_cpu = 3;      // percent (e.g., 70)
+  string cooldown = 4;       // duration (e.g., "60s")
 }
 
 message ManifestResources {

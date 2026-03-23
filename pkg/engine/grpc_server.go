@@ -580,6 +580,14 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 	statusMap := make(map[string]string, len(req.Containers))
 	ipMap := make(map[string]string, len(req.Containers))
 	healthMap := make(map[string]string, len(req.Containers))
+	type containerMetrics struct {
+		cpuPercent   float64
+		memUsed      uint64
+		memLimit     uint64
+		hasMetrics   bool
+	}
+	metricsMap := make(map[string]containerMetrics)
+
 	for _, c := range req.Containers {
 		statusMap[c.ContainerName] = c.Status
 		if c.Ip != "" {
@@ -587,6 +595,14 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		}
 		if c.HealthStatus != "" {
 			healthMap[c.ContainerName] = c.HealthStatus
+		}
+		if c.CpuPercent > 0 || c.MemoryUsedBytes > 0 {
+			metricsMap[c.ContainerName] = containerMetrics{
+				cpuPercent: c.CpuPercent,
+				memUsed:    c.MemoryUsedBytes,
+				memLimit:   c.MemoryLimitBytes,
+				hasMetrics: true,
+			}
 		}
 	}
 
@@ -616,6 +632,11 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 			}
 			if hs, hasHS := healthMap[task.ContainerName]; hasHS {
 				task.HealthStatus = hs
+			}
+			if m, hasM := metricsMap[task.ContainerName]; hasM {
+				task.CPUPercent = m.cpuPercent
+				task.MemoryUsedBytes = m.memUsed
+				task.MemoryLimitBytes = m.memLimit
 			}
 			if err := s.store.Save(ctx, key, &task); err != nil {
 				s.logger().Warn("Failed to save container health", "container", task.ContainerName, "error", err)
@@ -975,6 +996,130 @@ func (s *engineGRPCServer) GetInfo(ctx context.Context, req *banyanpb.GetInfoReq
 
 func (s *engineGRPCServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
 	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
+// Scale adjusts the replica count of services in a running deployment without
+// blue-green redeployment. Adds new tasks (scale up) or creates stop tasks (scale down).
+func (s *engineGRPCServer) Scale(ctx context.Context, req *banyanpb.ScaleRequest) (*banyanpb.ScaleResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "name is required")
+	}
+	if len(req.Replicas) == 0 {
+		return nil, status.Error(codes.InvalidArgument, "at least one service replica count is required")
+	}
+
+	tags := types.SortTags(req.Tags)
+	deployment, deploymentKey, err := s.findRunningDeploymentByName(ctx, req.Name, tags)
+	if err != nil {
+		return nil, err
+	}
+
+	agents, agentErr := ListAvailableAgents(ctx, s.store, tags)
+	if agentErr != nil || len(agents) == 0 {
+		return nil, status.Error(codes.FailedPrecondition, "no available agents")
+	}
+
+	previous := make(map[string]int32)
+	current := make(map[string]int32)
+
+	for svcName, targetReplicas := range req.Replicas {
+		svc, ok := deployment.Services[svcName]
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q not found in deployment %q", svcName, req.Name)
+		}
+
+		// Count current running tasks for this service
+		allTasks := types.CollectDeploymentTasks(ctx, s.store, deployment.ID)
+		var runningTasks []types.TaskRecord
+		for _, t := range allTasks {
+			if t.ServiceName == svcName && t.Type == types.TaskTypeCreateAndStart && t.Status == types.StatusCompleted {
+				runningTasks = append(runningTasks, t)
+			}
+		}
+
+		currentCount := int32(len(runningTasks)) //nolint:gosec // count is small
+		previous[svcName] = currentCount
+		target := targetReplicas
+
+		if target > currentCount {
+			// Scale up: create new tasks
+			for i := currentCount; i < target; i++ {
+				agent := agents[int(i)%len(agents)]
+				now := time.Now()
+				task := &types.TaskRecord{
+					ID:                fmt.Sprintf("%s-%s-%d", deployment.ID, svcName, i),
+					DeploymentID:      deployment.ID,
+					DeploymentName:    deployment.Name,
+					ServiceName:       svcName,
+					ReplicaIndex:      int(i),
+					AgentID:           agent.Name,
+					Type:              types.TaskTypeCreateAndStart,
+					Status:            types.StatusPending,
+					Image:             svc.Image,
+					ContainerName:     fmt.Sprintf("%s-%s-%d", deployment.Name, svcName, i),
+					Ports:             svc.Ports,
+					Environment:       svc.Environment,
+					Command:           svc.Command,
+					Entrypoint:        svc.Entrypoint,
+					Restart:           svc.Restart,
+					MemoryLimit:       svc.MemoryLimit,
+					CPULimit:          svc.CPULimit,
+					MemoryReservation: svc.MemoryReservation,
+					Healthcheck:       svc.Healthcheck,
+					Volumes:           svc.Volumes,
+					CreatedAt:         now,
+					UpdatedAt:         now,
+				}
+				taskKey := types.KeyTasks + agent.Name + "/" + task.ID
+				if saveErr := s.store.Save(ctx, taskKey, task); saveErr != nil {
+					return nil, status.Errorf(codes.Internal, "failed to create scale-up task: %v", saveErr)
+				}
+			}
+		} else if target < currentCount {
+			// Scale down: create stop tasks for excess replicas (highest index first)
+			for i := currentCount - 1; i >= target; i-- {
+				if int(i) >= len(runningTasks) {
+					continue
+				}
+				orig := runningTasks[i]
+				stopTask := &types.TaskRecord{
+					ID:            orig.ID + "-stop",
+					DeploymentID:  orig.DeploymentID,
+					ServiceName:   orig.ServiceName,
+					ReplicaIndex:  orig.ReplicaIndex,
+					AgentID:       orig.AgentID,
+					Type:          types.TaskTypeStopAndRemove,
+					Status:        types.StatusPending,
+					ContainerName: orig.ContainerName,
+					CreatedAt:     time.Now(),
+					UpdatedAt:     time.Now(),
+				}
+				taskKey := types.KeyTasks + orig.AgentID + "/" + stopTask.ID
+				if saveErr := s.store.Save(ctx, taskKey, stopTask); saveErr != nil {
+					return nil, status.Errorf(codes.Internal, "failed to create scale-down task: %v", saveErr)
+				}
+			}
+		}
+
+		// Update replica count in deployment record
+		svc.Replicas = int(target)
+		deployment.Services[svcName] = svc
+		current[svcName] = target
+	}
+
+	// Save updated deployment
+	deployment.UpdatedAt = time.Now()
+	if saveErr := s.store.Save(ctx, deploymentKey, deployment); saveErr != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update deployment: %v", saveErr)
+	}
+
+	s.triggerSchedule()
+
+	return &banyanpb.ScaleResponse{
+		DeploymentId: deployment.ID,
+		Previous:     previous,
+		Current:      current,
+	}, nil
 }
 
 // teardownDeployment creates stop_and_remove tasks for running containers and sets

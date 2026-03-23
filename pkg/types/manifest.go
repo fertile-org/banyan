@@ -268,9 +268,19 @@ type ManifestHealthcheck struct {
 
 // ManifestDeploy represents deploy configuration (matches Docker Compose).
 type ManifestDeploy struct {
-	Placement *ManifestPlacement `yaml:"placement,omitempty"`
-	Resources *ManifestResources `yaml:"resources,omitempty"`
-	Replicas  int                `yaml:"replicas,omitempty"`
+	Placement       *ManifestPlacement `yaml:"placement,omitempty"`
+	Resources       *ManifestResources `yaml:"resources,omitempty"`
+	Autoscale       *ManifestAutoscale `yaml:"autoscale,omitempty"`
+	StopGracePeriod string             `yaml:"stop_grace_period,omitempty"` // e.g., "10s"
+	Replicas        int                `yaml:"replicas,omitempty"`
+}
+
+// ManifestAutoscale configures automatic horizontal scaling for a service.
+type ManifestAutoscale struct {
+	Cooldown  string `yaml:"cooldown,omitempty"`   // min time between scale events (e.g., "60s")
+	Min       int    `yaml:"min"`                  // minimum replicas
+	Max       int    `yaml:"max"`                  // maximum replicas
+	TargetCPU int    `yaml:"target_cpu,omitempty"` // target CPU % (e.g., 70)
 }
 
 // ManifestResources represents resource limits and reservations.

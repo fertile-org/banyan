@@ -819,6 +819,195 @@ volumes:
 	}
 }
 
+func TestParseNFSOpts(t *testing.T) {
+	tests := []struct {
+		name          string
+		input         string
+		wantAddr      string
+		wantRemaining string
+	}{
+		{
+			name:          "full opts with addr and extras",
+			input:         "addr=192.168.1.100,vers=4,soft",
+			wantAddr:      "192.168.1.100",
+			wantRemaining: "vers=4,soft",
+		},
+		{
+			name:          "addr only",
+			input:         "addr=10.0.0.1",
+			wantAddr:      "10.0.0.1",
+			wantRemaining: "",
+		},
+		{
+			name:          "no addr",
+			input:         "vers=4,soft",
+			wantAddr:      "",
+			wantRemaining: "vers=4,soft",
+		},
+		{
+			name:          "empty string",
+			input:         "",
+			wantAddr:      "",
+			wantRemaining: "",
+		},
+		{
+			name:          "addr in middle",
+			input:         "vers=4,addr=nfs.internal,soft",
+			wantAddr:      "nfs.internal",
+			wantRemaining: "vers=4,soft",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			addr, remaining := parseNFSOpts(tt.input)
+			if addr != tt.wantAddr {
+				t.Errorf("addr: got %q, want %q", addr, tt.wantAddr)
+			}
+			if remaining != tt.wantRemaining {
+				t.Errorf("remaining: got %q, want %q", remaining, tt.wantRemaining)
+			}
+		})
+	}
+}
+
+func TestResolveManifestVolumes(t *testing.T) {
+	t.Run("NFS named volume resolved", func(t *testing.T) {
+		manifest := BanyanManifest{
+			Name: "test-app",
+			Services: map[string]ManifestService{
+				"db": {
+					Image: "postgres",
+					Volumes: VolumeMounts{
+						{Type: "volume", Source: "shared-data", Target: "/data"},
+					},
+				},
+			},
+			Volumes: map[string]VolumeConfig{
+				"shared-data": {
+					Driver: "local",
+					DriverOpts: map[string]string{
+						"type":   "nfs",
+						"o":      "addr=nfs.internal,vers=4",
+						"device": ":/exports/data",
+					},
+				},
+			},
+		}
+		ResolveManifestVolumes("", &manifest)
+		vol := manifest.Services["db"].Volumes[0]
+		if vol.Type != "nfs" {
+			t.Errorf("expected type 'nfs', got %q", vol.Type)
+		}
+		if vol.Source != "nfs.internal:/exports/data" {
+			t.Errorf("expected source 'nfs.internal:/exports/data', got %q", vol.Source)
+		}
+		if vol.Tmpfs == nil || vol.Tmpfs.Size != "vers=4" {
+			t.Errorf("expected remaining opts in Tmpfs.Size='vers=4', got %+v", vol.Tmpfs)
+		}
+	})
+
+	t.Run("NFS volume no extra opts", func(t *testing.T) {
+		manifest := BanyanManifest{
+			Name: "test-app",
+			Services: map[string]ManifestService{
+				"db": {
+					Image: "postgres",
+					Volumes: VolumeMounts{
+						{Type: "volume", Source: "nfs-vol", Target: "/data"},
+					},
+				},
+			},
+			Volumes: map[string]VolumeConfig{
+				"nfs-vol": {
+					Driver: "local",
+					DriverOpts: map[string]string{
+						"type":   "nfs",
+						"o":      "addr=10.0.0.1",
+						"device": ":/share",
+					},
+				},
+			},
+		}
+		ResolveManifestVolumes("", &manifest)
+		vol := manifest.Services["db"].Volumes[0]
+		if vol.Type != "nfs" {
+			t.Errorf("expected type 'nfs', got %q", vol.Type)
+		}
+		if vol.Source != "10.0.0.1:/share" {
+			t.Errorf("expected source '10.0.0.1:/share', got %q", vol.Source)
+		}
+		if vol.Tmpfs != nil {
+			t.Errorf("expected nil Tmpfs (no extra opts), got %+v", vol.Tmpfs)
+		}
+	})
+
+	t.Run("non-NFS named volume unchanged", func(t *testing.T) {
+		manifest := BanyanManifest{
+			Name: "test-app",
+			Services: map[string]ManifestService{
+				"db": {
+					Image: "postgres",
+					Volumes: VolumeMounts{
+						{Type: "volume", Source: "local-data", Target: "/data"},
+					},
+				},
+			},
+			Volumes: map[string]VolumeConfig{
+				"local-data": {Driver: "local"},
+			},
+		}
+		ResolveManifestVolumes("", &manifest)
+		vol := manifest.Services["db"].Volumes[0]
+		if vol.Type != "volume" {
+			t.Errorf("expected type 'volume', got %q", vol.Type)
+		}
+		if vol.Source != "local-data" {
+			t.Errorf("expected source 'local-data', got %q", vol.Source)
+		}
+	})
+
+	t.Run("bind mount unchanged", func(t *testing.T) {
+		manifest := BanyanManifest{
+			Name: "test-app",
+			Services: map[string]ManifestService{
+				"web": {
+					Image: "nginx",
+					Volumes: VolumeMounts{
+						{Type: "bind", Source: "/host/path", Target: "/container/path", ReadOnly: true},
+					},
+				},
+			},
+		}
+		ResolveManifestVolumes("", &manifest)
+		vol := manifest.Services["web"].Volumes[0]
+		if vol.Type != "bind" {
+			t.Errorf("expected type 'bind', got %q", vol.Type)
+		}
+		if vol.Source != "/host/path" {
+			t.Errorf("expected source '/host/path', got %q", vol.Source)
+		}
+	})
+
+	t.Run("no top-level volumes", func(t *testing.T) {
+		manifest := BanyanManifest{
+			Name: "test-app",
+			Services: map[string]ManifestService{
+				"web": {
+					Image: "nginx",
+					Volumes: VolumeMounts{
+						{Type: "volume", Source: "data", Target: "/data"},
+					},
+				},
+			},
+		}
+		ResolveManifestVolumes("", &manifest)
+		vol := manifest.Services["web"].Volumes[0]
+		if vol.Type != "volume" {
+			t.Errorf("expected type 'volume' unchanged, got %q", vol.Type)
+		}
+	})
+}
+
 func TestVolumeMount_BuildServiceRecords(t *testing.T) {
 	manifest := map[string]ManifestService{
 		"db": {

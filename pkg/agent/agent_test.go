@@ -2122,3 +2122,112 @@ func TestNewEngineClientMulti_FailoverWrapping(t *testing.T) {
 		}
 	}
 }
+
+func TestPbTaskToLocal_Volumes(t *testing.T) {
+	t.Run("converts volumes from proto", func(t *testing.T) {
+		pb := &banyanpb.TaskRecord{
+			Id:            "task-1",
+			DeploymentId:  "deploy-1",
+			ServiceName:   "db",
+			AgentId:       "agent-1",
+			Type:          types.TaskTypeCreateAndStart,
+			Status:        types.StatusPending,
+			Image:         "postgres:15",
+			ContainerName: "my-app-db-0",
+			Volumes: []*banyanpb.VolumeMount{
+				{
+					Type:     "bind",
+					Source:   "/host/data",
+					Target:   "/var/lib/postgresql/data",
+					ReadOnly: false,
+				},
+				{
+					Type:     "volume",
+					Source:   "cache",
+					Target:   "/cache",
+					ReadOnly: true,
+				},
+			},
+		}
+
+		task := pbTaskToLocal(pb)
+
+		if len(task.Volumes) != 2 {
+			t.Fatalf("expected 2 volumes, got %d", len(task.Volumes))
+		}
+		if task.Volumes[0].Type != "bind" {
+			t.Errorf("vol[0] type: got %q, want 'bind'", task.Volumes[0].Type)
+		}
+		if task.Volumes[0].Source != "/host/data" {
+			t.Errorf("vol[0] source: got %q, want '/host/data'", task.Volumes[0].Source)
+		}
+		if task.Volumes[0].Target != "/var/lib/postgresql/data" {
+			t.Errorf("vol[0] target: got %q, want '/var/lib/postgresql/data'", task.Volumes[0].Target)
+		}
+		if task.Volumes[0].ReadOnly {
+			t.Error("vol[0] should not be read-only")
+		}
+		if task.Volumes[1].Type != "volume" {
+			t.Errorf("vol[1] type: got %q, want 'volume'", task.Volumes[1].Type)
+		}
+		if !task.Volumes[1].ReadOnly {
+			t.Error("vol[1] should be read-only")
+		}
+	})
+
+	t.Run("converts volumes with tmpfs", func(t *testing.T) {
+		pb := &banyanpb.TaskRecord{
+			Id:            "task-2",
+			DeploymentId:  "deploy-1",
+			ServiceName:   "web",
+			AgentId:       "agent-1",
+			Type:          types.TaskTypeCreateAndStart,
+			Status:        types.StatusPending,
+			Image:         "nginx",
+			ContainerName: "my-app-web-0",
+			Volumes: []*banyanpb.VolumeMount{
+				{
+					Type:   "tmpfs",
+					Target: "/tmp",
+					Tmpfs:  &banyanpb.TmpfsOpt{Size: "512m"},
+				},
+			},
+		}
+
+		task := pbTaskToLocal(pb)
+
+		if len(task.Volumes) != 1 {
+			t.Fatalf("expected 1 volume, got %d", len(task.Volumes))
+		}
+		if task.Volumes[0].Type != "tmpfs" {
+			t.Errorf("type: got %q, want 'tmpfs'", task.Volumes[0].Type)
+		}
+		if task.Volumes[0].Target != "/tmp" {
+			t.Errorf("target: got %q, want '/tmp'", task.Volumes[0].Target)
+		}
+		if task.Volumes[0].Tmpfs == nil {
+			t.Fatal("expected non-nil Tmpfs")
+		}
+		if task.Volumes[0].Tmpfs.Size != "512m" {
+			t.Errorf("tmpfs size: got %q, want '512m'", task.Volumes[0].Tmpfs.Size)
+		}
+	})
+
+	t.Run("no volumes", func(t *testing.T) {
+		pb := &banyanpb.TaskRecord{
+			Id:            "task-3",
+			DeploymentId:  "deploy-1",
+			ServiceName:   "web",
+			AgentId:       "agent-1",
+			Type:          types.TaskTypeCreateAndStart,
+			Status:        types.StatusPending,
+			Image:         "nginx",
+			ContainerName: "my-app-web-0",
+		}
+
+		task := pbTaskToLocal(pb)
+		if len(task.Volumes) != 0 {
+			t.Errorf("expected 0 volumes, got %d", len(task.Volumes))
+		}
+	})
+}

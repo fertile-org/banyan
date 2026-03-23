@@ -266,11 +266,41 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 			}
 			ms.Deploy = md
 		}
+		// Volume mounts
+		for _, vol := range svc.Volumes {
+			pbVol := &banyanpb.VolumeMount{
+				Type:     vol.Type,
+				Source:   vol.Source,
+				Target:   vol.Target,
+				ReadOnly: vol.ReadOnly,
+			}
+			if vol.Tmpfs != nil {
+				pbVol.Tmpfs = &banyanpb.TmpfsOpt{Size: vol.Tmpfs.Size}
+			}
+			ms.Volumes = append(ms.Volumes, pbVol)
+		}
+
 		services[name] = ms
 	}
+
+	// Top-level volume configs
+	var pbVolumes map[string]*banyanpb.VolumeConfig
+	if len(m.Volumes) > 0 {
+		pbVolumes = make(map[string]*banyanpb.VolumeConfig, len(m.Volumes))
+		for name, vc := range m.Volumes {
+			pbVolumes[name] = &banyanpb.VolumeConfig{
+				Driver:     vc.Driver,
+				DriverOpts: vc.DriverOpts,
+				External:   vc.External,
+				Name:       vc.Name,
+			}
+		}
+	}
+
 	return &banyanpb.Manifest{
 		Name:     m.Name,
 		Version:  m.Version,
 		Services: services,
+		Volumes:  pbVolumes,
 	}
 }

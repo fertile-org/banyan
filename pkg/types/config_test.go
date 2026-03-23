@@ -700,3 +700,139 @@ func TestSaveConfig_MkdirAllError(t *testing.T) {
 		t.Fatal("expected error when MkdirAll fails")
 	}
 }
+
+func TestGetConfigEngineEndpoint_EnginesList(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+	cfg := BanyanConfig{
+		Agent: AgentConfig{
+			Engines: []EngineEndpoint{
+				{Address: "10.0.0.1:50051", WGPublicKey: "key1"},
+				{Address: "10.0.0.2:50051", WGPublicKey: "key2"},
+			},
+		},
+	}
+	if err := SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	result := GetConfigEngineEndpoint(cfgPath)
+	if result != "10.0.0.1:50051" {
+		t.Errorf("expected first engine address, got %s", result)
+	}
+}
+
+func TestGetCLIEngineEndpoint_EnginesList(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+	cfg := BanyanConfig{
+		CLI: CLIConfig{
+			Engines: []EngineEndpoint{
+				{Address: "10.0.0.1:50051", WGPublicKey: "key1"},
+				{Address: "10.0.0.2:50051", WGPublicKey: "key2"},
+			},
+		},
+	}
+	if err := SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	result := GetCLIEngineEndpoint(cfgPath)
+	if result != "10.0.0.1:50051" {
+		t.Errorf("expected first engine address, got %s", result)
+	}
+}
+
+func TestLoadWhitelistedKeys(t *testing.T) {
+	t.Run("returns nil for nonexistent directory", func(t *testing.T) {
+		keys, err := LoadWhitelistedKeys("/nonexistent/path")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if keys != nil {
+			t.Errorf("expected nil keys, got %v", keys)
+		}
+	})
+
+	t.Run("loads keys from .pub files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(filepath.Join(tmpDir, "worker-1.pub"), []byte("pubkey1\n"), 0o600)
+		os.WriteFile(filepath.Join(tmpDir, "worker-2.pub"), []byte("pubkey2\n"), 0o600)
+		os.WriteFile(filepath.Join(tmpDir, "readme.txt"), []byte("not a key"), 0o600)
+
+		keys, err := LoadWhitelistedKeys(tmpDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(keys) != 2 {
+			t.Fatalf("expected 2 keys, got %d", len(keys))
+		}
+		if keys["pubkey1"] != "worker-1" {
+			t.Errorf("expected pubkey1 -> worker-1, got %s", keys["pubkey1"])
+		}
+		if keys["pubkey2"] != "worker-2" {
+			t.Errorf("expected pubkey2 -> worker-2, got %s", keys["pubkey2"])
+		}
+	})
+
+	t.Run("skips empty files", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.WriteFile(filepath.Join(tmpDir, "empty.pub"), []byte(""), 0o600)
+		os.WriteFile(filepath.Join(tmpDir, "valid.pub"), []byte("realkey"), 0o600)
+
+		keys, err := LoadWhitelistedKeys(tmpDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(keys) != 1 {
+			t.Errorf("expected 1 key (empty skipped), got %d", len(keys))
+		}
+	})
+
+	t.Run("skips directories", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		os.MkdirAll(filepath.Join(tmpDir, "subdir.pub"), 0o700)
+		os.WriteFile(filepath.Join(tmpDir, "valid.pub"), []byte("key"), 0o600)
+
+		keys, err := LoadWhitelistedKeys(tmpDir)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(keys) != 1 {
+			t.Errorf("expected 1 key (dir skipped), got %d", len(keys))
+		}
+	})
+}
+
+func TestEngineEndpoint_Serialization(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+	cfg := BanyanConfig{
+		Agent: AgentConfig{
+			AgentName: "test",
+			Engines: []EngineEndpoint{
+				{Address: "10.0.0.1:50051", WGPublicKey: "abc123"},
+			},
+		},
+	}
+	if err := SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if len(loaded.Agent.Engines) != 1 {
+		t.Fatalf("expected 1 engine, got %d", len(loaded.Agent.Engines))
+	}
+	if loaded.Agent.Engines[0].Address != "10.0.0.1:50051" {
+		t.Errorf("expected address 10.0.0.1:50051, got %s", loaded.Agent.Engines[0].Address)
+	}
+	if loaded.Agent.Engines[0].WGPublicKey != "abc123" {
+		t.Errorf("expected wg key abc123, got %s", loaded.Agent.Engines[0].WGPublicKey)
+	}
+}

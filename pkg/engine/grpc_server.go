@@ -527,6 +527,15 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 				Disable:     task.Healthcheck.Disable,
 			}
 		}
+		for _, vol := range task.Volumes {
+			pbVol := &banyanpb.VolumeMount{
+				Type: vol.Type, Source: vol.Source, Target: vol.Target, ReadOnly: vol.ReadOnly,
+			}
+			if vol.Tmpfs != nil {
+				pbVol.Tmpfs = &banyanpb.TmpfsOpt{Size: vol.Tmpfs.Size}
+			}
+			pbTask.Volumes = append(pbTask.Volumes, pbVol)
+		}
 		tasks = append(tasks, pbTask)
 	}
 
@@ -1379,12 +1388,42 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 			}
 			ms.Deploy = md
 		}
+		// Volume mounts
+		for _, vol := range svc.Volumes {
+			vm := types.VolumeMount{
+				Type:     vol.Type,
+				Source:   vol.Source,
+				Target:   vol.Target,
+				ReadOnly: vol.ReadOnly,
+			}
+			if vol.Tmpfs != nil {
+				vm.Tmpfs = &types.TmpfsOpt{Size: vol.Tmpfs.Size}
+			}
+			ms.Volumes = append(ms.Volumes, vm)
+		}
+
 		services[name] = ms
 	}
+
+	// Top-level volume configs
+	var volumes map[string]types.VolumeConfig
+	if len(m.Volumes) > 0 {
+		volumes = make(map[string]types.VolumeConfig, len(m.Volumes))
+		for name, vc := range m.Volumes {
+			volumes[name] = types.VolumeConfig{
+				Driver:     vc.Driver,
+				DriverOpts: vc.DriverOpts,
+				External:   vc.External,
+				Name:       vc.Name,
+			}
+		}
+	}
+
 	return types.BanyanManifest{
 		Name:     m.Name,
 		Version:  m.Version,
 		Services: services,
+		Volumes:  volumes,
 	}
 }
 

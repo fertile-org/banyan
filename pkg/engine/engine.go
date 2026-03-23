@@ -14,8 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-containerregistry/pkg/registry"
-
 	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/metrics"
 	"github.com/fertile-org/banyan/pkg/storage"
@@ -190,33 +188,11 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}
 
-	// Start OCI registry — either use an external URL (managed subprocess or
-	// user-provided) or fall back to the in-memory registry for dev/test.
-	if e.opts.ExternalRegistryURL != "" {
-		e.registryURL = e.opts.ExternalRegistryURL
-	} else {
-		// Fallback: start in-memory registry (dev/test when Distribution binary is unavailable)
-		registryBindAddr := "127.0.0.1"
-		if e.opts.ControlTunnelActive {
-			registryBindAddr = e.opts.TunnelIP
-		}
-		e.logger().Info("Starting in-memory OCI registry", "bind", registryBindAddr, "port", e.opts.RegistryPort)
-		registryListener, startErr := startRegistry(ctx, registryBindAddr, e.opts.RegistryPort)
-		if startErr != nil {
-			return fmt.Errorf("failed to start registry: %w", startErr)
-		}
-		_ = registryListener
-
-		registryHost := registryBindAddr
-		if registryHost == "127.0.0.1" || registryHost == "0.0.0.0" {
-			engineIP, ipErr := DetermineEngineIP()
-			if ipErr != nil {
-				return fmt.Errorf("failed to determine engine IP: %w", ipErr)
-			}
-			registryHost = engineIP
-		}
-		e.registryURL = fmt.Sprintf("%s:%s", registryHost, e.opts.RegistryPort)
+	// Registry URL is set by the cmd layer (managed Distribution subprocess or external).
+	if e.opts.ExternalRegistryURL == "" {
+		return fmt.Errorf("no registry URL configured. Run 'banyan-engine init' to set up a managed or external registry")
 	}
+	e.registryURL = e.opts.ExternalRegistryURL
 	if saveErr := e.store.Save(ctx, types.KeyRegistry, e.registryURL); saveErr != nil {
 		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
@@ -939,35 +915,6 @@ func ListAvailableAgents(ctx context.Context, store storage.StateStore, deployme
 		}
 	}
 	return agents, nil
-}
-
-// --- Registry helpers ---
-
-func startRegistry(ctx context.Context, bindAddr, port string) (net.Listener, error) {
-	regLog := logging.New("engine.registry")
-	handler := registry.New(registry.Logger(regLog.StdLogger()))
-
-	listenAddr := bindAddr + ":" + port
-	listener, err := net.Listen("tcp", listenAddr)
-	if err != nil {
-		return nil, fmt.Errorf("failed to listen on port %s: %w", port, err)
-	}
-
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
-	go func() {
-		if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			logging.Error("Registry server error", "error", err)
-		}
-	}()
-
-	go func() {
-		<-ctx.Done()
-		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer shutdownCancel()
-		_ = server.Shutdown(shutdownCtx)
-	}()
-
-	return listener, nil
 }
 
 // DetermineEngineIP returns the engine's non-loopback IPv4 address.

@@ -1257,38 +1257,6 @@ func TestSchedulePendingDeployment_SaveDeploymentError(t *testing.T) {
 	}
 }
 
-// --- Tests for startRegistry ---
-
-func TestStartRegistry(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Use port 0 to let OS assign a random port
-	lis, err := startRegistry(ctx, "127.0.0.1", "0")
-	if err != nil {
-		t.Fatalf("startRegistry failed: %v", err)
-	}
-	if lis == nil {
-		t.Fatal("expected non-nil listener")
-	}
-
-	addr := lis.Addr().String()
-	if addr == "" {
-		t.Error("expected non-empty listener address")
-	}
-
-	cancel()
-}
-
-func TestStartRegistry_InvalidPort(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	_, err := startRegistry(ctx, "127.0.0.1", "99999")
-	if err == nil {
-		t.Fatal("expected error for invalid port")
-	}
-}
-
 // --- Tests for findNonLoopbackIPv4 ---
 
 // mockAddr implements net.Addr but is NOT a *net.IPNet.
@@ -2343,6 +2311,124 @@ func TestNewWithEngineID(t *testing.T) {
 		defer eng.Close()
 		if eng.EngineID() == "" {
 			t.Error("expected auto-generated engine ID")
+		}
+	})
+}
+
+func TestGenerateEngineIDUniqueness(t *testing.T) {
+	t.Run("100 IDs are all unique", func(t *testing.T) {
+		seen := make(map[string]bool)
+		for i := 0; i < 100; i++ {
+			id := GenerateEngineID()
+			if seen[id] {
+				t.Fatalf("duplicate engine ID %q at iteration %d", id, i)
+			}
+			seen[id] = true
+		}
+	})
+
+	t.Run("ID is lowercase", func(t *testing.T) {
+		for i := 0; i < 10; i++ {
+			id := GenerateEngineID()
+			if id != strings.ToLower(id) {
+				t.Errorf("expected lowercase ID, got %q", id)
+			}
+		}
+	})
+
+	t.Run("ID contains no dots", func(t *testing.T) {
+		for i := 0; i < 10; i++ {
+			id := GenerateEngineID()
+			if strings.Contains(id, ".") {
+				t.Errorf("expected no dots in ID, got %q", id)
+			}
+		}
+	})
+}
+
+func TestEngineIDGetter(t *testing.T) {
+	t.Run("returns the engine ID", func(t *testing.T) {
+		e := &Engine{engineID: "test-engine-abc1"}
+		if got := e.EngineID(); got != "test-engine-abc1" {
+			t.Errorf("expected 'test-engine-abc1', got %q", got)
+		}
+	})
+
+	t.Run("returns empty string when not set", func(t *testing.T) {
+		e := &Engine{}
+		if got := e.EngineID(); got != "" {
+			t.Errorf("expected empty string, got %q", got)
+		}
+	})
+}
+
+func TestEngineLoopScheduleCh(t *testing.T) {
+	t.Run("scheduleCh triggers processDeployments", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		// Store a pending deployment so processDeployments has something to read
+		dep := &types.DeploymentRecord{
+			ID:     "test-dep-1",
+			Status: types.StatusPending,
+		}
+		_ = store.Save(ctx, types.KeyDeployments+"/"+dep.ID, dep)
+
+		e := &Engine{
+			store:            store,
+			scheduleCh:       make(chan struct{}, 1),
+			metricsRegistry:  metrics.NewEngineMetricsRegistry(),
+			metricsCollector: metrics.NewSystemCollector(),
+			events:           NewEventBuffer(100),
+			startedAt:        time.Now(),
+		}
+
+		// Run engineLoop in background
+		go e.engineLoop(ctx)
+
+		// Send on scheduleCh to trigger immediate processing
+		e.scheduleCh <- struct{}{}
+
+		// Give the loop time to process
+		time.Sleep(200 * time.Millisecond)
+		cancel()
+
+		// Verify processDeployments ran (no crash, no hang).
+		// The deployment was read from the store by processDeployments.
+		var result types.DeploymentRecord
+		err := store.Get(context.Background(), types.KeyDeployments+"/"+dep.ID, &result)
+		if err != nil {
+			t.Fatalf("failed to get deployment: %v", err)
+		}
+	})
+
+	t.Run("context cancellation stops loop", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx, cancel := context.WithCancel(context.Background())
+
+		e := &Engine{
+			store:            store,
+			scheduleCh:       make(chan struct{}, 1),
+			metricsRegistry:  metrics.NewEngineMetricsRegistry(),
+			metricsCollector: metrics.NewSystemCollector(),
+			events:           NewEventBuffer(100),
+			startedAt:        time.Now(),
+		}
+
+		done := make(chan struct{})
+		go func() {
+			e.engineLoop(ctx)
+			close(done)
+		}()
+
+		cancel()
+
+		select {
+		case <-done:
+			// Loop exited as expected
+		case <-time.After(2 * time.Second):
+			t.Fatal("engineLoop did not exit after context cancellation")
 		}
 	})
 }

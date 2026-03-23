@@ -445,6 +445,27 @@ verify() {
 
 # --- Install dependencies (called by both install scripts) ---
 
+install_nfs_client() {
+    if command -v mount.nfs &>/dev/null; then
+        info "NFS client already installed, skipping."
+        return
+    fi
+
+    info "Installing NFS client tools..."
+
+    case "$OS" in
+        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
+            $PKG_UPDATE
+            $PKG_INSTALL nfs-common
+            ;;
+        *)
+            $PKG_INSTALL nfs-utils
+            ;;
+    esac
+
+    info "NFS client installed."
+}
+
 install_deps() {
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
         install_etcd
@@ -458,5 +479,6 @@ install_deps() {
         install_cni
         install_wireguard
         install_buildkit
+        install_nfs_client  # For NFS volume mounts
     fi
 }

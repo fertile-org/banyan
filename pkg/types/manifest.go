@@ -104,6 +104,7 @@ func ValidateService(name string, svc *ManifestService) error {
 type BanyanManifest struct {
 	Services map[string]ManifestService `yaml:"services"`
 	Networks map[string]ManifestNetwork `yaml:"networks,omitempty"`
+	Volumes  map[string]VolumeConfig    `yaml:"volumes,omitempty"`
 	Name     string                     `yaml:"name"`
 	Version  string                     `yaml:"version,omitempty"`
 }
@@ -121,6 +122,138 @@ type ManifestService struct {
 	DependsOn   DependsOnConfig      `yaml:"depends_on,omitempty"`
 	Restart     string               `yaml:"restart,omitempty"`
 	Entrypoint  ShellCommand         `yaml:"entrypoint,omitempty"`
+	Volumes     VolumeMounts         `yaml:"volumes,omitempty"`
+}
+
+// VolumeMount represents a service-level volume mount.
+// Supports both Docker Compose short syntax (string) and long syntax (struct).
+type VolumeMount struct {
+	Tmpfs    *TmpfsOpt `yaml:"tmpfs,omitempty" json:"tmpfs,omitempty"`
+	Type     string    `yaml:"type,omitempty" json:"type,omitempty"`
+	Source   string    `yaml:"source,omitempty" json:"source,omitempty"`
+	Target   string    `yaml:"target" json:"target"`
+	ReadOnly bool      `yaml:"read_only,omitempty" json:"read_only,omitempty"`
+}
+
+// TmpfsOpt configures tmpfs mount options.
+type TmpfsOpt struct {
+	Size string `yaml:"size,omitempty" json:"size,omitempty"`
+}
+
+// VolumeConfig represents a top-level named volume declaration.
+type VolumeConfig struct {
+	DriverOpts map[string]string `yaml:"driver_opts,omitempty" json:"driver_opts,omitempty"`
+	Driver     string            `yaml:"driver,omitempty" json:"driver,omitempty"`
+	Name       string            `yaml:"name,omitempty" json:"name,omitempty"`
+	External   bool              `yaml:"external,omitempty" json:"external,omitempty"`
+}
+
+// VolumeMounts supports both Docker Compose short syntax (strings) and long syntax (structs).
+// Short: "source:target[:ro]"   Long: {type: bind, source: ./x, target: /y, read_only: true}
+type VolumeMounts []VolumeMount
+
+// UnmarshalYAML parses the volumes list, supporting both string and mapping items.
+func (v *VolumeMounts) UnmarshalYAML(value *yaml.Node) error {
+	if value.Kind != yaml.SequenceNode {
+		return fmt.Errorf("volumes must be a list")
+	}
+	var mounts []VolumeMount
+	for _, item := range value.Content {
+		if item.Kind == yaml.ScalarNode {
+			// Short syntax: "source:target[:mode]"
+			m, err := parseVolumeShortSyntax(item.Value)
+			if err != nil {
+				return fmt.Errorf("invalid volume %q: %w", item.Value, err)
+			}
+			mounts = append(mounts, m)
+		} else {
+			// Long syntax: {type: ..., source: ..., target: ...}
+			var m VolumeMount
+			if err := item.Decode(&m); err != nil {
+				return fmt.Errorf("invalid volume mapping: %w", err)
+			}
+			mounts = append(mounts, m)
+		}
+	}
+	*v = mounts
+	return nil
+}
+
+// ResolveManifestVolumes resolves volume paths and top-level NFS references.
+// Relative bind mount paths are resolved against basePath (the manifest directory).
+// Named volumes with NFS driver_opts are converted to type "nfs" with the
+// NFS source (addr:device) in the Source field.
+func ResolveManifestVolumes(_ string, manifest *BanyanManifest) {
+	for svcName := range manifest.Services {
+		svc := manifest.Services[svcName]
+		for i, vol := range svc.Volumes {
+			// Relative bind mount paths are NOT resolved on the CLI.
+			// They are resolved on the agent against /var/lib/banyan/data/.
+			// This ensures paths work in distributed deployments.
+
+			// Resolve named volumes with NFS driver_opts
+			if vol.Type == "volume" && len(manifest.Volumes) > 0 {
+				vc, ok := manifest.Volumes[vol.Source]
+				if ok && vc.DriverOpts["type"] == "nfs" {
+					device := vc.DriverOpts["device"]
+					opts := vc.DriverOpts["o"]
+					addr, otherOpts := parseNFSOpts(opts)
+					if addr != "" && device != "" {
+						// Device in Docker Compose NFS has format ":/path" — strip leading colon
+						device = strings.TrimPrefix(device, ":")
+						svc.Volumes[i].Type = "nfs"
+						svc.Volumes[i].Source = addr + ":" + device
+						if otherOpts != "" {
+							svc.Volumes[i].Tmpfs = &TmpfsOpt{Size: otherOpts}
+						}
+					}
+				}
+			}
+		}
+		manifest.Services[svcName] = svc
+	}
+}
+
+// parseNFSOpts extracts addr and remaining options from an NFS mount options string.
+func parseNFSOpts(opts string) (addr, remaining string) {
+	var others []string
+	for _, opt := range strings.Split(opts, ",") {
+		opt = strings.TrimSpace(opt)
+		if strings.HasPrefix(opt, "addr=") {
+			addr = strings.TrimPrefix(opt, "addr=")
+		} else if opt != "" {
+			others = append(others, opt)
+		}
+	}
+	return addr, strings.Join(others, ",")
+}
+
+// parseVolumeShortSyntax parses "source:target[:mode]" into a VolumeMount.
+func parseVolumeShortSyntax(s string) (VolumeMount, error) {
+	parts := strings.SplitN(s, ":", 3)
+	if len(parts) < 2 {
+		return VolumeMount{}, fmt.Errorf("expected source:target format")
+	}
+
+	source := parts[0]
+	target := parts[1]
+	readOnly := false
+	if len(parts) == 3 {
+		readOnly = parts[2] == "ro"
+	}
+
+	// Determine type from source path
+	volType := "volume" // default: named volume
+	if strings.HasPrefix(source, "/") || strings.HasPrefix(source, "./") || strings.HasPrefix(source, "../") {
+		volType = "bind"
+	}
+
+	return VolumeMount{
+		Type:     volType,
+		Source:   source,
+		Target:   target,
+		ReadOnly: readOnly,
+	}, nil
 }
 
 // ManifestHealthcheck represents healthcheck configuration (matches Docker Compose).

@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -80,8 +81,12 @@ var (
 	containerIDGetter         = getContainerID
 	containerRemover          = removeContainer
 	containerIPGetter         = getContainerIP
-	vpcNetworkEnabled         bool   // set by Agent.Run() after VPC init
-	dnsGatewayIPAddr          string // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
+	vpcNetworkEnabled         bool           // set by Agent.Run() after VPC init
+	dnsGatewayIPAddr          string         // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
+	bindMountDataDir          = "/var/lib/banyan/data" // base dir for relative bind mount paths
+	heartbeatInterval         = 15 * time.Second // overridable in tests
+	taskPollInterval          = 2 * time.Second  // overridable in tests
+	healthCheckInterval       = 10 * time.Second // overridable in tests
 )
 
 // New creates a new Agent.
@@ -233,7 +238,7 @@ func (a *Agent) Run(ctx context.Context) error {
 
 // agentLoop polls the engine for tasks assigned to this agent and executes them.
 func (a *Agent) agentLoop(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(taskPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -351,6 +356,15 @@ func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
 			Disable:     pb.Healthcheck.Disable,
 		}
 	}
+	for _, vol := range pb.Volumes {
+		vm := types.VolumeMount{
+			Type: vol.Type, Source: vol.Source, Target: vol.Target, ReadOnly: vol.ReadOnly,
+		}
+		if vol.Tmpfs != nil {
+			vm.Tmpfs = &types.TmpfsOpt{Size: vol.Tmpfs.Size}
+		}
+		task.Volumes = append(task.Volumes, vm)
+	}
 	return task
 }
 
@@ -366,6 +380,15 @@ func executeTask(ctx context.Context, task *types.TaskRecord) (*types.TaskResult
 }
 
 func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.TaskResultRecord, error) {
+	// Resolve NFS volumes to local host mounts before building nerdctl args
+	if len(task.Volumes) > 0 {
+		resolved, nfsErr := ResolveNFSVolumes(ctx, task.Volumes)
+		if nfsErr != nil {
+			return nil, nfsErr
+		}
+		task.Volumes = resolved
+	}
+
 	logging.Info("Pulling image", "image", task.Image)
 	if err := commandRunner(ctx, "nerdctl", "pull", "--insecure-registry", task.Image); err != nil {
 		return nil, fmt.Errorf("failed to pull image %s: %w", task.Image, err)
@@ -518,6 +541,29 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 		args = append(args, "-e", env)
 	}
 
+	// Volume mounts
+	for _, vol := range task.Volumes {
+		switch vol.Type {
+		case "tmpfs":
+			mount := "type=tmpfs,target=" + vol.Target
+			if vol.Tmpfs != nil && vol.Tmpfs.Size != "" {
+				mount += ",tmpfs-size=" + vol.Tmpfs.Size
+			}
+			args = append(args, "--mount", mount)
+		default: // "volume", "bind", or empty
+			source := vol.Source
+			// Resolve relative bind mount paths on the agent (not the CLI)
+			if vol.Type == "bind" && source != "" && !strings.HasPrefix(source, "/") {
+				source = filepath.Join(bindMountDataDir, source)
+			}
+			flag := source + ":" + vol.Target
+			if vol.ReadOnly {
+				flag += ":ro"
+			}
+			args = append(args, "-v", flag)
+		}
+	}
+
 	if len(task.Entrypoint) > 0 {
 		args = append(args, "--entrypoint", task.Entrypoint[0])
 	}
@@ -588,7 +634,7 @@ func (a *Agent) doOneHeartbeat(ctx context.Context) {
 }
 
 func (a *Agent) agentHeartbeat(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Second)
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	var consecutiveFails int
@@ -639,7 +685,7 @@ func (a *Agent) agentHeartbeat(ctx context.Context) {
 }
 
 func (a *Agent) containerHealthLoop(ctx context.Context) {
-	ticker := time.NewTicker(10 * time.Second)
+	ticker := time.NewTicker(healthCheckInterval)
 	defer ticker.Stop()
 
 	for {

@@ -150,6 +150,7 @@ message TaskRecord {
   string memory_reservation = 17;
   ManifestHealthcheck healthcheck = 18;
   string deployment_name = 19;
+  repeated VolumeMount volumes = 20;
 }
 
 // --- CLI messages ---
@@ -169,6 +170,7 @@ message Manifest {
   string name = 1;
   string version = 2;
   map<string, ManifestService> services = 3;
+  map<string, VolumeConfig> volumes = 4;
 }
 
 message ManifestService {
@@ -182,6 +184,26 @@ message ManifestService {
   string restart = 8;
   repeated string entrypoint = 9;
   ManifestHealthcheck healthcheck = 10;
+  repeated VolumeMount volumes = 11;
+}
+
+message VolumeMount {
+  string type = 1;
+  string source = 2;
+  string target = 3;
+  bool read_only = 4;
+  TmpfsOpt tmpfs = 5;
+}
+
+message TmpfsOpt {
+  string size = 1;
+}
+
+message VolumeConfig {
+  string driver = 1;
+  map<string, string> driver_opts = 2;
+  bool external = 3;
+  string name = 4;
 }
 
 message DependsOnCondition {

@@ -396,8 +396,8 @@ Before documenting any feature, verify its implementation status:
 | CLI terminal dashboard | Done | Document fully |
 | Resource-aware scheduling | Done | Document fully |
 | Multi-engine HA | Done (M7) | Document fully |
-| Auto-scaling | Planned (M8) | Don't document |
-| Volumes | Not planned yet | Note as limitation |
+| Volumes (named, bind, tmpfs, NFS) | Done (M8) | Document fully |
+| Auto-scaling | Planned (M9) | Don't document |
 | mTLS | Planned | Mention as upcoming |
 
 **Rule**: Never document a planned feature as if it exists. Use "coming in [milestone]" or link to the roadmap.

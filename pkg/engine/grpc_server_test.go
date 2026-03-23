@@ -4396,3 +4396,84 @@ func TestRateLimiter(t *testing.T) {
 		}
 	})
 }
+
+func TestIsControlTunnelIP(t *testing.T) {
+	t.Run("tunnel IP in range", func(t *testing.T) {
+		if !isControlTunnelIP("10.200.0.1") {
+			t.Error("expected 10.200.0.1 to be a control tunnel IP")
+		}
+	})
+
+	t.Run("tunnel IP high range", func(t *testing.T) {
+		if !isControlTunnelIP("10.200.255.254") {
+			t.Error("expected 10.200.255.254 to be a control tunnel IP")
+		}
+	})
+
+	t.Run("non-tunnel IP", func(t *testing.T) {
+		if isControlTunnelIP("192.168.1.1") {
+			t.Error("expected 192.168.1.1 to NOT be a control tunnel IP")
+		}
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		if isControlTunnelIP("") {
+			t.Error("expected empty string to NOT be a control tunnel IP")
+		}
+	})
+
+	t.Run("invalid IP", func(t *testing.T) {
+		if isControlTunnelIP("not-an-ip") {
+			t.Error("expected invalid IP to NOT be a control tunnel IP")
+		}
+	})
+
+	t.Run("adjacent subnet not in tunnel", func(t *testing.T) {
+		if isControlTunnelIP("10.201.0.1") {
+			t.Error("expected 10.201.0.1 to NOT be a control tunnel IP")
+		}
+	})
+}
+
+func TestTriggerSchedule(t *testing.T) {
+	t.Run("nil channel is safe", func(t *testing.T) {
+		s := &engineGRPCServer{scheduleCh: nil}
+		// Should not panic
+		s.triggerSchedule()
+	})
+
+	t.Run("sends on channel", func(t *testing.T) {
+		ch := make(chan struct{}, 1)
+		s := &engineGRPCServer{scheduleCh: ch}
+		s.triggerSchedule()
+
+		select {
+		case <-ch:
+			// success — signal was sent
+		default:
+			t.Error("expected triggerSchedule to send on scheduleCh")
+		}
+	})
+
+	t.Run("non-blocking when channel is full", func(t *testing.T) {
+		ch := make(chan struct{}, 1)
+		ch <- struct{}{} // fill the channel
+		s := &engineGRPCServer{scheduleCh: ch}
+
+		// Should not block or panic
+		s.triggerSchedule()
+
+		// Channel should still have exactly one item
+		select {
+		case <-ch:
+		default:
+			t.Error("expected channel to still have one item")
+		}
+		// And now it should be empty
+		select {
+		case <-ch:
+			t.Error("expected channel to be empty after draining one item")
+		default:
+		}
+	})
+}

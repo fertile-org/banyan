@@ -71,6 +71,7 @@ type ServiceRecord struct {
 	Environment       []string             `json:"env,omitempty"`
 	Command           []string             `json:"command,omitempty"`
 	Entrypoint        []string             `json:"entrypoint,omitempty"`
+	Volumes           []VolumeMount        `json:"volumes,omitempty"`
 	Replicas          int                  `json:"replicas"`
 }
 
@@ -102,6 +103,7 @@ type TaskRecord struct {
 	Entrypoint         []string             `json:"entrypoint,omitempty"`
 	Ports              []string             `json:"ports,omitempty"`
 	Environment        []string             `json:"env,omitempty"`
+	Volumes            []VolumeMount        `json:"volumes,omitempty"`
 	ReplicaIndex       int                  `json:"replica_index"`
 }
 

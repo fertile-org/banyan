@@ -1066,6 +1066,7 @@ type TaskRecord struct {
 	MemoryReservation string                 `protobuf:"bytes,17,opt,name=memory_reservation,json=memoryReservation,proto3" json:"memory_reservation,omitempty"`
 	Healthcheck       *ManifestHealthcheck   `protobuf:"bytes,18,opt,name=healthcheck,proto3" json:"healthcheck,omitempty"`
 	DeploymentName    string                 `protobuf:"bytes,19,opt,name=deployment_name,json=deploymentName,proto3" json:"deployment_name,omitempty"`
+	Volumes           []*VolumeMount         `protobuf:"bytes,20,rep,name=volumes,proto3" json:"volumes,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1233,6 +1234,13 @@ func (x *TaskRecord) GetDeploymentName() string {
 	return ""
 }
 
+func (x *TaskRecord) GetVolumes() []*VolumeMount {
+	if x != nil {
+		return x.Volumes
+	}
+	return nil
+}
+
 type DeployRPCRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Manifest      *Manifest              `protobuf:"bytes,1,opt,name=manifest,proto3" json:"manifest,omitempty"`
@@ -1350,6 +1358,7 @@ type Manifest struct {
 	Name          string                      `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Version       string                      `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"`
 	Services      map[string]*ManifestService `protobuf:"bytes,3,rep,name=services,proto3" json:"services,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	Volumes       map[string]*VolumeConfig    `protobuf:"bytes,4,rep,name=volumes,proto3" json:"volumes,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1405,6 +1414,13 @@ func (x *Manifest) GetServices() map[string]*ManifestService {
 	return nil
 }
 
+func (x *Manifest) GetVolumes() map[string]*VolumeConfig {
+	if x != nil {
+		return x.Volumes
+	}
+	return nil
+}
+
 type ManifestService struct {
 	state         protoimpl.MessageState         `protogen:"open.v1"`
 	Image         string                         `protobuf:"bytes,1,opt,name=image,proto3" json:"image,omitempty"`
@@ -1417,6 +1433,7 @@ type ManifestService struct {
 	Restart       string                         `protobuf:"bytes,8,opt,name=restart,proto3" json:"restart,omitempty"`
 	Entrypoint    []string                       `protobuf:"bytes,9,rep,name=entrypoint,proto3" json:"entrypoint,omitempty"`
 	Healthcheck   *ManifestHealthcheck           `protobuf:"bytes,10,opt,name=healthcheck,proto3" json:"healthcheck,omitempty"`
+	Volumes       []*VolumeMount                 `protobuf:"bytes,11,rep,name=volumes,proto3" json:"volumes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1521,6 +1538,201 @@ func (x *ManifestService) GetHealthcheck() *ManifestHealthcheck {
 	return nil
 }
 
+func (x *ManifestService) GetVolumes() []*VolumeMount {
+	if x != nil {
+		return x.Volumes
+	}
+	return nil
+}
+
+type VolumeMount struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"`
+	Source        string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
+	Target        string                 `protobuf:"bytes,3,opt,name=target,proto3" json:"target,omitempty"`
+	ReadOnly      bool                   `protobuf:"varint,4,opt,name=read_only,json=readOnly,proto3" json:"read_only,omitempty"`
+	Tmpfs         *TmpfsOpt              `protobuf:"bytes,5,opt,name=tmpfs,proto3" json:"tmpfs,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VolumeMount) Reset() {
+	*x = VolumeMount{}
+	mi := &file_engine_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VolumeMount) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VolumeMount) ProtoMessage() {}
+
+func (x *VolumeMount) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VolumeMount.ProtoReflect.Descriptor instead.
+func (*VolumeMount) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *VolumeMount) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *VolumeMount) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
+func (x *VolumeMount) GetTarget() string {
+	if x != nil {
+		return x.Target
+	}
+	return ""
+}
+
+func (x *VolumeMount) GetReadOnly() bool {
+	if x != nil {
+		return x.ReadOnly
+	}
+	return false
+}
+
+func (x *VolumeMount) GetTmpfs() *TmpfsOpt {
+	if x != nil {
+		return x.Tmpfs
+	}
+	return nil
+}
+
+type TmpfsOpt struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Size          string                 `protobuf:"bytes,1,opt,name=size,proto3" json:"size,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TmpfsOpt) Reset() {
+	*x = TmpfsOpt{}
+	mi := &file_engine_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TmpfsOpt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TmpfsOpt) ProtoMessage() {}
+
+func (x *TmpfsOpt) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TmpfsOpt.ProtoReflect.Descriptor instead.
+func (*TmpfsOpt) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *TmpfsOpt) GetSize() string {
+	if x != nil {
+		return x.Size
+	}
+	return ""
+}
+
+type VolumeConfig struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Driver        string                 `protobuf:"bytes,1,opt,name=driver,proto3" json:"driver,omitempty"`
+	DriverOpts    map[string]string      `protobuf:"bytes,2,rep,name=driver_opts,json=driverOpts,proto3" json:"driver_opts,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	External      bool                   `protobuf:"varint,3,opt,name=external,proto3" json:"external,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VolumeConfig) Reset() {
+	*x = VolumeConfig{}
+	mi := &file_engine_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VolumeConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VolumeConfig) ProtoMessage() {}
+
+func (x *VolumeConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VolumeConfig.ProtoReflect.Descriptor instead.
+func (*VolumeConfig) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *VolumeConfig) GetDriver() string {
+	if x != nil {
+		return x.Driver
+	}
+	return ""
+}
+
+func (x *VolumeConfig) GetDriverOpts() map[string]string {
+	if x != nil {
+		return x.DriverOpts
+	}
+	return nil
+}
+
+func (x *VolumeConfig) GetExternal() bool {
+	if x != nil {
+		return x.External
+	}
+	return false
+}
+
+func (x *VolumeConfig) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
 type DependsOnCondition struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Condition     string                 `protobuf:"bytes,1,opt,name=condition,proto3" json:"condition,omitempty"` // "service_started" or "service_healthy"
@@ -1530,7 +1742,7 @@ type DependsOnCondition struct {
 
 func (x *DependsOnCondition) Reset() {
 	*x = DependsOnCondition{}
-	mi := &file_engine_proto_msgTypes[21]
+	mi := &file_engine_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1542,7 +1754,7 @@ func (x *DependsOnCondition) String() string {
 func (*DependsOnCondition) ProtoMessage() {}
 
 func (x *DependsOnCondition) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[21]
+	mi := &file_engine_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1555,7 +1767,7 @@ func (x *DependsOnCondition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DependsOnCondition.ProtoReflect.Descriptor instead.
 func (*DependsOnCondition) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{21}
+	return file_engine_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *DependsOnCondition) GetCondition() string {
@@ -1579,7 +1791,7 @@ type ManifestHealthcheck struct {
 
 func (x *ManifestHealthcheck) Reset() {
 	*x = ManifestHealthcheck{}
-	mi := &file_engine_proto_msgTypes[22]
+	mi := &file_engine_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1591,7 +1803,7 @@ func (x *ManifestHealthcheck) String() string {
 func (*ManifestHealthcheck) ProtoMessage() {}
 
 func (x *ManifestHealthcheck) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[22]
+	mi := &file_engine_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1604,7 +1816,7 @@ func (x *ManifestHealthcheck) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestHealthcheck.ProtoReflect.Descriptor instead.
 func (*ManifestHealthcheck) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{22}
+	return file_engine_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ManifestHealthcheck) GetTest() []string {
@@ -1659,7 +1871,7 @@ type ManifestBuild struct {
 
 func (x *ManifestBuild) Reset() {
 	*x = ManifestBuild{}
-	mi := &file_engine_proto_msgTypes[23]
+	mi := &file_engine_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1671,7 +1883,7 @@ func (x *ManifestBuild) String() string {
 func (*ManifestBuild) ProtoMessage() {}
 
 func (x *ManifestBuild) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[23]
+	mi := &file_engine_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1684,7 +1896,7 @@ func (x *ManifestBuild) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestBuild.ProtoReflect.Descriptor instead.
 func (*ManifestBuild) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{23}
+	return file_engine_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ManifestBuild) GetContext() string {
@@ -1712,7 +1924,7 @@ type ManifestDeploy struct {
 
 func (x *ManifestDeploy) Reset() {
 	*x = ManifestDeploy{}
-	mi := &file_engine_proto_msgTypes[24]
+	mi := &file_engine_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1724,7 +1936,7 @@ func (x *ManifestDeploy) String() string {
 func (*ManifestDeploy) ProtoMessage() {}
 
 func (x *ManifestDeploy) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[24]
+	mi := &file_engine_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1737,7 +1949,7 @@ func (x *ManifestDeploy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestDeploy.ProtoReflect.Descriptor instead.
 func (*ManifestDeploy) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{24}
+	return file_engine_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *ManifestDeploy) GetReplicas() int32 {
@@ -1771,7 +1983,7 @@ type ManifestResources struct {
 
 func (x *ManifestResources) Reset() {
 	*x = ManifestResources{}
-	mi := &file_engine_proto_msgTypes[25]
+	mi := &file_engine_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1783,7 +1995,7 @@ func (x *ManifestResources) String() string {
 func (*ManifestResources) ProtoMessage() {}
 
 func (x *ManifestResources) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[25]
+	mi := &file_engine_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1796,7 +2008,7 @@ func (x *ManifestResources) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestResources.ProtoReflect.Descriptor instead.
 func (*ManifestResources) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{25}
+	return file_engine_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *ManifestResources) GetLimits() *ResourceSpec {
@@ -1823,7 +2035,7 @@ type ResourceSpec struct {
 
 func (x *ResourceSpec) Reset() {
 	*x = ResourceSpec{}
-	mi := &file_engine_proto_msgTypes[26]
+	mi := &file_engine_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1835,7 +2047,7 @@ func (x *ResourceSpec) String() string {
 func (*ResourceSpec) ProtoMessage() {}
 
 func (x *ResourceSpec) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[26]
+	mi := &file_engine_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1848,7 +2060,7 @@ func (x *ResourceSpec) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceSpec.ProtoReflect.Descriptor instead.
 func (*ResourceSpec) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{26}
+	return file_engine_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *ResourceSpec) GetMemory() string {
@@ -1874,7 +2086,7 @@ type ManifestPlacement struct {
 
 func (x *ManifestPlacement) Reset() {
 	*x = ManifestPlacement{}
-	mi := &file_engine_proto_msgTypes[27]
+	mi := &file_engine_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1886,7 +2098,7 @@ func (x *ManifestPlacement) String() string {
 func (*ManifestPlacement) ProtoMessage() {}
 
 func (x *ManifestPlacement) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[27]
+	mi := &file_engine_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1899,7 +2111,7 @@ func (x *ManifestPlacement) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManifestPlacement.ProtoReflect.Descriptor instead.
 func (*ManifestPlacement) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{27}
+	return file_engine_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *ManifestPlacement) GetNode() string {
@@ -1920,7 +2132,7 @@ type DownRPCRequest struct {
 
 func (x *DownRPCRequest) Reset() {
 	*x = DownRPCRequest{}
-	mi := &file_engine_proto_msgTypes[28]
+	mi := &file_engine_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1932,7 +2144,7 @@ func (x *DownRPCRequest) String() string {
 func (*DownRPCRequest) ProtoMessage() {}
 
 func (x *DownRPCRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[28]
+	mi := &file_engine_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1945,7 +2157,7 @@ func (x *DownRPCRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownRPCRequest.ProtoReflect.Descriptor instead.
 func (*DownRPCRequest) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{28}
+	return file_engine_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DownRPCRequest) GetName() string {
@@ -1978,7 +2190,7 @@ type DownRPCResponse struct {
 
 func (x *DownRPCResponse) Reset() {
 	*x = DownRPCResponse{}
-	mi := &file_engine_proto_msgTypes[29]
+	mi := &file_engine_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1990,7 +2202,7 @@ func (x *DownRPCResponse) String() string {
 func (*DownRPCResponse) ProtoMessage() {}
 
 func (x *DownRPCResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[29]
+	mi := &file_engine_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2003,7 +2215,7 @@ func (x *DownRPCResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DownRPCResponse.ProtoReflect.Descriptor instead.
 func (*DownRPCResponse) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{29}
+	return file_engine_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *DownRPCResponse) GetTaskCount() int32 {
@@ -2021,7 +2233,7 @@ type GetStatusRequest struct {
 
 func (x *GetStatusRequest) Reset() {
 	*x = GetStatusRequest{}
-	mi := &file_engine_proto_msgTypes[30]
+	mi := &file_engine_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2033,7 +2245,7 @@ func (x *GetStatusRequest) String() string {
 func (*GetStatusRequest) ProtoMessage() {}
 
 func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[30]
+	mi := &file_engine_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2046,7 +2258,7 @@ func (x *GetStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetStatusRequest) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{30}
+	return file_engine_proto_rawDescGZIP(), []int{33}
 }
 
 type GetStatusResponse struct {
@@ -2059,7 +2271,7 @@ type GetStatusResponse struct {
 
 func (x *GetStatusResponse) Reset() {
 	*x = GetStatusResponse{}
-	mi := &file_engine_proto_msgTypes[31]
+	mi := &file_engine_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2071,7 +2283,7 @@ func (x *GetStatusResponse) String() string {
 func (*GetStatusResponse) ProtoMessage() {}
 
 func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[31]
+	mi := &file_engine_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2084,7 +2296,7 @@ func (x *GetStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetStatusResponse) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{31}
+	return file_engine_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *GetStatusResponse) GetAgents() []*AgentInfo {
@@ -2115,7 +2327,7 @@ type AgentInfo struct {
 
 func (x *AgentInfo) Reset() {
 	*x = AgentInfo{}
-	mi := &file_engine_proto_msgTypes[32]
+	mi := &file_engine_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2127,7 +2339,7 @@ func (x *AgentInfo) String() string {
 func (*AgentInfo) ProtoMessage() {}
 
 func (x *AgentInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[32]
+	mi := &file_engine_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2140,7 +2352,7 @@ func (x *AgentInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentInfo.ProtoReflect.Descriptor instead.
 func (*AgentInfo) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{32}
+	return file_engine_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *AgentInfo) GetName() string {
@@ -2204,7 +2416,7 @@ type DeploymentInfo struct {
 
 func (x *DeploymentInfo) Reset() {
 	*x = DeploymentInfo{}
-	mi := &file_engine_proto_msgTypes[33]
+	mi := &file_engine_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2216,7 +2428,7 @@ func (x *DeploymentInfo) String() string {
 func (*DeploymentInfo) ProtoMessage() {}
 
 func (x *DeploymentInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[33]
+	mi := &file_engine_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2229,7 +2441,7 @@ func (x *DeploymentInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeploymentInfo.ProtoReflect.Descriptor instead.
 func (*DeploymentInfo) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{33}
+	return file_engine_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *DeploymentInfo) GetId() string {
@@ -2323,7 +2535,7 @@ type ServiceInfo struct {
 
 func (x *ServiceInfo) Reset() {
 	*x = ServiceInfo{}
-	mi := &file_engine_proto_msgTypes[34]
+	mi := &file_engine_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2335,7 +2547,7 @@ func (x *ServiceInfo) String() string {
 func (*ServiceInfo) ProtoMessage() {}
 
 func (x *ServiceInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[34]
+	mi := &file_engine_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2348,7 +2560,7 @@ func (x *ServiceInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServiceInfo.ProtoReflect.Descriptor instead.
 func (*ServiceInfo) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{34}
+	return file_engine_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ServiceInfo) GetImage() string {
@@ -2419,7 +2631,7 @@ type TaskInfo struct {
 
 func (x *TaskInfo) Reset() {
 	*x = TaskInfo{}
-	mi := &file_engine_proto_msgTypes[35]
+	mi := &file_engine_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2431,7 +2643,7 @@ func (x *TaskInfo) String() string {
 func (*TaskInfo) ProtoMessage() {}
 
 func (x *TaskInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[35]
+	mi := &file_engine_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2444,7 +2656,7 @@ func (x *TaskInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TaskInfo.ProtoReflect.Descriptor instead.
 func (*TaskInfo) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{35}
+	return file_engine_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *TaskInfo) GetId() string {
@@ -2584,7 +2796,7 @@ type GetLogsRequest struct {
 
 func (x *GetLogsRequest) Reset() {
 	*x = GetLogsRequest{}
-	mi := &file_engine_proto_msgTypes[36]
+	mi := &file_engine_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2596,7 +2808,7 @@ func (x *GetLogsRequest) String() string {
 func (*GetLogsRequest) ProtoMessage() {}
 
 func (x *GetLogsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[36]
+	mi := &file_engine_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2609,7 +2821,7 @@ func (x *GetLogsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLogsRequest.ProtoReflect.Descriptor instead.
 func (*GetLogsRequest) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{36}
+	return file_engine_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *GetLogsRequest) GetContainerName() string {
@@ -2642,7 +2854,7 @@ type GetLogsResponse struct {
 
 func (x *GetLogsResponse) Reset() {
 	*x = GetLogsResponse{}
-	mi := &file_engine_proto_msgTypes[37]
+	mi := &file_engine_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2654,7 +2866,7 @@ func (x *GetLogsResponse) String() string {
 func (*GetLogsResponse) ProtoMessage() {}
 
 func (x *GetLogsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[37]
+	mi := &file_engine_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2667,7 +2879,7 @@ func (x *GetLogsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetLogsResponse.ProtoReflect.Descriptor instead.
 func (*GetLogsResponse) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{37}
+	return file_engine_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *GetLogsResponse) GetData() []byte {
@@ -2685,7 +2897,7 @@ type GetInfoRequest struct {
 
 func (x *GetInfoRequest) Reset() {
 	*x = GetInfoRequest{}
-	mi := &file_engine_proto_msgTypes[38]
+	mi := &file_engine_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2697,7 +2909,7 @@ func (x *GetInfoRequest) String() string {
 func (*GetInfoRequest) ProtoMessage() {}
 
 func (x *GetInfoRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[38]
+	mi := &file_engine_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2710,7 +2922,7 @@ func (x *GetInfoRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInfoRequest.ProtoReflect.Descriptor instead.
 func (*GetInfoRequest) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{38}
+	return file_engine_proto_rawDescGZIP(), []int{41}
 }
 
 type GetInfoResponse struct {
@@ -2722,7 +2934,7 @@ type GetInfoResponse struct {
 
 func (x *GetInfoResponse) Reset() {
 	*x = GetInfoResponse{}
-	mi := &file_engine_proto_msgTypes[39]
+	mi := &file_engine_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2734,7 +2946,7 @@ func (x *GetInfoResponse) String() string {
 func (*GetInfoResponse) ProtoMessage() {}
 
 func (x *GetInfoResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[39]
+	mi := &file_engine_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2747,7 +2959,7 @@ func (x *GetInfoResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetInfoResponse.ProtoReflect.Descriptor instead.
 func (*GetInfoResponse) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{39}
+	return file_engine_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GetInfoResponse) GetRegistryUrl() string {
@@ -2765,7 +2977,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_engine_proto_msgTypes[40]
+	mi := &file_engine_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2777,7 +2989,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[40]
+	mi := &file_engine_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2790,7 +3002,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{40}
+	return file_engine_proto_rawDescGZIP(), []int{43}
 }
 
 type HealthResponse struct {
@@ -2802,7 +3014,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_engine_proto_msgTypes[41]
+	mi := &file_engine_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2814,7 +3026,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[41]
+	mi := &file_engine_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2827,7 +3039,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{41}
+	return file_engine_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *HealthResponse) GetStatus() string {
@@ -2845,7 +3057,7 @@ type GetDashboardDataRequest struct {
 
 func (x *GetDashboardDataRequest) Reset() {
 	*x = GetDashboardDataRequest{}
-	mi := &file_engine_proto_msgTypes[42]
+	mi := &file_engine_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2857,7 +3069,7 @@ func (x *GetDashboardDataRequest) String() string {
 func (*GetDashboardDataRequest) ProtoMessage() {}
 
 func (x *GetDashboardDataRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[42]
+	mi := &file_engine_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2870,7 +3082,7 @@ func (x *GetDashboardDataRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDashboardDataRequest.ProtoReflect.Descriptor instead.
 func (*GetDashboardDataRequest) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{42}
+	return file_engine_proto_rawDescGZIP(), []int{45}
 }
 
 type GetDashboardDataResponse struct {
@@ -2886,7 +3098,7 @@ type GetDashboardDataResponse struct {
 
 func (x *GetDashboardDataResponse) Reset() {
 	*x = GetDashboardDataResponse{}
-	mi := &file_engine_proto_msgTypes[43]
+	mi := &file_engine_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2898,7 +3110,7 @@ func (x *GetDashboardDataResponse) String() string {
 func (*GetDashboardDataResponse) ProtoMessage() {}
 
 func (x *GetDashboardDataResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[43]
+	mi := &file_engine_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2911,7 +3123,7 @@ func (x *GetDashboardDataResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetDashboardDataResponse.ProtoReflect.Descriptor instead.
 func (*GetDashboardDataResponse) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{43}
+	return file_engine_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *GetDashboardDataResponse) GetEngine() *EngineStatus {
@@ -2960,7 +3172,7 @@ type EngineStatus struct {
 
 func (x *EngineStatus) Reset() {
 	*x = EngineStatus{}
-	mi := &file_engine_proto_msgTypes[44]
+	mi := &file_engine_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2972,7 +3184,7 @@ func (x *EngineStatus) String() string {
 func (*EngineStatus) ProtoMessage() {}
 
 func (x *EngineStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[44]
+	mi := &file_engine_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2985,7 +3197,7 @@ func (x *EngineStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use EngineStatus.ProtoReflect.Descriptor instead.
 func (*EngineStatus) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{44}
+	return file_engine_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *EngineStatus) GetStatus() string {
@@ -3026,7 +3238,7 @@ type AgentDetail struct {
 
 func (x *AgentDetail) Reset() {
 	*x = AgentDetail{}
-	mi := &file_engine_proto_msgTypes[45]
+	mi := &file_engine_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3038,7 +3250,7 @@ func (x *AgentDetail) String() string {
 func (*AgentDetail) ProtoMessage() {}
 
 func (x *AgentDetail) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[45]
+	mi := &file_engine_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3051,7 +3263,7 @@ func (x *AgentDetail) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentDetail.ProtoReflect.Descriptor instead.
 func (*AgentDetail) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{45}
+	return file_engine_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *AgentDetail) GetName() string {
@@ -3132,7 +3344,7 @@ type ClusterSummary struct {
 
 func (x *ClusterSummary) Reset() {
 	*x = ClusterSummary{}
-	mi := &file_engine_proto_msgTypes[46]
+	mi := &file_engine_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3144,7 +3356,7 @@ func (x *ClusterSummary) String() string {
 func (*ClusterSummary) ProtoMessage() {}
 
 func (x *ClusterSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[46]
+	mi := &file_engine_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3157,7 +3369,7 @@ func (x *ClusterSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterSummary.ProtoReflect.Descriptor instead.
 func (*ClusterSummary) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{46}
+	return file_engine_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *ClusterSummary) GetTotalAgents() int32 {
@@ -3221,7 +3433,7 @@ type ClusterEvent struct {
 
 func (x *ClusterEvent) Reset() {
 	*x = ClusterEvent{}
-	mi := &file_engine_proto_msgTypes[47]
+	mi := &file_engine_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3233,7 +3445,7 @@ func (x *ClusterEvent) String() string {
 func (*ClusterEvent) ProtoMessage() {}
 
 func (x *ClusterEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_engine_proto_msgTypes[47]
+	mi := &file_engine_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3246,7 +3458,7 @@ func (x *ClusterEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClusterEvent.ProtoReflect.Descriptor instead.
 func (*ClusterEvent) Descriptor() ([]byte, []int) {
-	return file_engine_proto_rawDescGZIP(), []int{47}
+	return file_engine_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *ClusterEvent) GetTimestampUnix() int64 {
@@ -3362,7 +3574,7 @@ const file_engine_proto_rawDesc = "" +
 	"agent_name\x18\x04 \x01(\tR\tagentName\x12!\n" +
 	"\fservice_name\x18\x05 \x01(\tR\vserviceName\x12'\n" +
 	"\x0fdeployment_name\x18\x06 \x01(\tR\x0edeploymentName\"\x1f\n" +
-	"\x1dReportContainerHealthResponse\"\xf3\x04\n" +
+	"\x1dReportContainerHealthResponse\"\xa5\x05\n" +
 	"\n" +
 	"TaskRecord\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
@@ -3386,21 +3598,26 @@ const file_engine_proto_rawDesc = "" +
 	"\tcpu_limit\x18\x10 \x01(\tR\bcpuLimit\x12-\n" +
 	"\x12memory_reservation\x18\x11 \x01(\tR\x11memoryReservation\x12@\n" +
 	"\vhealthcheck\x18\x12 \x01(\v2\x1e.banyan.v1.ManifestHealthcheckR\vhealthcheck\x12'\n" +
-	"\x0fdeployment_name\x18\x13 \x01(\tR\x0edeploymentName\"s\n" +
+	"\x0fdeployment_name\x18\x13 \x01(\tR\x0edeploymentName\x120\n" +
+	"\avolumes\x18\x14 \x03(\v2\x16.banyan.v1.VolumeMountR\avolumes\"s\n" +
 	"\x10DeployRPCRequest\x12/\n" +
 	"\bmanifest\x18\x01 \x01(\v2\x13.banyan.v1.ManifestR\bmanifest\x12\x1a\n" +
 	"\bservices\x18\x02 \x03(\tR\bservices\x12\x12\n" +
 	"\x04tags\x18\x03 \x03(\tR\x04tags\"P\n" +
 	"\x11DeployRPCResponse\x12#\n" +
 	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12\x16\n" +
-	"\x06status\x18\x02 \x01(\tR\x06status\"\xd0\x01\n" +
+	"\x06status\x18\x02 \x01(\tR\x06status\"\xe1\x02\n" +
 	"\bManifest\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x18\n" +
 	"\aversion\x18\x02 \x01(\tR\aversion\x12=\n" +
-	"\bservices\x18\x03 \x03(\v2!.banyan.v1.Manifest.ServicesEntryR\bservices\x1aW\n" +
+	"\bservices\x18\x03 \x03(\v2!.banyan.v1.Manifest.ServicesEntryR\bservices\x12:\n" +
+	"\avolumes\x18\x04 \x03(\v2 .banyan.v1.Manifest.VolumesEntryR\avolumes\x1aW\n" +
 	"\rServicesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x120\n" +
-	"\x05value\x18\x02 \x01(\v2\x1a.banyan.v1.ManifestServiceR\x05value:\x028\x01\"\xff\x03\n" +
+	"\x05value\x18\x02 \x01(\v2\x1a.banyan.v1.ManifestServiceR\x05value:\x028\x01\x1aS\n" +
+	"\fVolumesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12-\n" +
+	"\x05value\x18\x02 \x01(\v2\x17.banyan.v1.VolumeConfigR\x05value:\x028\x01\"\xb1\x04\n" +
 	"\x0fManifestService\x12\x14\n" +
 	"\x05image\x18\x01 \x01(\tR\x05image\x12.\n" +
 	"\x05build\x18\x02 \x01(\v2\x18.banyan.v1.ManifestBuildR\x05build\x121\n" +
@@ -3415,10 +3632,28 @@ const file_engine_proto_rawDesc = "" +
 	"entrypoint\x18\t \x03(\tR\n" +
 	"entrypoint\x12@\n" +
 	"\vhealthcheck\x18\n" +
-	" \x01(\v2\x1e.banyan.v1.ManifestHealthcheckR\vhealthcheck\x1a[\n" +
+	" \x01(\v2\x1e.banyan.v1.ManifestHealthcheckR\vhealthcheck\x120\n" +
+	"\avolumes\x18\v \x03(\v2\x16.banyan.v1.VolumeMountR\avolumes\x1a[\n" +
 	"\x0eDependsOnEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
-	"\x05value\x18\x02 \x01(\v2\x1d.banyan.v1.DependsOnConditionR\x05value:\x028\x01\"2\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.banyan.v1.DependsOnConditionR\x05value:\x028\x01\"\x99\x01\n" +
+	"\vVolumeMount\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x16\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\x16\n" +
+	"\x06target\x18\x03 \x01(\tR\x06target\x12\x1b\n" +
+	"\tread_only\x18\x04 \x01(\bR\breadOnly\x12)\n" +
+	"\x05tmpfs\x18\x05 \x01(\v2\x13.banyan.v1.TmpfsOptR\x05tmpfs\"\x1e\n" +
+	"\bTmpfsOpt\x12\x12\n" +
+	"\x04size\x18\x01 \x01(\tR\x04size\"\xdf\x01\n" +
+	"\fVolumeConfig\x12\x16\n" +
+	"\x06driver\x18\x01 \x01(\tR\x06driver\x12H\n" +
+	"\vdriver_opts\x18\x02 \x03(\v2'.banyan.v1.VolumeConfig.DriverOptsEntryR\n" +
+	"driverOpts\x12\x1a\n" +
+	"\bexternal\x18\x03 \x01(\bR\bexternal\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x1a=\n" +
+	"\x0fDriverOptsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"2\n" +
 	"\x12DependsOnCondition\x12\x1c\n" +
 	"\tcondition\x18\x01 \x01(\tR\tcondition\"\xb6\x01\n" +
 	"\x13ManifestHealthcheck\x12\x12\n" +
@@ -3588,7 +3823,7 @@ func file_engine_proto_rawDescGZIP() []byte {
 	return file_engine_proto_rawDescData
 }
 
-var file_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
+var file_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 58)
 var file_engine_proto_goTypes = []any{
 	(*SystemMetrics)(nil),                 // 0: banyan.v1.SystemMetrics
 	(*RegisterRequest)(nil),               // 1: banyan.v1.RegisterRequest
@@ -3611,38 +3846,43 @@ var file_engine_proto_goTypes = []any{
 	(*DeployRPCResponse)(nil),             // 18: banyan.v1.DeployRPCResponse
 	(*Manifest)(nil),                      // 19: banyan.v1.Manifest
 	(*ManifestService)(nil),               // 20: banyan.v1.ManifestService
-	(*DependsOnCondition)(nil),            // 21: banyan.v1.DependsOnCondition
-	(*ManifestHealthcheck)(nil),           // 22: banyan.v1.ManifestHealthcheck
-	(*ManifestBuild)(nil),                 // 23: banyan.v1.ManifestBuild
-	(*ManifestDeploy)(nil),                // 24: banyan.v1.ManifestDeploy
-	(*ManifestResources)(nil),             // 25: banyan.v1.ManifestResources
-	(*ResourceSpec)(nil),                  // 26: banyan.v1.ResourceSpec
-	(*ManifestPlacement)(nil),             // 27: banyan.v1.ManifestPlacement
-	(*DownRPCRequest)(nil),                // 28: banyan.v1.DownRPCRequest
-	(*DownRPCResponse)(nil),               // 29: banyan.v1.DownRPCResponse
-	(*GetStatusRequest)(nil),              // 30: banyan.v1.GetStatusRequest
-	(*GetStatusResponse)(nil),             // 31: banyan.v1.GetStatusResponse
-	(*AgentInfo)(nil),                     // 32: banyan.v1.AgentInfo
-	(*DeploymentInfo)(nil),                // 33: banyan.v1.DeploymentInfo
-	(*ServiceInfo)(nil),                   // 34: banyan.v1.ServiceInfo
-	(*TaskInfo)(nil),                      // 35: banyan.v1.TaskInfo
-	(*GetLogsRequest)(nil),                // 36: banyan.v1.GetLogsRequest
-	(*GetLogsResponse)(nil),               // 37: banyan.v1.GetLogsResponse
-	(*GetInfoRequest)(nil),                // 38: banyan.v1.GetInfoRequest
-	(*GetInfoResponse)(nil),               // 39: banyan.v1.GetInfoResponse
-	(*HealthRequest)(nil),                 // 40: banyan.v1.HealthRequest
-	(*HealthResponse)(nil),                // 41: banyan.v1.HealthResponse
-	(*GetDashboardDataRequest)(nil),       // 42: banyan.v1.GetDashboardDataRequest
-	(*GetDashboardDataResponse)(nil),      // 43: banyan.v1.GetDashboardDataResponse
-	(*EngineStatus)(nil),                  // 44: banyan.v1.EngineStatus
-	(*AgentDetail)(nil),                   // 45: banyan.v1.AgentDetail
-	(*ClusterSummary)(nil),                // 46: banyan.v1.ClusterSummary
-	(*ClusterEvent)(nil),                  // 47: banyan.v1.ClusterEvent
-	nil,                                   // 48: banyan.v1.Manifest.ServicesEntry
-	nil,                                   // 49: banyan.v1.ManifestService.DependsOnEntry
-	nil,                                   // 50: banyan.v1.DeploymentInfo.ServicesEntry
-	nil,                                   // 51: banyan.v1.ServiceInfo.DependsOnEntry
-	nil,                                   // 52: banyan.v1.ClusterSummary.TasksByStatusEntry
+	(*VolumeMount)(nil),                   // 21: banyan.v1.VolumeMount
+	(*TmpfsOpt)(nil),                      // 22: banyan.v1.TmpfsOpt
+	(*VolumeConfig)(nil),                  // 23: banyan.v1.VolumeConfig
+	(*DependsOnCondition)(nil),            // 24: banyan.v1.DependsOnCondition
+	(*ManifestHealthcheck)(nil),           // 25: banyan.v1.ManifestHealthcheck
+	(*ManifestBuild)(nil),                 // 26: banyan.v1.ManifestBuild
+	(*ManifestDeploy)(nil),                // 27: banyan.v1.ManifestDeploy
+	(*ManifestResources)(nil),             // 28: banyan.v1.ManifestResources
+	(*ResourceSpec)(nil),                  // 29: banyan.v1.ResourceSpec
+	(*ManifestPlacement)(nil),             // 30: banyan.v1.ManifestPlacement
+	(*DownRPCRequest)(nil),                // 31: banyan.v1.DownRPCRequest
+	(*DownRPCResponse)(nil),               // 32: banyan.v1.DownRPCResponse
+	(*GetStatusRequest)(nil),              // 33: banyan.v1.GetStatusRequest
+	(*GetStatusResponse)(nil),             // 34: banyan.v1.GetStatusResponse
+	(*AgentInfo)(nil),                     // 35: banyan.v1.AgentInfo
+	(*DeploymentInfo)(nil),                // 36: banyan.v1.DeploymentInfo
+	(*ServiceInfo)(nil),                   // 37: banyan.v1.ServiceInfo
+	(*TaskInfo)(nil),                      // 38: banyan.v1.TaskInfo
+	(*GetLogsRequest)(nil),                // 39: banyan.v1.GetLogsRequest
+	(*GetLogsResponse)(nil),               // 40: banyan.v1.GetLogsResponse
+	(*GetInfoRequest)(nil),                // 41: banyan.v1.GetInfoRequest
+	(*GetInfoResponse)(nil),               // 42: banyan.v1.GetInfoResponse
+	(*HealthRequest)(nil),                 // 43: banyan.v1.HealthRequest
+	(*HealthResponse)(nil),                // 44: banyan.v1.HealthResponse
+	(*GetDashboardDataRequest)(nil),       // 45: banyan.v1.GetDashboardDataRequest
+	(*GetDashboardDataResponse)(nil),      // 46: banyan.v1.GetDashboardDataResponse
+	(*EngineStatus)(nil),                  // 47: banyan.v1.EngineStatus
+	(*AgentDetail)(nil),                   // 48: banyan.v1.AgentDetail
+	(*ClusterSummary)(nil),                // 49: banyan.v1.ClusterSummary
+	(*ClusterEvent)(nil),                  // 50: banyan.v1.ClusterEvent
+	nil,                                   // 51: banyan.v1.Manifest.ServicesEntry
+	nil,                                   // 52: banyan.v1.Manifest.VolumesEntry
+	nil,                                   // 53: banyan.v1.ManifestService.DependsOnEntry
+	nil,                                   // 54: banyan.v1.VolumeConfig.DriverOptsEntry
+	nil,                                   // 55: banyan.v1.DeploymentInfo.ServicesEntry
+	nil,                                   // 56: banyan.v1.ServiceInfo.DependsOnEntry
+	nil,                                   // 57: banyan.v1.ClusterSummary.TasksByStatusEntry
 }
 var file_engine_proto_depIdxs = []int32{
 	3,  // 0: banyan.v1.RegisterResponse.active_containers:type_name -> banyan.v1.ActiveContainer
@@ -3652,63 +3892,69 @@ var file_engine_proto_depIdxs = []int32{
 	16, // 4: banyan.v1.PollTasksResponse.tasks:type_name -> banyan.v1.TaskRecord
 	10, // 5: banyan.v1.ReportTaskResultRequest.result:type_name -> banyan.v1.TaskResult
 	13, // 6: banyan.v1.ReportContainerHealthRequest.containers:type_name -> banyan.v1.ContainerStatus
-	22, // 7: banyan.v1.TaskRecord.healthcheck:type_name -> banyan.v1.ManifestHealthcheck
-	19, // 8: banyan.v1.DeployRPCRequest.manifest:type_name -> banyan.v1.Manifest
-	48, // 9: banyan.v1.Manifest.services:type_name -> banyan.v1.Manifest.ServicesEntry
-	23, // 10: banyan.v1.ManifestService.build:type_name -> banyan.v1.ManifestBuild
-	24, // 11: banyan.v1.ManifestService.deploy:type_name -> banyan.v1.ManifestDeploy
-	49, // 12: banyan.v1.ManifestService.depends_on:type_name -> banyan.v1.ManifestService.DependsOnEntry
-	22, // 13: banyan.v1.ManifestService.healthcheck:type_name -> banyan.v1.ManifestHealthcheck
-	27, // 14: banyan.v1.ManifestDeploy.placement:type_name -> banyan.v1.ManifestPlacement
-	25, // 15: banyan.v1.ManifestDeploy.resources:type_name -> banyan.v1.ManifestResources
-	26, // 16: banyan.v1.ManifestResources.limits:type_name -> banyan.v1.ResourceSpec
-	26, // 17: banyan.v1.ManifestResources.reservations:type_name -> banyan.v1.ResourceSpec
-	32, // 18: banyan.v1.GetStatusResponse.agents:type_name -> banyan.v1.AgentInfo
-	33, // 19: banyan.v1.GetStatusResponse.deployments:type_name -> banyan.v1.DeploymentInfo
-	50, // 20: banyan.v1.DeploymentInfo.services:type_name -> banyan.v1.DeploymentInfo.ServicesEntry
-	35, // 21: banyan.v1.DeploymentInfo.tasks:type_name -> banyan.v1.TaskInfo
-	51, // 22: banyan.v1.ServiceInfo.depends_on:type_name -> banyan.v1.ServiceInfo.DependsOnEntry
-	44, // 23: banyan.v1.GetDashboardDataResponse.engine:type_name -> banyan.v1.EngineStatus
-	45, // 24: banyan.v1.GetDashboardDataResponse.agents:type_name -> banyan.v1.AgentDetail
-	33, // 25: banyan.v1.GetDashboardDataResponse.deployments:type_name -> banyan.v1.DeploymentInfo
-	46, // 26: banyan.v1.GetDashboardDataResponse.summary:type_name -> banyan.v1.ClusterSummary
-	47, // 27: banyan.v1.GetDashboardDataResponse.recent_events:type_name -> banyan.v1.ClusterEvent
-	0,  // 28: banyan.v1.EngineStatus.system_metrics:type_name -> banyan.v1.SystemMetrics
-	0,  // 29: banyan.v1.AgentDetail.system_metrics:type_name -> banyan.v1.SystemMetrics
-	52, // 30: banyan.v1.ClusterSummary.tasks_by_status:type_name -> banyan.v1.ClusterSummary.TasksByStatusEntry
-	20, // 31: banyan.v1.Manifest.ServicesEntry.value:type_name -> banyan.v1.ManifestService
-	21, // 32: banyan.v1.ManifestService.DependsOnEntry.value:type_name -> banyan.v1.DependsOnCondition
-	34, // 33: banyan.v1.DeploymentInfo.ServicesEntry.value:type_name -> banyan.v1.ServiceInfo
-	21, // 34: banyan.v1.ServiceInfo.DependsOnEntry.value:type_name -> banyan.v1.DependsOnCondition
-	1,  // 35: banyan.v1.EngineService.Register:input_type -> banyan.v1.RegisterRequest
-	4,  // 36: banyan.v1.EngineService.Heartbeat:input_type -> banyan.v1.HeartbeatRequest
-	7,  // 37: banyan.v1.EngineService.PollTasks:input_type -> banyan.v1.PollTasksRequest
-	9,  // 38: banyan.v1.EngineService.ReportTaskResult:input_type -> banyan.v1.ReportTaskResultRequest
-	12, // 39: banyan.v1.EngineService.ReportContainerHealth:input_type -> banyan.v1.ReportContainerHealthRequest
-	17, // 40: banyan.v1.EngineService.Deploy:input_type -> banyan.v1.DeployRPCRequest
-	28, // 41: banyan.v1.EngineService.Down:input_type -> banyan.v1.DownRPCRequest
-	30, // 42: banyan.v1.EngineService.GetStatus:input_type -> banyan.v1.GetStatusRequest
-	36, // 43: banyan.v1.EngineService.GetLogs:input_type -> banyan.v1.GetLogsRequest
-	38, // 44: banyan.v1.EngineService.GetInfo:input_type -> banyan.v1.GetInfoRequest
-	40, // 45: banyan.v1.EngineService.Health:input_type -> banyan.v1.HealthRequest
-	42, // 46: banyan.v1.EngineService.GetDashboardData:input_type -> banyan.v1.GetDashboardDataRequest
-	2,  // 47: banyan.v1.EngineService.Register:output_type -> banyan.v1.RegisterResponse
-	5,  // 48: banyan.v1.EngineService.Heartbeat:output_type -> banyan.v1.HeartbeatResponse
-	8,  // 49: banyan.v1.EngineService.PollTasks:output_type -> banyan.v1.PollTasksResponse
-	11, // 50: banyan.v1.EngineService.ReportTaskResult:output_type -> banyan.v1.ReportTaskResultResponse
-	15, // 51: banyan.v1.EngineService.ReportContainerHealth:output_type -> banyan.v1.ReportContainerHealthResponse
-	18, // 52: banyan.v1.EngineService.Deploy:output_type -> banyan.v1.DeployRPCResponse
-	29, // 53: banyan.v1.EngineService.Down:output_type -> banyan.v1.DownRPCResponse
-	31, // 54: banyan.v1.EngineService.GetStatus:output_type -> banyan.v1.GetStatusResponse
-	37, // 55: banyan.v1.EngineService.GetLogs:output_type -> banyan.v1.GetLogsResponse
-	39, // 56: banyan.v1.EngineService.GetInfo:output_type -> banyan.v1.GetInfoResponse
-	41, // 57: banyan.v1.EngineService.Health:output_type -> banyan.v1.HealthResponse
-	43, // 58: banyan.v1.EngineService.GetDashboardData:output_type -> banyan.v1.GetDashboardDataResponse
-	47, // [47:59] is the sub-list for method output_type
-	35, // [35:47] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	25, // 7: banyan.v1.TaskRecord.healthcheck:type_name -> banyan.v1.ManifestHealthcheck
+	21, // 8: banyan.v1.TaskRecord.volumes:type_name -> banyan.v1.VolumeMount
+	19, // 9: banyan.v1.DeployRPCRequest.manifest:type_name -> banyan.v1.Manifest
+	51, // 10: banyan.v1.Manifest.services:type_name -> banyan.v1.Manifest.ServicesEntry
+	52, // 11: banyan.v1.Manifest.volumes:type_name -> banyan.v1.Manifest.VolumesEntry
+	26, // 12: banyan.v1.ManifestService.build:type_name -> banyan.v1.ManifestBuild
+	27, // 13: banyan.v1.ManifestService.deploy:type_name -> banyan.v1.ManifestDeploy
+	53, // 14: banyan.v1.ManifestService.depends_on:type_name -> banyan.v1.ManifestService.DependsOnEntry
+	25, // 15: banyan.v1.ManifestService.healthcheck:type_name -> banyan.v1.ManifestHealthcheck
+	21, // 16: banyan.v1.ManifestService.volumes:type_name -> banyan.v1.VolumeMount
+	22, // 17: banyan.v1.VolumeMount.tmpfs:type_name -> banyan.v1.TmpfsOpt
+	54, // 18: banyan.v1.VolumeConfig.driver_opts:type_name -> banyan.v1.VolumeConfig.DriverOptsEntry
+	30, // 19: banyan.v1.ManifestDeploy.placement:type_name -> banyan.v1.ManifestPlacement
+	28, // 20: banyan.v1.ManifestDeploy.resources:type_name -> banyan.v1.ManifestResources
+	29, // 21: banyan.v1.ManifestResources.limits:type_name -> banyan.v1.ResourceSpec
+	29, // 22: banyan.v1.ManifestResources.reservations:type_name -> banyan.v1.ResourceSpec
+	35, // 23: banyan.v1.GetStatusResponse.agents:type_name -> banyan.v1.AgentInfo
+	36, // 24: banyan.v1.GetStatusResponse.deployments:type_name -> banyan.v1.DeploymentInfo
+	55, // 25: banyan.v1.DeploymentInfo.services:type_name -> banyan.v1.DeploymentInfo.ServicesEntry
+	38, // 26: banyan.v1.DeploymentInfo.tasks:type_name -> banyan.v1.TaskInfo
+	56, // 27: banyan.v1.ServiceInfo.depends_on:type_name -> banyan.v1.ServiceInfo.DependsOnEntry
+	47, // 28: banyan.v1.GetDashboardDataResponse.engine:type_name -> banyan.v1.EngineStatus
+	48, // 29: banyan.v1.GetDashboardDataResponse.agents:type_name -> banyan.v1.AgentDetail
+	36, // 30: banyan.v1.GetDashboardDataResponse.deployments:type_name -> banyan.v1.DeploymentInfo
+	49, // 31: banyan.v1.GetDashboardDataResponse.summary:type_name -> banyan.v1.ClusterSummary
+	50, // 32: banyan.v1.GetDashboardDataResponse.recent_events:type_name -> banyan.v1.ClusterEvent
+	0,  // 33: banyan.v1.EngineStatus.system_metrics:type_name -> banyan.v1.SystemMetrics
+	0,  // 34: banyan.v1.AgentDetail.system_metrics:type_name -> banyan.v1.SystemMetrics
+	57, // 35: banyan.v1.ClusterSummary.tasks_by_status:type_name -> banyan.v1.ClusterSummary.TasksByStatusEntry
+	20, // 36: banyan.v1.Manifest.ServicesEntry.value:type_name -> banyan.v1.ManifestService
+	23, // 37: banyan.v1.Manifest.VolumesEntry.value:type_name -> banyan.v1.VolumeConfig
+	24, // 38: banyan.v1.ManifestService.DependsOnEntry.value:type_name -> banyan.v1.DependsOnCondition
+	37, // 39: banyan.v1.DeploymentInfo.ServicesEntry.value:type_name -> banyan.v1.ServiceInfo
+	24, // 40: banyan.v1.ServiceInfo.DependsOnEntry.value:type_name -> banyan.v1.DependsOnCondition
+	1,  // 41: banyan.v1.EngineService.Register:input_type -> banyan.v1.RegisterRequest
+	4,  // 42: banyan.v1.EngineService.Heartbeat:input_type -> banyan.v1.HeartbeatRequest
+	7,  // 43: banyan.v1.EngineService.PollTasks:input_type -> banyan.v1.PollTasksRequest
+	9,  // 44: banyan.v1.EngineService.ReportTaskResult:input_type -> banyan.v1.ReportTaskResultRequest
+	12, // 45: banyan.v1.EngineService.ReportContainerHealth:input_type -> banyan.v1.ReportContainerHealthRequest
+	17, // 46: banyan.v1.EngineService.Deploy:input_type -> banyan.v1.DeployRPCRequest
+	31, // 47: banyan.v1.EngineService.Down:input_type -> banyan.v1.DownRPCRequest
+	33, // 48: banyan.v1.EngineService.GetStatus:input_type -> banyan.v1.GetStatusRequest
+	39, // 49: banyan.v1.EngineService.GetLogs:input_type -> banyan.v1.GetLogsRequest
+	41, // 50: banyan.v1.EngineService.GetInfo:input_type -> banyan.v1.GetInfoRequest
+	43, // 51: banyan.v1.EngineService.Health:input_type -> banyan.v1.HealthRequest
+	45, // 52: banyan.v1.EngineService.GetDashboardData:input_type -> banyan.v1.GetDashboardDataRequest
+	2,  // 53: banyan.v1.EngineService.Register:output_type -> banyan.v1.RegisterResponse
+	5,  // 54: banyan.v1.EngineService.Heartbeat:output_type -> banyan.v1.HeartbeatResponse
+	8,  // 55: banyan.v1.EngineService.PollTasks:output_type -> banyan.v1.PollTasksResponse
+	11, // 56: banyan.v1.EngineService.ReportTaskResult:output_type -> banyan.v1.ReportTaskResultResponse
+	15, // 57: banyan.v1.EngineService.ReportContainerHealth:output_type -> banyan.v1.ReportContainerHealthResponse
+	18, // 58: banyan.v1.EngineService.Deploy:output_type -> banyan.v1.DeployRPCResponse
+	32, // 59: banyan.v1.EngineService.Down:output_type -> banyan.v1.DownRPCResponse
+	34, // 60: banyan.v1.EngineService.GetStatus:output_type -> banyan.v1.GetStatusResponse
+	40, // 61: banyan.v1.EngineService.GetLogs:output_type -> banyan.v1.GetLogsResponse
+	42, // 62: banyan.v1.EngineService.GetInfo:output_type -> banyan.v1.GetInfoResponse
+	44, // 63: banyan.v1.EngineService.Health:output_type -> banyan.v1.HealthResponse
+	46, // 64: banyan.v1.EngineService.GetDashboardData:output_type -> banyan.v1.GetDashboardDataResponse
+	53, // [53:65] is the sub-list for method output_type
+	41, // [41:53] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_engine_proto_init() }
@@ -3722,7 +3968,7 @@ func file_engine_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_engine_proto_rawDesc), len(file_engine_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   53,
+			NumMessages:   58,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

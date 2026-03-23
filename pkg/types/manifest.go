@@ -2,7 +2,6 @@ package types
 
 import (
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -184,14 +183,14 @@ func (v *VolumeMounts) UnmarshalYAML(value *yaml.Node) error {
 // Relative bind mount paths are resolved against basePath (the manifest directory).
 // Named volumes with NFS driver_opts are converted to type "nfs" with the
 // NFS source (addr:device) in the Source field.
-func ResolveManifestVolumes(basePath string, manifest *BanyanManifest) {
+func ResolveManifestVolumes(_ string, manifest *BanyanManifest) {
 	for svcName := range manifest.Services {
 		svc := manifest.Services[svcName]
 		for i, vol := range svc.Volumes {
-			// Resolve relative bind mount paths
-			if vol.Type == "bind" && !strings.HasPrefix(vol.Source, "/") {
-				svc.Volumes[i].Source = filepath.Join(basePath, vol.Source)
-			}
+			// Relative bind mount paths are NOT resolved on the CLI.
+			// They are resolved on the agent against /var/lib/banyan/data/.
+			// This ensures paths work in distributed deployments.
+
 			// Resolve named volumes with NFS driver_opts
 			if vol.Type == "volume" && len(manifest.Volumes) > 0 {
 				vc, ok := manifest.Volumes[vol.Source]

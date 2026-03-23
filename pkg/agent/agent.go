@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -82,6 +83,7 @@ var (
 	containerIPGetter         = getContainerIP
 	vpcNetworkEnabled         bool           // set by Agent.Run() after VPC init
 	dnsGatewayIPAddr          string         // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
+	bindMountDataDir          = "/var/lib/banyan/data" // base dir for relative bind mount paths
 	heartbeatInterval         = 15 * time.Second // overridable in tests
 	taskPollInterval          = 2 * time.Second  // overridable in tests
 	healthCheckInterval       = 10 * time.Second // overridable in tests
@@ -548,8 +550,13 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 				mount += ",tmpfs-size=" + vol.Tmpfs.Size
 			}
 			args = append(args, "--mount", mount)
-		default: // "volume", "bind", or empty (default to bind/volume based on source)
-			flag := vol.Source + ":" + vol.Target
+		default: // "volume", "bind", or empty
+			source := vol.Source
+			// Resolve relative bind mount paths on the agent (not the CLI)
+			if vol.Type == "bind" && source != "" && !strings.HasPrefix(source, "/") {
+				source = filepath.Join(bindMountDataDir, source)
+			}
+			flag := source + ":" + vol.Target
 			if vol.ReadOnly {
 				flag += ":ro"
 			}

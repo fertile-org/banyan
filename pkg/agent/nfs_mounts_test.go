@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/fertile-org/banyan/pkg/types"
@@ -205,13 +206,13 @@ func TestResolveManifestVolumes(t *testing.T) {
 		},
 	}
 
-	types.ResolveManifestVolumes("/home/user/myapp", manifest)
+	types.ResolveManifestVolumes("", manifest)
 
 	api := manifest.Services["api"]
 
-	// Relative path resolved
-	if api.Volumes[0].Source != "/home/user/myapp/config" {
-		t.Errorf("expected resolved path, got %q", api.Volumes[0].Source)
+	// Relative path NOT resolved on CLI (resolved on agent instead)
+	if api.Volumes[0].Source != "./config" {
+		t.Errorf("expected relative path unchanged, got %q", api.Volumes[0].Source)
 	}
 
 	// NFS named volume resolved
@@ -220,5 +221,26 @@ func TestResolveManifestVolumes(t *testing.T) {
 	}
 	if api.Volumes[1].Source != "10.0.0.1:/exports/shared" {
 		t.Errorf("expected NFS source, got %q", api.Volumes[1].Source)
+	}
+}
+
+func TestBuildNerdctlRunArgs_RelativeBindMount(t *testing.T) {
+	origDir := bindMountDataDir
+	bindMountDataDir = "/var/lib/banyan/data"
+	t.Cleanup(func() { bindMountDataDir = origDir })
+
+	task := &types.TaskRecord{
+		ContainerName: "app-0",
+		Image:         "myapp",
+		Volumes: []types.VolumeMount{
+			{Type: "bind", Source: "./config.yml", Target: "/etc/app/config.yml", ReadOnly: true},
+		},
+	}
+	args := buildNerdctlRunArgs(task, false)
+	argsStr := strings.Join(args, " ")
+
+	expected := "-v /var/lib/banyan/data/config.yml:/etc/app/config.yml:ro"
+	if !strings.Contains(argsStr, expected) {
+		t.Errorf("expected relative path resolved on agent:\n  want: %s\n  got:  %s", expected, argsStr)
 	}
 }

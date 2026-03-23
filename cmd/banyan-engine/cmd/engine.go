@@ -574,18 +574,9 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		log.Warn("Failed to load config", "error", err)
 	}
 
-	// Early auth check — fail fast before starting etcd, WireGuard, registry, etc.
-	if !engineAllowInsecure {
-		whitelistedKeysDir := cfg.Engine.WhitelistedKeysDir
-		if whitelistedKeysDir == "" {
-			whitelistedKeysDir = types.DefaultWhitelistedKeysDir
-		}
-		earlyKeys, _ := types.LoadWhitelistedKeys(whitelistedKeysDir)
-		if len(earlyKeys) == 0 {
-			return fmt.Errorf("no whitelisted client keys found in %s\n"+
-				"  Add client keys with: sudo banyan-engine add-client --name <name> --pubkey <key>\n"+
-				"  Or use --allow-insecure for development only (NOT for production)", whitelistedKeysDir)
-		}
+	// Early validation — fail fast before starting etcd, WireGuard, registry, etc.
+	if valErr := types.ValidateEngineStartConfig(&cfg.Engine, engineAllowInsecure); valErr != nil {
+		return valErr
 	}
 
 	// Read gRPC port from config if not overridden by flags
@@ -646,16 +637,6 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 			}
 		}
 		log.Info("WireGuard control tunnel ready", "ip", engineTunnelIP, "peers", len(whitelistedKeys))
-	}
-
-	// Validate multi-engine prerequisites
-	if cfg.Engine.MultiEngine {
-		if cfg.Engine.ManagedEtcd {
-			return fmt.Errorf("multi-engine mode requires external etcd (set managed_etcd: false and provide store_address)")
-		}
-		if cfg.Engine.ManagedRegistry || cfg.Engine.ExternalRegistryURL == "" {
-			return fmt.Errorf("multi-engine mode requires external registry (set managed_registry: false and provide external_registry_url)")
-		}
 	}
 
 	// Handle managed or external registry

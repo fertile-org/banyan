@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"time"
 
 	"google.golang.org/grpc"
@@ -48,23 +47,8 @@ var controlTunnelExistsFn = overlay.ControlTunnelExists
 func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
 	cfg, _ := types.LoadConfig(configPath)
 
-	// Build engine list from config — always use `engines` field.
-	// Fall back to old single-engine fields for configs that haven't been re-initialized.
-	engines := cfg.CLI.Engines
-	if len(engines) == 0 && cfg.CLI.EngineWGPublicKey != "" {
-		port := "50051"
-		if cfg.CLI.EnginePort != "" {
-			port = cfg.CLI.EnginePort
-		}
-		host := cfg.CLI.EngineHost
-		if host == "" {
-			host = "localhost"
-		}
-		engines = []types.EngineEndpoint{
-			{Address: host + ":" + port, WGPublicKey: cfg.CLI.EngineWGPublicKey},
-		}
-	}
-
+	// Build engine list from config
+	engines := types.ResolveCLIEngines(&cfg.CLI)
 	if len(engines) == 0 {
 		return nil, fmt.Errorf("no engines configured. Run 'sudo banyan-cli init'")
 	}
@@ -74,21 +58,9 @@ func NewAutoEngineClient(engineAddr string) (*EngineClient, error) {
 		return nil, fmt.Errorf("no authentication configured. Run 'sudo banyan-cli init'")
 	}
 
-	// Build endpoint list — use WG tunnel IPs when tunnel is active, direct addresses otherwise
+	// Build gRPC endpoint list
 	tunnelActive := controlTunnelExistsFn(types.ControlIfaceCLI)
-	var endpoints []string
-	for _, eng := range engines {
-		if tunnelActive {
-			_, port, splitErr := net.SplitHostPort(eng.Address)
-			if splitErr != nil {
-				continue
-			}
-			tunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
-			endpoints = append(endpoints, tunnelIP.String()+":"+port)
-		} else {
-			endpoints = append(endpoints, eng.Address)
-		}
-	}
+	endpoints := types.BuildGRPCEndpoints(engines, tunnelActive)
 
 	// Try each endpoint with a health check
 	var lastErr error

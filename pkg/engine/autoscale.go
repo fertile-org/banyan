@@ -197,13 +197,33 @@ func parseDuration(s string, defaultVal time.Duration) time.Duration {
 	return d
 }
 
+// rebalanceMigrationCooldown tracks recently migrated containers to prevent ping-pong.
+// Key: container name, value: time of last migration.
+var rebalanceMigrationCooldown = make(map[string]time.Time)
+
+// rebalanceCooldownDuration is the minimum time before a container can be migrated again.
+const rebalanceCooldownDuration = 10 * time.Minute
+
+// rebalanceOverloadThreshold is the CPU% above which an agent is considered overloaded.
+// Set high (95%) because high CPU is often fine — only intervene when it's truly problematic.
+const rebalanceOverloadThreshold = 95.0
+
+// rebalanceTargetMaxCPU is the max CPU% the target agent should have AFTER migration.
+// Prevents migrating a container to an agent that would also become overloaded.
+const rebalanceTargetMaxCPU = 70.0
+
+// rebalanceMinImbalance is the minimum CPU% difference between source and target
+// required before a migration is considered worthwhile.
+const rebalanceMinImbalance = 30.0
+
 // evaluateRebalance checks for imbalanced agents and migrates stateless containers.
 //
-// Criteria:
-//   - Overloaded: agent CPU > 85%
-//   - Underloaded: agent CPU < 40%
-//   - Migratable: no volumes, no placement constraint, status=running
-//   - Max 1 migration per cycle per agent
+// Safeguards against infinite rebalancing:
+//  1. Per-container cooldown (10 min) — prevents ping-pong
+//  2. High threshold (95%) — only intervene when truly problematic
+//  3. Target validation — won't overload destination (must stay < 70% after migration)
+//  4. Minimum imbalance (30%) — source and target must differ significantly
+//  5. Max 1 migration per agent per cycle
 func (e *Engine) evaluateRebalance(ctx context.Context) {
 	nodeKeys, err := e.store.List(ctx, types.KeyNodes)
 	if err != nil {
@@ -228,55 +248,81 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 	}
 
 	if len(agents) < 2 {
-		return // need at least 2 agents for rebalancing
+		return
 	}
 
 	// Find overloaded and underloaded agents
 	var overloaded, underloaded []agentInfo
 	for _, a := range agents {
-		if a.cpu > 85 {
+		if a.cpu > rebalanceOverloadThreshold {
 			overloaded = append(overloaded, a)
-		} else if a.cpu < 40 {
+		} else if a.cpu < rebalanceTargetMaxCPU {
 			underloaded = append(underloaded, a)
 		}
 	}
 
 	if len(overloaded) == 0 || len(underloaded) == 0 {
-		return // no imbalance
+		return
+	}
+
+	// Clean up expired cooldown entries
+	for name, t := range rebalanceMigrationCooldown {
+		if time.Since(t) > rebalanceCooldownDuration {
+			delete(rebalanceMigrationCooldown, name)
+		}
 	}
 
 	// For each overloaded agent, try to migrate one stateless container
-	migrated := make(map[string]bool) // agent → already migrated this cycle
+	migrated := make(map[string]bool)
 	for _, over := range overloaded {
 		if migrated[over.node.Name] {
 			continue // max 1 migration per agent per cycle
 		}
 
-		// Find migratable containers on this agent
+		// Find migratable container (not recently migrated)
 		candidate := e.findMigratableTask(ctx, over.node.Name)
 		if candidate == nil {
 			continue
 		}
 
-		// Pick the least loaded underloaded agent
+		// Check per-container cooldown — prevent ping-pong
+		if lastMigrated, ok := rebalanceMigrationCooldown[candidate.ContainerName]; ok {
+			if time.Since(lastMigrated) < rebalanceCooldownDuration {
+				continue // recently migrated, skip
+			}
+		}
+
+		// Pick the least loaded target agent
 		var bestTarget *agentInfo
 		for i := range underloaded {
+			// Safeguard: require minimum imbalance between source and target
+			if over.cpu-underloaded[i].cpu < rebalanceMinImbalance {
+				continue
+			}
+			// Safeguard: estimate target CPU after migration — don't overload it
+			// (rough estimate: add container's CPU% to target agent)
+			estimatedTargetCPU := underloaded[i].cpu + candidate.CPUPercent
+			if estimatedTargetCPU > rebalanceTargetMaxCPU {
+				continue // would overload the target
+			}
 			if bestTarget == nil || underloaded[i].cpu < bestTarget.cpu {
 				bestTarget = &underloaded[i]
 			}
 		}
 		if bestTarget == nil {
-			continue
+			continue // no suitable target found
 		}
 
 		e.logger().Info("Rebalance: migrating container",
 			"container", candidate.ContainerName,
 			"from", over.node.Name, "to", bestTarget.node.Name,
 			"from_cpu", fmt.Sprintf("%.1f%%", over.cpu),
-			"to_cpu", fmt.Sprintf("%.1f%%", bestTarget.cpu))
+			"to_cpu", fmt.Sprintf("%.1f%%", bestTarget.cpu),
+			"container_cpu", fmt.Sprintf("%.1f%%", candidate.CPUPercent))
 
 		e.migrateTask(ctx, candidate, over.node.Name, bestTarget.node.Name)
 		migrated[over.node.Name] = true
+		rebalanceMigrationCooldown[candidate.ContainerName] = time.Now()
 	}
 }
 

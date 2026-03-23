@@ -165,7 +165,24 @@ See [High Availability](/guides/high-availability/) for setup guide.
 
 ---
 
-## Milestone 8 — Auto-Scaling
+## Milestone 8 — Volumes
+
+Status: **Done**
+
+Persistent storage for containers — named volumes, bind mounts, tmpfs, and NFS shared volumes. Same syntax as Docker Compose.
+
+- **Named volumes**: Persistent local storage managed by the container engine. Data survives container restarts.
+- **Bind mounts**: Mount host directories or files into containers. Absolute paths or relative to `/var/lib/banyan/data/` on each agent.
+- **tmpfs**: In-memory temporary storage with optional size limits.
+- **NFS shared volumes**: Declare NFS in the manifest, Banyan mounts it on each agent automatically. Multiple replicas on different agents share the same data.
+- **Read-only mounts**: Append `:ro` or set `read_only: true` to prevent container writes.
+- **Placement + volumes**: Pin stateful services to specific agents with `deploy.placement.node` to ensure data locality.
+
+See [Manifest Reference — Volumes](/reference/manifest/#volumes) for syntax and examples.
+
+---
+
+## Milestone 9 — Auto-Scaling
 
 Scale services based on metrics and support automatic rollback.
 
@@ -176,7 +193,7 @@ Scale services based on metrics and support automatic rollback.
 
 ---
 
-## Milestone 9 — Web Monitoring Dashboard
+## Milestone 10 — Web Monitoring Dashboard
 
 Web-based dashboard for cluster visualization and monitoring.
 
@@ -191,7 +208,7 @@ The terminal dashboard (`banyan-cli dashboard`) is already available — see [Mi
 
 ---
 
-## Milestone 10 — Advanced Security
+## Milestone 11 — Advanced Security
 
 Authorizaton, secrets management, and certificate rotation for secure cluster operations.
 
@@ -201,7 +218,7 @@ Authorizaton, secrets management, and certificate rotation for secure cluster op
 
 ---
 
-## Milestone 11 — Dynamic Workload Rebalancing
+## Milestone 12 — Dynamic Workload Rebalancing
 
 Automatically redistribute services across nodes based on actual resource usage and node capacity.
 
@@ -215,7 +232,7 @@ Automatically redistribute services across nodes based on actual resource usage 
 
 ---
 
-## Milestone 12 — Advanced Networking
+## Milestone 13 — Advanced Networking
 
 Service discovery, traffic policies, and encrypted communication across the cluster.
 

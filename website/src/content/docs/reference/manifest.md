@@ -106,6 +106,7 @@ services:
 | `healthcheck.start_period` | string | No | -- | Grace period for startup (e.g., `30s`). Failures during this period don't count toward retries. |
 | `healthcheck.disable` | boolean | No | `false` | Set `true` to disable any healthcheck defined in the image. |
 | `depends_on` | list or map | No | -- | Service dependencies. Short form: `["db", "redis"]`. Long form with conditions: `{db: {condition: service_healthy}}`. Conditions: `service_started` (default), `service_healthy`. See [depends_on](#depends_on) below. |
+| `volumes` | list | No | -- | Mount volumes into the container. Same syntax as Docker Compose. See [volumes](#volumes) below. |
 
 ## Container naming
 
@@ -358,6 +359,154 @@ CPU values are tracked but memory is the primary scheduling dimension.
 :::tip
 For most workloads, you don't need to set `deploy.resources` at all. The defaults (512 MB, 1 CPU per service) work well for typical web services. Add explicit resources when you have services with significantly different needs — a memory-heavy database alongside lightweight API workers, for example.
 :::
+
+## Volumes
+
+Mount host directories, named volumes, or temporary filesystems into containers. Same syntax as Docker Compose.
+
+### Short syntax
+
+```yaml
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - db-data:/var/lib/postgresql/data           # named volume
+      - /backups:/backups:ro                        # host path, read-only
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql  # relative path
+```
+
+| Format | Type | Example |
+|--------|------|---------|
+| `name:/container/path` | Named volume | `db-data:/var/lib/postgresql/data` |
+| `/host/path:/container/path` | Host path (absolute) | `/backups:/backups` |
+| `./path:/container/path` | Host path (relative) | `./config:/etc/app/config` |
+| `...:ro` | Read-only mount | `db-data:/data:ro` |
+
+### Long syntax
+
+For more control, use the mapping form:
+
+```yaml
+services:
+  api:
+    image: myapp/api
+    volumes:
+      - type: bind
+        source: /host/logs
+        target: /var/log/app
+        read_only: true
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 512m
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `type` | string | Yes | `volume`, `bind`, or `tmpfs` |
+| `source` | string | No | Volume name (for `volume`) or host path (for `bind`). Not used for `tmpfs`. |
+| `target` | string | Yes | Absolute path inside the container. |
+| `read_only` | boolean | No | Mount as read-only. Default: `false`. |
+| `tmpfs.size` | string | No | Size limit for tmpfs (e.g., `512m`, `1g`). |
+
+### Top-level volumes
+
+Declare named volumes at the top level to configure their driver:
+
+```yaml
+volumes:
+  db-data:                     # local storage (default)
+  shared-uploads:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=nfs.internal,vers=4,soft"
+      device: ":/exports/uploads"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `driver` | string | Volume driver. Default: `local`. |
+| `driver_opts` | map | Driver-specific options. For NFS: `type`, `o` (mount options), `device` (server path). |
+
+Named volumes without a top-level declaration default to local storage on the agent.
+
+### Databases and persistent data
+
+Named volumes are **local to each agent**. If Banyan schedules a database on a different agent after a redeployment, the data won't follow.
+
+For databases and other stateful services, pin them to a specific agent:
+
+```yaml
+services:
+  db:
+    image: postgres:15
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    deploy:
+      placement:
+        node: db-*                  # always runs on agents matching "db-*"
+
+volumes:
+  db-data:
+```
+
+This ensures the database always runs on the same agent, where its named volume lives.
+
+:::caution
+Without `deploy.placement.node`, Banyan may schedule a stateful service on a different agent after redeployment. The named volume from the previous agent won't be available. Always pin stateful services to a specific agent.
+:::
+
+### NFS shared volumes
+
+For data that multiple services or agents need to access, use NFS:
+
+```yaml
+services:
+  api:
+    image: myapp/api
+    deploy:
+      replicas: 3
+    volumes:
+      - uploads:/app/uploads
+
+volumes:
+  uploads:
+    driver: local
+    driver_opts:
+      type: nfs
+      o: "addr=nfs.internal,vers=4,soft"
+      device: ":/exports/uploads"
+```
+
+All 3 API replicas — regardless of which agent they run on — mount the same NFS share. You provide the NFS server; Banyan handles the mounting on each agent.
+
+:::note
+NFS requires `nfs-common` (Debian/Ubuntu) or `nfs-utils` (RHEL/Fedora) on each agent. The install script installs this automatically.
+:::
+
+### Relative paths
+
+In Docker Compose, `./config` is relative to the compose file. In Banyan, the manifest runs on a different machine than the containers.
+
+Relative bind mount paths resolve to `/var/lib/banyan/data/` on the agent machine. To mount `./config.yml`:
+
+1. Place the file at `/var/lib/banyan/data/config.yml` on each agent
+2. Use `./config.yml:/etc/app/config.yml` in the manifest
+
+For files that only exist on one agent, combine with placement:
+
+```yaml
+services:
+  app:
+    image: myapp
+    volumes:
+      - ./config.yml:/etc/app/config.yml:ro
+    deploy:
+      placement:
+        node: app-server
+```
 
 ## Validation
 

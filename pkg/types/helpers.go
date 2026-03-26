@@ -76,6 +76,12 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 				memReservation = svc.Deploy.Resources.Reservations.Memory
 			}
 		}
+		var autoscale *ManifestAutoscale
+		var stopGracePeriod string
+		if svc.Deploy != nil {
+			autoscale = svc.Deploy.Autoscale
+			stopGracePeriod = svc.Deploy.StopGracePeriod
+		}
 		services[name] = ServiceRecord{
 			Image:             svc.Image,
 			Replicas:          replicas,
@@ -91,6 +97,8 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 			MemoryReservation: memReservation,
 			Healthcheck:       svc.Healthcheck,
 			Volumes:           svc.Volumes,
+			Autoscale:         autoscale,
+			StopGracePeriod:   stopGracePeriod,
 		}
 	}
 	return services

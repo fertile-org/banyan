@@ -236,6 +236,17 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 				}
 				md.Resources = mr
 			}
+			if svc.Deploy.Autoscale != nil {
+				md.Autoscale = &banyanpb.ManifestAutoscale{
+					Min:       int32(svc.Deploy.Autoscale.Min),       //nolint:gosec // small int
+					Max:       int32(svc.Deploy.Autoscale.Max),       //nolint:gosec // small int
+					TargetCpu: int32(svc.Deploy.Autoscale.TargetCPU), //nolint:gosec // small int
+					Cooldown:  svc.Deploy.Autoscale.Cooldown,
+				}
+			}
+			if svc.Deploy.StopGracePeriod != "" {
+				md.StopGracePeriod = svc.Deploy.StopGracePeriod
+			}
 			ms.Deploy = md
 		}
 		// Volume mounts

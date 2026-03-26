@@ -11,7 +11,7 @@ Banyan uses three binaries. Install only what each machine needs.
 |--------|------|------------|---------------|
 | `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node | Yes (all commands) |
 | `banyan-agent` | Agent (task execution, container management) | Agent nodes | Yes (all commands) |
-| `banyan-cli` | Client (up, down, engine, agent, deployment, container, events, logs, dashboard) | Any machine | `init` and `login` |
+| `banyan-cli` | Client (up, down, scale, engine, agent, deployment, container, events, logs, dashboard) | Any machine | `init` and `login` |
 
 ---
 
@@ -308,6 +308,47 @@ banyan-cli down --name my-app web db
 # Stop a tagged deployment
 banyan-cli down --name my-app --tags staging
 ```
+
+### scale
+
+Adjust replica counts for services in a running deployment, without redeploying.
+
+```bash
+banyan-cli scale my-app api=5 web=3
+```
+
+Containers are added or removed individually — no blue-green, no new deployment ID. Scale-up creates new containers on available agents. Scale-down follows a graceful drain: remove from proxy, remove DNS, wait `stop_grace_period`, then stop.
+
+| Argument | Description |
+|----------|-------------|
+| `<app-name>` | Name of the deployed application |
+| `<service=replicas>` | One or more service=count pairs |
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--tags` | | Deployment tags for matching (comma-separated) |
+
+```
+  api: 2 → 5 replicas (scaling up)
+  web: 4 → 3 replicas (scaling down)
+```
+
+Examples:
+
+```bash
+# Scale the API service to 5 replicas
+banyan-cli scale my-app api=5
+
+# Scale multiple services at once
+banyan-cli scale my-app api=5 web=3
+
+# Scale a tagged deployment
+banyan-cli scale my-app api=5 --tags staging
+```
+
+:::tip
+For automatic scaling based on CPU metrics, define `deploy.autoscale` in your manifest instead. See [Manifest Reference — Auto-scaling](/reference/manifest/#auto-scaling).
+:::
 
 ### engine
 

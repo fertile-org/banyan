@@ -338,6 +338,10 @@ func (e *Engine) startMetricsHTTP(ctx context.Context, port string) error {
 func (e *Engine) engineLoop(ctx context.Context) {
 	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
+	autoscaleTicker := time.NewTicker(30 * time.Second)
+	defer autoscaleTicker.Stop()
+	rebalanceTicker := time.NewTicker(60 * time.Second)
+	defer rebalanceTicker.Stop()
 
 	for {
 		select {
@@ -348,6 +352,10 @@ func (e *Engine) engineLoop(ctx context.Context) {
 			e.updateMetrics(ctx)
 		case <-e.scheduleCh:
 			e.processDeployments(ctx)
+		case <-autoscaleTicker.C:
+			e.evaluateAutoscale(ctx)
+		case <-rebalanceTicker.C:
+			e.evaluateRebalance(ctx)
 		}
 	}
 }

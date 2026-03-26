@@ -61,12 +61,15 @@ type DeploymentRecord struct {
 type ServiceRecord struct {
 	DependsOn         DependsOnConfig      `json:"depends_on,omitempty"`
 	Healthcheck       *ManifestHealthcheck `json:"healthcheck,omitempty"`
+	Autoscale         *ManifestAutoscale   `json:"autoscale,omitempty"`
+	LastScaleAt       time.Time            `json:"last_scale_at,omitempty"`
 	Image             string               `json:"image"`
 	Placement         string               `json:"placement,omitempty"`
 	Restart           string               `json:"restart,omitempty"`
 	MemoryLimit       string               `json:"memory_limit,omitempty"`
 	CPULimit          string               `json:"cpu_limit,omitempty"`
 	MemoryReservation string               `json:"memory_reservation,omitempty"`
+	StopGracePeriod   string               `json:"stop_grace_period,omitempty"`
 	Ports             []string             `json:"ports,omitempty"`
 	Environment       []string             `json:"env,omitempty"`
 	Command           []string             `json:"command,omitempty"`
@@ -105,6 +108,9 @@ type TaskRecord struct {
 	Environment        []string             `json:"env,omitempty"`
 	Volumes            []VolumeMount        `json:"volumes,omitempty"`
 	ReplicaIndex       int                  `json:"replica_index"`
+	CPUPercent         float64              `json:"cpu_percent,omitempty"`
+	MemoryUsedBytes    uint64               `json:"memory_used_bytes,omitempty"`
+	MemoryLimitBytes   uint64               `json:"memory_limit_bytes,omitempty"`
 }
 
 // TaskResultRecord stores the outcome of task execution.

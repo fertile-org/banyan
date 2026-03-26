@@ -30,6 +30,7 @@ const (
 	EngineService_GetLogs_FullMethodName               = "/banyan.v1.EngineService/GetLogs"
 	EngineService_GetInfo_FullMethodName               = "/banyan.v1.EngineService/GetInfo"
 	EngineService_Health_FullMethodName                = "/banyan.v1.EngineService/Health"
+	EngineService_Scale_FullMethodName                 = "/banyan.v1.EngineService/Scale"
 	EngineService_GetDashboardData_FullMethodName      = "/banyan.v1.EngineService/GetDashboardData"
 )
 
@@ -52,6 +53,7 @@ type EngineServiceClient interface {
 	GetLogs(ctx context.Context, in *GetLogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[GetLogsResponse], error)
 	GetInfo(ctx context.Context, in *GetInfoRequest, opts ...grpc.CallOption) (*GetInfoResponse, error)
 	Health(ctx context.Context, in *HealthRequest, opts ...grpc.CallOption) (*HealthResponse, error)
+	Scale(ctx context.Context, in *ScaleRequest, opts ...grpc.CallOption) (*ScaleResponse, error)
 	// Dashboard RPCs
 	GetDashboardData(ctx context.Context, in *GetDashboardDataRequest, opts ...grpc.CallOption) (*GetDashboardDataResponse, error)
 }
@@ -183,6 +185,16 @@ func (c *engineServiceClient) Health(ctx context.Context, in *HealthRequest, opt
 	return out, nil
 }
 
+func (c *engineServiceClient) Scale(ctx context.Context, in *ScaleRequest, opts ...grpc.CallOption) (*ScaleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScaleResponse)
+	err := c.cc.Invoke(ctx, EngineService_Scale_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *engineServiceClient) GetDashboardData(ctx context.Context, in *GetDashboardDataRequest, opts ...grpc.CallOption) (*GetDashboardDataResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetDashboardDataResponse)
@@ -212,6 +224,7 @@ type EngineServiceServer interface {
 	GetLogs(*GetLogsRequest, grpc.ServerStreamingServer[GetLogsResponse]) error
 	GetInfo(context.Context, *GetInfoRequest) (*GetInfoResponse, error)
 	Health(context.Context, *HealthRequest) (*HealthResponse, error)
+	Scale(context.Context, *ScaleRequest) (*ScaleResponse, error)
 	// Dashboard RPCs
 	GetDashboardData(context.Context, *GetDashboardDataRequest) (*GetDashboardDataResponse, error)
 	mustEmbedUnimplementedEngineServiceServer()
@@ -256,6 +269,9 @@ func (UnimplementedEngineServiceServer) GetInfo(context.Context, *GetInfoRequest
 }
 func (UnimplementedEngineServiceServer) Health(context.Context, *HealthRequest) (*HealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method Health not implemented")
+}
+func (UnimplementedEngineServiceServer) Scale(context.Context, *ScaleRequest) (*ScaleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Scale not implemented")
 }
 func (UnimplementedEngineServiceServer) GetDashboardData(context.Context, *GetDashboardDataRequest) (*GetDashboardDataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDashboardData not implemented")
@@ -472,6 +488,24 @@ func _EngineService_Health_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineService_Scale_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScaleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).Scale(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_Scale_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).Scale(ctx, req.(*ScaleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _EngineService_GetDashboardData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetDashboardDataRequest)
 	if err := dec(in); err != nil {
@@ -536,6 +570,10 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _EngineService_Health_Handler,
+		},
+		{
+			MethodName: "Scale",
+			Handler:    _EngineService_Scale_Handler,
 		},
 		{
 			MethodName: "GetDashboardData",

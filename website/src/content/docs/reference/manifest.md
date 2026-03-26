@@ -27,6 +27,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Resource limits | `deploy.resources:` | `deploy.resources:` | Same (memory, cpus). Also used for scheduling decisions. |
 | Healthcheck | `healthcheck:` | `healthcheck:` | Same (test, interval, timeout, retries, start_period, disable) |
 | Volumes | `volumes:` | `volumes:` | Same (named volumes, bind mounts, tmpfs, NFS). See [Volumes](#volumes). |
+| Auto-scaling | -- | `deploy.autoscale:` | Banyan-specific. Auto-scale based on CPU metrics. See [Auto-scaling](#auto-scaling). |
 | Networks | `networks:` | -- | Managed automatically |
 | Labels | `labels:` | -- | Not supported — Banyan uses built-in service DNS and load balancing instead of label-based service discovery |
 
@@ -54,6 +55,12 @@ services:
           cpus: "0.5"
         reservations:
           memory: 256m
+      autoscale:
+        min: 1
+        max: 10
+        target_cpu: 70
+        cooldown: 60s
+      stop_grace_period: 5s
     healthcheck:
       test: ["CMD", "<command>"]
       interval: 10s
@@ -106,6 +113,11 @@ services:
 | `healthcheck.start_period` | string | No | -- | Grace period for startup (e.g., `30s`). Failures during this period don't count toward retries. |
 | `healthcheck.disable` | boolean | No | `false` | Set `true` to disable any healthcheck defined in the image. |
 | `depends_on` | list or map | No | -- | Service dependencies. Short form: `["db", "redis"]`. Long form with conditions: `{db: {condition: service_healthy}}`. Conditions: `service_started` (default), `service_healthy`. See [depends_on](#depends_on) below. |
+| `deploy.autoscale.min` | integer | No | -- | Minimum replicas. Auto-scaling won't go below this. See [Auto-scaling](#auto-scaling) below. |
+| `deploy.autoscale.max` | integer | No | -- | Maximum replicas. Auto-scaling won't go above this. |
+| `deploy.autoscale.target_cpu` | integer | No | -- | Target average CPU percent (e.g., `70`). Scale up above this, scale down below half. |
+| `deploy.autoscale.cooldown` | string | No | `60s` | Minimum time between scale events (e.g., `30s`, `2m`). |
+| `deploy.stop_grace_period` | string | No | `5s` | Time to wait after removing from proxy/DNS before stopping a container during scale-down or drain. |
 | `volumes` | list | No | -- | Mount volumes into the container. Same syntax as Docker Compose. See [volumes](#volumes) below. |
 
 ## Container naming
@@ -359,6 +371,85 @@ CPU values are tracked but memory is the primary scheduling dimension.
 :::tip
 For most workloads, you don't need to set `deploy.resources` at all. The defaults (512 MB, 1 CPU per service) work well for typical web services. Add explicit resources when you have services with significantly different needs — a memory-heavy database alongside lightweight API workers, for example.
 :::
+
+## Auto-scaling
+
+Banyan can automatically adjust replica counts based on CPU usage. Define scaling rules in the manifest, and the engine handles the rest.
+
+```yaml
+services:
+  api:
+    image: myapp/api:latest
+    deploy:
+      replicas: 2
+      autoscale:
+        min: 2
+        max: 10
+        target_cpu: 70        # scale up when avg CPU > 70%
+        cooldown: 30s         # wait at least 30s between scale events
+      stop_grace_period: 5s   # drain time before stopping a container
+    ports:
+      - "8080:8080"
+```
+
+### How it works
+
+1. Agents collect CPU and memory metrics per container every 10 seconds and report them to the engine.
+2. The engine evaluates auto-scale rules every 30 seconds.
+3. **Scale up**: If average CPU across all replicas exceeds `target_cpu`, one replica is added (up to `max`).
+4. **Scale down**: If average CPU drops below `target_cpu / 2` (hysteresis), one replica is removed (down to `min`).
+5. The `cooldown` prevents rapid flapping — no scaling happens until the cooldown period has passed since the last scale event.
+
+Scaling is incremental: one replica at a time, in or out. No full redeployment, no new deployment ID. Containers are added or removed individually.
+
+### Fields
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `deploy.autoscale.min` | integer | Yes | -- | Minimum replica count. Auto-scaling won't go below this. |
+| `deploy.autoscale.max` | integer | Yes | -- | Maximum replica count. Auto-scaling won't go above this. |
+| `deploy.autoscale.target_cpu` | integer | No | -- | Target average CPU percent. Scale up above this, scale down below half. |
+| `deploy.autoscale.cooldown` | string | No | `60s` | Minimum time between scale events. Accepts Go duration format: `30s`, `2m`, `1h`. |
+| `deploy.stop_grace_period` | string | No | `5s` | Time to wait after removing a container from the proxy and DNS before stopping it. Prevents dropped requests during scale-down. |
+
+### Graceful scale-down
+
+When Banyan removes a container (scale-down, rebalancing, or `banyan-cli down`), it follows a drain sequence:
+
+1. Remove the container from the load balancer (iptables DNAT rules)
+2. Remove the container's DNS records
+3. Wait `stop_grace_period` (default 5s) for in-flight requests to complete
+4. Stop and remove the container
+
+This prevents dropped connections during scale-down.
+
+### Manual scaling
+
+For immediate scaling without waiting for metrics, use the CLI:
+
+```bash
+banyan-cli scale my-app api=5 web=3
+```
+
+See [CLI Reference — scale](/reference/cli/#scale) for details.
+
+### Workload rebalancing
+
+The engine also monitors agent-level resource usage. When an agent's CPU or memory exceeds 95%, the engine migrates stateless containers to less loaded agents.
+
+Safeguards prevent unnecessary churn:
+- Only agents above 95% load trigger rebalancing
+- Target agent must stay below 70% load after migration
+- Minimum 30% load difference between source and target
+- Per-container cooldown of 10 minutes (no ping-pong)
+- Maximum one migration per agent per cycle
+- Containers with volumes or placement constraints are never moved
+
+:::tip
+Auto-scaling and rebalancing work together. Auto-scaling adjusts the number of replicas based on demand. Rebalancing redistributes existing containers when agents become unevenly loaded — for example, after one agent restarts with no containers while others are full.
+:::
+
+---
 
 ## Volumes
 

@@ -726,7 +726,7 @@ func collectContainerMetrics(ctx context.Context, names []string) map[string]Con
 	if len(names) == 0 {
 		return nil
 	}
-	args := append([]string{"stats", "--no-stream", "--format",
+	args := append([]string{"stats", "--no-stream", "--no-trunc", "--format",
 		"{{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}"}, names...)
 	cmd := exec.CommandContext(ctx, "nerdctl", args...)
 	var stdout bytes.Buffer

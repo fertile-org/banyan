@@ -182,14 +182,19 @@ See [Manifest Reference — Volumes](/reference/manifest/#volumes) for syntax an
 
 ---
 
-## Milestone 9 — Auto-Scaling
+## Milestone 9 — Auto-Scaling & Workload Rebalancing
 
-Scale services based on metrics and support automatic rollback.
+Status: **Done**
 
-- Define scaling rules in the manifest (min/max replicas, target thresholds)
-- Engine evaluates metrics against rules and adjusts replica count
-- Graceful scale-down (drain before stopping)
-- Automatic rollback on deployment failure
+Automatic horizontal scaling based on CPU metrics, manual scaling via CLI, and workload rebalancing across agents.
+
+- **`banyan-cli scale`**: Adjust replica counts on a running deployment without redeploying. Containers are added or removed individually — no blue-green, no new deployment ID.
+- **Auto-scaling rules in manifest**: Define `deploy.autoscale` with `min`, `max`, `target_cpu`, and `cooldown`. Engine evaluates CPU metrics every 30 seconds and adjusts replicas automatically.
+- **Per-container metrics**: Agents collect CPU and memory usage per container via `nerdctl stats` and report to the engine in health checks.
+- **Graceful scale-down**: Removing containers follows a drain sequence — remove from proxy, remove DNS, wait grace period, then stop. No dropped requests.
+- **Workload rebalancing**: Engine detects overloaded agents (CPU or memory > 95%) and migrates stateless containers to underloaded agents. Five safeguards prevent infinite migration: per-container cooldown (10 min), high threshold (95%), target validation, minimum imbalance (30%), and max one migration per agent per cycle.
+
+See [Auto-Scaling](/guides/auto-scaling/) for the guide and [Manifest Reference — Autoscale](/reference/manifest/#auto-scaling) for syntax.
 
 ---
 
@@ -218,21 +223,7 @@ Authorizaton, secrets management, and certificate rotation for secure cluster op
 
 ---
 
-## Milestone 12 — Dynamic Workload Rebalancing
-
-Automatically redistribute services across nodes based on actual resource usage and node capacity.
-
-- Engine tracks actual CPU/memory usage per container (from agent health reports)
-- Identify over-utilized and under-utilized nodes
-- Gracefully move containers from crowded nodes to nodes with available capacity
-- Drain-and-restart for stateless services; manual rebalancing only for stateful services
-- Configurable triggers (e.g., migrate when node >90% full)
-- Safety checks: verify destination has capacity before migration
-- Rollback support for failed migrations
-
----
-
-## Milestone 13 — Advanced Networking
+## Milestone 12 — Advanced Networking
 
 Service discovery, traffic policies, and encrypted communication across the cluster.
 

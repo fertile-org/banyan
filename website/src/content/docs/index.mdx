@@ -80,6 +80,10 @@ services:
     build: ./api
     deploy:
       replicas: 3             # ← scale what you need
+      autoscale:
+        min: 2
+        max: 10
+        target_cpu: 70        # ← or let Banyan scale for you
     ports:
       - "8080:8080"
     environment:
@@ -107,7 +111,10 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
   <Card title="Live terminal dashboard" icon="seti:cake_php">
     `banyan-cli dashboard` opens a real-time TUI — engine health, agent resources, deployments, container status, and cluster events, all updating live. Navigate views with keyboard shortcuts, drill into details, and use the built-in command palette. No Grafana setup, no browser — monitoring is one command away.
   </Card>
-  <Card title="High availability built in" icon="approve-check">
+  <Card title="Auto-scaling built in" icon="approve-check">
+    Define `target_cpu` in your manifest and Banyan scales replicas automatically. Scale up under load, scale down when idle. Graceful drain prevents dropped requests. Or scale manually with `banyan-cli scale my-app api=5`.
+  </Card>
+  <Card title="High availability" icon="approve-check">
     Run multiple engines for zero-downtime control plane. All engines are active — no leader election, no manual failover. Start with one engine, add more when you need them.
   </Card>
   <Card title="Open source, self-hosted" icon="openCollective">

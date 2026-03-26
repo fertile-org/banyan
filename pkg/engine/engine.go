@@ -111,8 +111,8 @@ func New(opts *Options) (*Engine, error) {
 	return e, nil
 }
 
-// GenerateEngineID creates a unique engine ID from hostname + 4 random hex chars.
-// Example: "prod-web-1-a3f2"
+// GenerateEngineID creates a unique engine ID from hostname + 8 random hex chars.
+// Example: "prod-web-1-a3f2b1c4"
 func GenerateEngineID() string {
 	hostname, _ := os.Hostname()
 	if hostname == "" {
@@ -122,7 +122,7 @@ func GenerateEngineID() string {
 	hostname = strings.ToLower(hostname)
 	hostname = strings.ReplaceAll(hostname, ".", "-")
 
-	b := make([]byte, 2)
+	b := make([]byte, 4)
 	if _, err := rand.Read(b); err != nil {
 		return hostname
 	}

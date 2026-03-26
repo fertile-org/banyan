@@ -2267,11 +2267,11 @@ func TestGenerateEngineID(t *testing.T) {
 		if !strings.Contains(id, "-") {
 			t.Errorf("expected engine ID to contain dashes, got %q", id)
 		}
-		// Should end with 4 hex chars
+		// Should end with 8 hex chars
 		parts := strings.Split(id, "-")
 		lastPart := parts[len(parts)-1]
-		if len(lastPart) != 4 {
-			t.Errorf("expected 4-char hex suffix, got %q", lastPart)
+		if len(lastPart) != 8 {
+			t.Errorf("expected 8-char hex suffix, got %q", lastPart)
 		}
 	})
 

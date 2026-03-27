@@ -73,8 +73,15 @@ func GenerateSecretsKey(path string) error {
 	return nil
 }
 
-// LoadSecretsKey reads a 32-byte key from disk.
+// LoadSecretsKey reads a 32-byte key from disk and verifies file permissions.
 func LoadSecretsKey(path string) ([]byte, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat key file: %w", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		return nil, fmt.Errorf("secrets.key has insecure permissions %04o (must be 0600). Fix with: chmod 600 %s", perm, path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read key file: %w", err)
@@ -104,7 +111,7 @@ func (sm *SecretsManager) Create(ctx context.Context, name string, value []byte)
 		return fmt.Errorf("secret %q already exists (use update to change its value)", name)
 	}
 
-	encrypted, err := sm.encrypt(value)
+	encrypted, err := sm.encrypt(value, name)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt secret: %w", err)
 	}
@@ -127,7 +134,7 @@ func (sm *SecretsManager) Update(ctx context.Context, name string, value []byte)
 		return fmt.Errorf("secret %q not found", name)
 	}
 
-	encrypted, err := sm.encrypt(value)
+	encrypted, err := sm.encrypt(value, name)
 	if err != nil {
 		return fmt.Errorf("failed to encrypt secret: %w", err)
 	}
@@ -144,7 +151,7 @@ func (sm *SecretsManager) Get(ctx context.Context, name string) ([]byte, error) 
 	if err := sm.store.Get(ctx, key, &record); err != nil {
 		return nil, fmt.Errorf("secret %q not found", name)
 	}
-	plaintext, err := sm.decrypt(record.EncryptedValue)
+	plaintext, err := sm.decrypt(record.EncryptedValue, name)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt secret %q: %w", name, err)
 	}
@@ -210,21 +217,24 @@ func (sm *SecretsManager) ResolveSecrets(ctx context.Context, names []string) (m
 }
 
 // encrypt encrypts plaintext with AES-256-GCM. The nonce is prepended to the ciphertext.
-func (sm *SecretsManager) encrypt(plaintext []byte) ([]byte, error) {
+// The secret name is used as additional authenticated data (AAD) to bind the ciphertext
+// to this specific key path — prevents ciphertext relocation attacks in etcd.
+func (sm *SecretsManager) encrypt(plaintext []byte, name string) ([]byte, error) {
 	nonce := make([]byte, sm.aesgcm.NonceSize())
 	if _, err := rand.Read(nonce); err != nil {
 		return nil, fmt.Errorf("failed to generate nonce: %w", err)
 	}
-	return sm.aesgcm.Seal(nonce, nonce, plaintext, nil), nil
+	return sm.aesgcm.Seal(nonce, nonce, plaintext, []byte(name)), nil
 }
 
 // decrypt decrypts ciphertext with AES-256-GCM. Expects nonce prepended to ciphertext.
-func (sm *SecretsManager) decrypt(ciphertext []byte) ([]byte, error) {
+// The secret name must match the AAD used during encryption.
+func (sm *SecretsManager) decrypt(ciphertext []byte, name string) ([]byte, error) {
 	nonceSize := sm.aesgcm.NonceSize()
 	if len(ciphertext) < nonceSize {
 		return nil, fmt.Errorf("ciphertext too short")
 	}
-	return sm.aesgcm.Open(nil, ciphertext[:nonceSize], ciphertext[nonceSize:], nil)
+	return sm.aesgcm.Open(nil, ciphertext[:nonceSize], ciphertext[nonceSize:], []byte(name))
 }
 
 // dirOf returns the directory part of a file path.

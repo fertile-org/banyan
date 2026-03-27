@@ -100,8 +100,11 @@ func ensureNFSMount(ctx context.Context, vol types.VolumeMount, log *logging.Log
 	args := []string{"-t", "nfs"}
 	if vol.Tmpfs != nil && vol.Tmpfs.Size != "" {
 		// Reuse Tmpfs.Size field to carry NFS mount options (set during resolution)
-		// This is a pragmatic reuse — NFS volumes don't use tmpfs options
-		args = append(args, "-o", vol.Tmpfs.Size)
+		sanitized, sanitizeErr := sanitizeNFSMountOpts(vol.Tmpfs.Size)
+		if sanitizeErr != nil {
+			return "", fmt.Errorf("invalid NFS mount options: %w", sanitizeErr)
+		}
+		args = append(args, "-o", sanitized)
 	}
 	args = append(args, source, mountDir)
 
@@ -168,4 +171,44 @@ func ResolveTopLevelNFSVolumes(mounts []types.VolumeMount, topLevel map[string]t
 		}
 	}
 	return resolved
+}
+
+// allowedNFSMountOpts is the whitelist of NFS mount option prefixes.
+// Options not on this list are rejected to prevent injection of dangerous flags
+// like suid, exec, or dev via manifest driver_opts.
+var allowedNFSMountOpts = map[string]bool{
+	"vers": true, "nfsvers": true,
+	"soft": true, "hard": true,
+	"timeo": true, "retrans": true,
+	"rsize": true, "wsize": true,
+	"nolock": true, "lock": true,
+	"ro": true, "rw": true,
+	"tcp": true, "udp": true,
+	"intr": true, "nointr": true,
+	"bg": true, "fg": true,
+	"addr": true, "proto": true,
+	"sec": true, "port": true,
+	"mountport": true, "mountvers": true,
+	"nosuid": true, "nodev": true, "noexec": true,
+}
+
+// sanitizeNFSMountOpts validates NFS mount options against a whitelist.
+func sanitizeNFSMountOpts(opts string) (string, error) {
+	var validated []string
+	for _, opt := range strings.Split(opts, ",") {
+		opt = strings.TrimSpace(opt)
+		if opt == "" {
+			continue
+		}
+		// Extract the key part (before =)
+		key := opt
+		if idx := strings.IndexByte(opt, '='); idx >= 0 {
+			key = opt[:idx]
+		}
+		if !allowedNFSMountOpts[key] {
+			return "", fmt.Errorf("NFS mount option %q is not allowed (permitted: addr, vers, soft, hard, timeo, retrans, rsize, wsize, nolock, ro, rw, nosuid, nodev, noexec)", key)
+		}
+		validated = append(validated, opt)
+	}
+	return strings.Join(validated, ","), nil
 }

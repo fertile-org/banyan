@@ -31,10 +31,11 @@ type ServerConfig struct {
 	UpstreamDNS  string // Upstream DNS for external queries (e.g., "8.8.8.8:53")
 }
 
-// DefaultServerConfig returns sensible defaults for production use
+// DefaultServerConfig returns sensible defaults for production use.
+// BindAddr defaults to localhost — callers must override for overlay networking.
 func DefaultServerConfig() ServerConfig {
 	return ServerConfig{
-		BindAddr:     "0.0.0.0:53",
+		BindAddr:     "127.0.0.1:53",
 		InternalZone: "internal",
 		UpstreamDNS:  "8.8.8.8:53",
 	}

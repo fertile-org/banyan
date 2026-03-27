@@ -480,7 +480,8 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 				fmt.Println("\nInitialization cancelled.")
 				return nil
 			}
-			return fmt.Errorf("secrets key choice: %w", formErr)
+			// No TTY (e.g., Docker, CI) — auto-generate
+			keyChoice = "generate"
 		}
 		if writeErr := handleSecretsKeyChoice(keyChoice, secretsKeyPath, multiEngine, styleOK, styleInfo); writeErr != nil {
 			return writeErr

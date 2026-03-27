@@ -63,6 +63,15 @@ Repeat on Engine 2 (`192.168.1.20`) with the same etcd and registry addresses.
 
 Both engines generate their own WireGuard keypairs during init. Copy each engine's public key — agents need it.
 
+The wizard also asks about the **secrets encryption key**. On the first engine, choose "Generate new key". On additional engines, choose "Provide existing key file" and point to the key copied from the first engine:
+
+```bash
+# Copy secrets key from engine-1 to engine-2 before running init on engine-2
+scp engine-1:/etc/banyan/keys/secrets.key engine-2:/etc/banyan/keys/secrets.key
+```
+
+All engines must use the same `secrets.key` to encrypt and decrypt secrets. See [Secrets — High Availability](/guides/secrets/#high-availability) for details.
+
 ## 2. Configure agents with multiple engines
 
 On each agent, run `banyan-agent init`. The wizard asks for the engine host and port as usual. After that:

@@ -75,6 +75,7 @@ type engineGRPCServer struct {
 	scheduleCh      chan<- struct{}                   // triggers immediate scheduling (nil-safe)
 	metricsRegistry *metrics.EngineMetricsRegistry
 	events          EventLog
+	secrets         *SecretsManager // nil if secrets.key not present
 	limiter         *rateLimiter
 	startedAt       time.Time
 	log             *logging.Logger
@@ -94,6 +95,7 @@ type grpcServerOptions struct {
 	ScheduleCh      chan<- struct{}    // triggers immediate scheduling
 	MetricsRegistry *metrics.EngineMetricsRegistry
 	Events          EventLog
+	Secrets         *SecretsManager // nil if secrets.key not present
 	StartedAt       time.Time
 }
 
@@ -146,6 +148,7 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		scheduleCh:      opts.ScheduleCh,
 		metricsRegistry: opts.MetricsRegistry,
 		events:          opts.Events,
+		secrets:         opts.Secrets,
 		limiter:         newRateLimiter(100, time.Minute), // 100 requests/min per IP
 		startedAt:       opts.StartedAt,
 		log:             logging.New("engine"),
@@ -536,6 +539,16 @@ func (s *engineGRPCServer) PollTasks(ctx context.Context, req *banyanpb.PollTask
 			}
 			pbTask.Volumes = append(pbTask.Volumes, pbVol)
 		}
+		// Resolve secret references just-in-time (values never stored in etcd)
+		if len(task.SecretRefs) > 0 && s.secrets != nil {
+			pbTask.SecretRefs = task.SecretRefs
+			resolved, resolveErr := s.secrets.ResolveSecrets(ctx, task.SecretRefs)
+			if resolveErr != nil {
+				s.logger().Warn("Failed to resolve secrets for task", "task", task.ID, "error", resolveErr)
+			} else {
+				pbTask.ResolvedSecrets = resolved
+			}
+		}
 		tasks = append(tasks, pbTask)
 	}
 
@@ -730,6 +743,25 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 	// Convert proto manifest to types
 	manifest := protoToManifest(req.Manifest)
 	allServices := types.BuildServiceRecords(manifest.Services)
+
+	// Validate secret references
+	for svcName, svc := range allServices {
+		if len(svc.Secrets) == 0 {
+			continue
+		}
+		if s.secrets == nil {
+			return nil, status.Errorf(codes.FailedPrecondition,
+				"service %q references secrets but secrets are not enabled on the engine (missing secrets.key)",
+				svcName)
+		}
+		for _, secretName := range svc.Secrets {
+			if _, err := s.secrets.Get(ctx, secretName); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument,
+					"service %q references secret %q which does not exist. Create it with: banyan-cli secret create %s",
+					svcName, secretName, secretName)
+			}
+		}
+	}
 
 	tags := types.SortTags(req.Tags)
 
@@ -1558,6 +1590,8 @@ func protoToManifest(m *banyanpb.Manifest) types.BanyanManifest {
 			ms.Volumes = append(ms.Volumes, vm)
 		}
 
+		ms.Secrets = svc.Secrets
+
 		services[name] = ms
 	}
 
@@ -1942,6 +1976,104 @@ func extractPeerIP(ctx context.Context) net.IP {
 		return nil
 	}
 	return addr.IP
+}
+
+// --- Secret RPCs ---
+
+func (s *engineGRPCServer) CreateSecret(ctx context.Context, req *banyanpb.CreateSecretRequest) (*banyanpb.CreateSecretResponse, error) {
+	if s.secrets == nil {
+		return nil, status.Error(codes.FailedPrecondition, "secrets not enabled (missing secrets.key on engine)")
+	}
+	if err := ValidateSecretName(req.Name); err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
+	}
+
+	// Try create first; if exists, update
+	if err := s.secrets.Create(ctx, req.Name, req.Value); err != nil {
+		// If already exists, update
+		if updateErr := s.secrets.Update(ctx, req.Name, req.Value); updateErr != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create/update secret: %v", updateErr)
+		}
+		s.emitEvent("secret.updated", fmt.Sprintf("Secret %q updated", req.Name), "info")
+	} else {
+		s.emitEvent("secret.created", fmt.Sprintf("Secret %q created", req.Name), "info")
+	}
+	return &banyanpb.CreateSecretResponse{}, nil
+}
+
+func (s *engineGRPCServer) ListSecrets(ctx context.Context, _ *banyanpb.ListSecretsRequest) (*banyanpb.ListSecretsResponse, error) {
+	if s.secrets == nil {
+		return &banyanpb.ListSecretsResponse{}, nil
+	}
+	records, err := s.secrets.List(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list secrets: %v", err)
+	}
+	var infos []*banyanpb.SecretInfo
+	for _, r := range records {
+		infos = append(infos, &banyanpb.SecretInfo{
+			Name:      r.Name,
+			CreatedAt: r.CreatedAt.Format(time.RFC3339),
+			UpdatedAt: r.UpdatedAt.Format(time.RFC3339),
+		})
+	}
+	return &banyanpb.ListSecretsResponse{Secrets: infos}, nil
+}
+
+func (s *engineGRPCServer) GetSecret(ctx context.Context, req *banyanpb.GetSecretRequest) (*banyanpb.GetSecretResponse, error) {
+	if s.secrets == nil {
+		return nil, status.Error(codes.FailedPrecondition, "secrets not enabled (missing secrets.key on engine)")
+	}
+	meta, err := s.secrets.GetMetadata(ctx, req.Name)
+	if err != nil {
+		return nil, status.Errorf(codes.NotFound, "%v", err)
+	}
+	resp := &banyanpb.GetSecretResponse{
+		Name:      meta.Name,
+		CreatedAt: meta.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: meta.UpdatedAt.Format(time.RFC3339),
+	}
+	if req.Reveal {
+		value, decErr := s.secrets.Get(ctx, req.Name)
+		if decErr != nil {
+			return nil, status.Errorf(codes.Internal, "failed to decrypt secret: %v", decErr)
+		}
+		resp.Value = value
+	}
+	return resp, nil
+}
+
+func (s *engineGRPCServer) DeleteSecret(ctx context.Context, req *banyanpb.DeleteSecretRequest) (*banyanpb.DeleteSecretResponse, error) {
+	if s.secrets == nil {
+		return nil, status.Error(codes.FailedPrecondition, "secrets not enabled (missing secrets.key on engine)")
+	}
+
+	// Block deletion if any running deployment references this secret
+	depKeys, _ := s.store.List(ctx, types.KeyDeployments)
+	for _, key := range depKeys {
+		var dep types.DeploymentRecord
+		if getErr := s.store.Get(ctx, key, &dep); getErr != nil {
+			continue
+		}
+		if dep.Status != types.StatusRunning {
+			continue
+		}
+		for svcName, svc := range dep.Services {
+			for _, ref := range svc.Secrets {
+				if ref == req.Name {
+					return nil, status.Errorf(codes.FailedPrecondition,
+						"cannot delete secret %q: referenced by deployment %q (service: %s)",
+						req.Name, dep.Name, svcName)
+				}
+			}
+		}
+	}
+
+	if err := s.secrets.Delete(ctx, req.Name); err != nil {
+		return nil, status.Errorf(codes.NotFound, "%v", err)
+	}
+	s.emitEvent("secret.deleted", fmt.Sprintf("Secret %q deleted", req.Name), "info")
+	return &banyanpb.DeleteSecretResponse{}, nil
 }
 
 // agentHostIP returns the agent's data-plane host IP. It prefers the

@@ -381,6 +381,7 @@ func pbTaskToLocal(pb *banyanpb.TaskRecord) *types.TaskRecord {
 		}
 		task.Volumes = append(task.Volumes, vm)
 	}
+	task.ResolvedSecrets = pb.ResolvedSecrets
 	return task
 }
 
@@ -555,6 +556,10 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
+	}
+	// Secrets override env vars (nerdctl uses last -e value for duplicates)
+	for name, value := range task.ResolvedSecrets {
+		args = append(args, "-e", name+"="+value)
 	}
 
 	// Volume mounts

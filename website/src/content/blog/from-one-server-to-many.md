@@ -280,7 +280,7 @@ Here's the pattern you see across the orchestration landscape. A tool claims sim
 | Capability | Kubernetes | Nomad | Docker Swarm | Banyan |
 |-----------|-----------|-------|-------------|--------|
 | **Service discovery** | CoreDNS (addon) or Consul | Consul (separate cluster) | Built-in DNS | **Built in** |
-| **Secret management** | K8s Secrets (base64) or Vault | Vault (separate cluster) | Built-in Docker Secrets | **Planned** *(coming soon)* |
+| **Secret management** | K8s Secrets (base64) or Vault | Vault (separate cluster) | Built-in Docker Secrets | **Built in** (AES-256-GCM) |
 | **Container registry** | Docker Hub / ECR / Harbor | External registry | External registry | **Built in** |
 | **Observability** | Prometheus + Grafana (separate) | Separate stack | None | **Built in** |
 | **Overlay networking** | Pick a CNI (Calico? Cilium? Flannel?) | Consul Connect or CNI | VXLAN (IPsec, performance hit) | **Built in** (WireGuard) |
@@ -291,7 +291,7 @@ Take Nomad. The scheduler itself is simple. But a real production setup usually 
 
 With Kubernetes, the ecosystem is even wider. CoreDNS, a CNI plugin, an Ingress controller, cert-manager, Prometheus + Grafana, a logging stack, a secrets solution, a GitOps tool. All well-built. All another thing to learn, configure, keep running, and upgrade.
 
-Banyan takes a different approach: **you shouldn't have to research, evaluate, install, or integrate external tools just to deploy containers across servers.** Service discovery, networking, load balancing, observability, and a container registry are all part of the engine and agents. The state store (etcd) is embedded — you don't operate it, back it up, or even think about it.
+Banyan takes a different approach: **you shouldn't have to research, evaluate, install, or integrate external tools just to deploy containers across servers.** Service discovery, networking, load balancing, observability, secrets management, and a container registry are all part of the engine and agents. The state store (etcd) is embedded — you don't operate it, back it up, or even think about it.
 
 This is an opinionated stance. Banyan picks sensible defaults instead of offering maximum configurability. The DNS server uses 60-second TTLs. The overlay uses WireGuard. Deployments default to blue-green. The load balancer uses probability-based iptables rules. These aren't the only valid choices — but they're good choices that work for the target use case without you having to make them.
 
@@ -459,11 +459,7 @@ Banyan is not the right tool for everything. Honestly:
 
 We'd rather be upfront about what Banyan can't do yet than have you find out the hard way.
 
-- **No volume support yet.** Persistent storage isn't implemented. For now, stateful services like databases can use placement constraints to pin to a specific agent, or use external managed databases. Distributed volume support is on the roadmap.
-- **No autoscaling.** Replica counts are manual. Metric-based scaling is on the roadmap.
-- **Single engine = single point of failure.** If the engine goes down, running containers keep going (they're independent containerd processes), but no new deploys or rescheduling happen until it's back. Multi-engine HA is planned.
 - **No access control beyond key whitelisting.** ABAC (attribute-based access control) is coming.
-- **No secrets management yet.** Environment variables work the same way as Docker Compose (in the manifest YAML, or via `env_file`), but there's no encrypted secrets store like Docker Swarm secrets or Vault. Built-in secrets management is on the roadmap.
 - **L4 proxy only.** iptables handles TCP/UDP forwarding. Path-based routing, TLS termination, header routing need an external reverse proxy (Nginx, Traefik).
 - **No session affinity.** Traffic distributes randomly. Sticky sessions are planned.
 - **No network policies.** All containers in the overlay can reach all others. Segmentation is planned.
@@ -471,19 +467,19 @@ We'd rather be upfront about what Banyan can't do yet than have you find out the
 
 ### 4.4 Roadmap
 
+**Recently shipped:**
+- Resource-aware scheduling (CPU/memory-aware placement)
+- Multi-engine HA (active-active, no leader election)
+- Volumes (named, bind mounts, tmpfs, NFS)
+- Auto-scaling and workload rebalancing
+- Secrets management (AES-256-GCM encrypted, injected as env vars)
+
 **Near term:**
+- Web monitoring dashboard
 - Rootless container mode
-- Health-based scheduling (CPU/memory-aware placement)
-- Built-in secrets management
 
 **Medium term:**
-- Multi-engine HA (eliminate the single point of failure)
-- Persistent volume support (local volumes with placement-aware scheduling, and distributed storage)
-- Autoscaling based on resource utilization
-- Web monitoring dashboard
-
-**Long term:**
-- Advanced security (ABAC, certificate rotation, audit logging)
+- Advanced security (ABAC, certificate rotation)
 - Advanced networking (L7 ingress, session affinity, network policies)
 - Dynamic workload rebalancing
 

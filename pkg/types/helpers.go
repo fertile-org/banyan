@@ -97,6 +97,7 @@ func BuildServiceRecords(manifest map[string]ManifestService) map[string]Service
 			MemoryReservation: memReservation,
 			Healthcheck:       svc.Healthcheck,
 			Volumes:           svc.Volumes,
+			Secrets:           svc.Secrets,
 			Autoscale:         autoscale,
 			StopGracePeriod:   stopGracePeriod,
 		}
@@ -176,6 +177,7 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 				MemoryReservation: svc.MemoryReservation,
 				Healthcheck:       svc.Healthcheck,
 				Volumes:           svc.Volumes,
+				SecretRefs:        svc.Secrets,
 				CreatedAt:         now,
 				UpdatedAt:         now,
 			})

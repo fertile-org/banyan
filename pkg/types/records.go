@@ -13,6 +13,7 @@ const (
 	KeyTasks       = "tasks/"
 	KeyRegistry    = "config/registry"
 	KeyEngines     = "engines/"
+	KeySecrets     = "secrets/"
 )
 
 // Deployment statuses.
@@ -75,6 +76,7 @@ type ServiceRecord struct {
 	Command           []string             `json:"command,omitempty"`
 	Entrypoint        []string             `json:"entrypoint,omitempty"`
 	Volumes           []VolumeMount        `json:"volumes,omitempty"`
+	Secrets           []string             `json:"secrets,omitempty"`
 	Replicas          int                  `json:"replicas"`
 }
 
@@ -83,6 +85,7 @@ type TaskRecord struct {
 	ContainerCheckedAt time.Time            `json:"container_checked_at,omitempty"`
 	UpdatedAt          time.Time            `json:"updated_at"`
 	CreatedAt          time.Time            `json:"created_at"`
+	ResolvedSecrets    map[string]string    `json:"-"` // runtime only, never persisted
 	Result             *TaskResultRecord    `json:"result,omitempty"`
 	Healthcheck        *ManifestHealthcheck `json:"healthcheck,omitempty"`
 	DeploymentID       string               `json:"deployment_id"`
@@ -107,10 +110,11 @@ type TaskRecord struct {
 	Ports              []string             `json:"ports,omitempty"`
 	Environment        []string             `json:"env,omitempty"`
 	Volumes            []VolumeMount        `json:"volumes,omitempty"`
-	ReplicaIndex       int                  `json:"replica_index"`
+	SecretRefs         []string             `json:"secret_refs,omitempty"`
 	CPUPercent         float64              `json:"cpu_percent,omitempty"`
 	MemoryUsedBytes    uint64               `json:"memory_used_bytes,omitempty"`
 	MemoryLimitBytes   uint64               `json:"memory_limit_bytes,omitempty"`
+	ReplicaIndex       int                  `json:"replica_index"`
 }
 
 // TaskResultRecord stores the outcome of task execution.
@@ -141,6 +145,14 @@ type EngineRecord struct {
 	Status      string    `json:"status"`
 	GRPCAddr    string    `json:"grpc_addr"`
 	RegistryURL string    `json:"registry_url,omitempty"`
+}
+
+// SecretRecord stores an encrypted secret in etcd.
+type SecretRecord struct {
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	Name           string    `json:"name"`
+	EncryptedValue []byte    `json:"encrypted_value"`
 }
 
 // StateStore is a minimal interface for store operations used by helpers.

@@ -22,6 +22,12 @@ service EngineService {
 
   // Dashboard RPCs
   rpc GetDashboardData(GetDashboardDataRequest) returns (GetDashboardDataResponse);
+
+  // Secret RPCs
+  rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
+  rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
+  rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
+  rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
 }
 
 message ScaleRequest {
@@ -167,6 +173,8 @@ message TaskRecord {
   ManifestHealthcheck healthcheck = 18;
   string deployment_name = 19;
   repeated VolumeMount volumes = 20;
+  repeated string secret_refs = 21;            // secret names (stored in etcd)
+  map<string, string> resolved_secrets = 22;   // decrypted values (populated at PollTasks time, never stored)
 }
 
 // --- CLI messages ---
@@ -201,6 +209,7 @@ message ManifestService {
   repeated string entrypoint = 9;
   ManifestHealthcheck healthcheck = 10;
   repeated VolumeMount volumes = 11;
+  repeated string secrets = 12;        // secret names to inject as env vars
 }
 
 message VolumeMount {
@@ -407,3 +416,38 @@ message ClusterEvent {
   string message = 3;
   string severity = 4;
 }
+
+// --- Secret messages ---
+
+message CreateSecretRequest {
+  string name = 1;
+  bytes value = 2;
+}
+message CreateSecretResponse {}
+
+message ListSecretsRequest {}
+message ListSecretsResponse {
+  repeated SecretInfo secrets = 1;
+}
+
+message SecretInfo {
+  string name = 1;
+  string created_at = 2;
+  string updated_at = 3;
+}
+
+message GetSecretRequest {
+  string name = 1;
+  bool reveal = 2;
+}
+message GetSecretResponse {
+  string name = 1;
+  string created_at = 2;
+  string updated_at = 3;
+  bytes value = 4;   // only populated if reveal=true
+}
+
+message DeleteSecretRequest {
+  string name = 1;
+}
+message DeleteSecretResponse {}

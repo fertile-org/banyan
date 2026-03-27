@@ -123,6 +123,7 @@ type ManifestService struct {
 	Restart     string               `yaml:"restart,omitempty"`
 	Entrypoint  ShellCommand         `yaml:"entrypoint,omitempty"`
 	Volumes     VolumeMounts         `yaml:"volumes,omitempty"`
+	Secrets     []string             `yaml:"secrets,omitempty"`
 }
 
 // VolumeMount represents a service-level volume mount.

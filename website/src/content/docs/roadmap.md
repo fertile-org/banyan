@@ -213,17 +213,33 @@ The terminal dashboard (`banyan-cli dashboard`) is already available — see [Mi
 
 ---
 
-## Milestone 11 — Advanced Security
+## Milestone 11 — Secrets Management
 
-Authorizaton, secrets management, and certificate rotation for secure cluster operations.
+Status: **Done**
 
-- attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
-- secrets management: encrypt secrets at rest in etcd, inject into containers as environment variables or files, with CLI commands to create and manage secrets
+Manage sensitive configuration — database passwords, API keys, tokens — without plaintext in manifests or source control.
+
+- **`banyan-cli secret` commands**: `create`, `list`, `get` (with `--reveal`), `delete` for managing encrypted secrets
+- **AES-256-GCM encryption**: Secrets encrypted at rest in etcd with a 256-bit key stored on the engine (`/etc/banyan/keys/secrets.key`)
+- **Manifest `secrets:` field**: Reference secrets by name — injected as environment variables into containers at runtime
+- **Just-in-time resolution**: Secret values never stored in task records. Decrypted only during PollTasks (in-memory), transmitted over WireGuard
+- **Deploy-time validation**: Deploying with a missing secret fails immediately with an actionable error
+- **Delete protection**: Secrets referenced by running deployments cannot be deleted
+
+See [Secrets](/guides/secrets/) for the guide and [Manifest Reference — Secrets](/reference/manifest/#secrets) for syntax.
+
+---
+
+## Milestone 12 — Advanced Security
+
+Authorization and certificate lifecycle management.
+
+- Attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
 - Certificate rotation support
 
 ---
 
-## Milestone 12 — Advanced Networking
+## Milestone 13 — Advanced Networking
 
 Service discovery, traffic policies, and encrypted communication across the cluster.
 

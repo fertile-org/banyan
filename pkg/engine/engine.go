@@ -48,6 +48,7 @@ type Options struct {
 type Engine struct {
 	store            storage.StateStore
 	grpcServer       *engineGRPCServer
+	secrets          *SecretsManager // nil if secrets.key not present
 	opts             Options
 	registryURL      string
 	engineID         string
@@ -107,6 +108,16 @@ func New(opts *Options) (*Engine, error) {
 	}
 	// Seed the CPU sample so the first metrics read gets a real value
 	e.metricsCollector.Collect()
+
+	// Load secrets encryption key (optional — secrets features disabled if key missing)
+	secretsKeyPath := filepath.Join(types.DefaultKeysDir, "secrets.key")
+	if _, statErr := os.Stat(secretsKeyPath); statErr == nil {
+		sm, smErr := NewSecretsManager(store, secretsKeyPath)
+		if smErr != nil {
+			return nil, fmt.Errorf("failed to initialize secrets manager: %w", smErr)
+		}
+		e.secrets = sm
+	}
 
 	return e, nil
 }
@@ -219,6 +230,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		ScheduleCh:      e.scheduleCh,
 		MetricsRegistry: e.metricsRegistry,
 		Events:          e.events,
+		Secrets:         e.secrets,
 		StartedAt:       e.startedAt,
 	})
 	if err != nil {

@@ -148,6 +148,32 @@ func (c *EngineClient) Health(ctx context.Context) error {
 	return err
 }
 
+// CreateSecret creates or updates a secret on the engine.
+func (c *EngineClient) CreateSecret(ctx context.Context, name string, value []byte) error {
+	_, err := c.client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{Name: name, Value: value})
+	return err
+}
+
+// ListSecrets returns all secret metadata from the engine.
+func (c *EngineClient) ListSecrets(ctx context.Context) ([]*banyanpb.SecretInfo, error) {
+	resp, err := c.client.ListSecrets(ctx, &banyanpb.ListSecretsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Secrets, nil
+}
+
+// GetSecret returns secret metadata, optionally with the decrypted value.
+func (c *EngineClient) GetSecret(ctx context.Context, name string, reveal bool) (*banyanpb.GetSecretResponse, error) {
+	return c.client.GetSecret(ctx, &banyanpb.GetSecretRequest{Name: name, Reveal: reveal})
+}
+
+// DeleteSecret removes a secret from the engine.
+func (c *EngineClient) DeleteSecret(ctx context.Context, name string) error {
+	_, err := c.client.DeleteSecret(ctx, &banyanpb.DeleteSecretRequest{Name: name})
+	return err
+}
+
 // grpcLogStreamReader wraps a gRPC server-streaming response as io.ReadCloser.
 type grpcLogStreamReader struct {
 	stream grpc.ServerStreamingClient[banyanpb.GetLogsResponse]
@@ -262,6 +288,8 @@ func manifestToProto(m types.BanyanManifest) *banyanpb.Manifest {
 			}
 			ms.Volumes = append(ms.Volumes, pbVol)
 		}
+
+		ms.Secrets = svc.Secrets
 
 		services[name] = ms
 	}

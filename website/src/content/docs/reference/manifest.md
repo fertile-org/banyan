@@ -28,6 +28,7 @@ Banyan's manifest format is based on Docker Compose. Here's what carries over an
 | Healthcheck | `healthcheck:` | `healthcheck:` | Same (test, interval, timeout, retries, start_period, disable) |
 | Volumes | `volumes:` | `volumes:` | Same (named volumes, bind mounts, tmpfs, NFS). See [Volumes](#volumes). |
 | Auto-scaling | -- | `deploy.autoscale:` | Banyan-specific. Auto-scale based on CPU metrics. See [Auto-scaling](#auto-scaling). |
+| Secrets | `secrets:` (Swarm only, file-based) | `secrets:` | Banyan-specific. Encrypted, injected as env vars. See [Secrets](#secrets). |
 | Networks | `networks:` | -- | Managed automatically |
 | Labels | `labels:` | -- | Not supported — Banyan uses built-in service DNS and load balancing instead of label-based service discovery |
 
@@ -78,6 +79,9 @@ services:
     depends_on:
       <other-service>:
         condition: service_healthy  # or service_started (default)
+    secrets:
+      - DB_PASSWORD               # Injected as env var
+      - API_KEY
 ```
 
 ## Fields
@@ -119,6 +123,7 @@ services:
 | `deploy.autoscale.cooldown` | string | No | `60s` | Minimum time between scale events (e.g., `30s`, `2m`). |
 | `deploy.stop_grace_period` | string | No | `5s` | Time to wait after removing from proxy/DNS before stopping a container during scale-down or drain. |
 | `volumes` | list | No | -- | Mount volumes into the container. Same syntax as Docker Compose. See [volumes](#volumes) below. |
+| `secrets` | list | No | -- | Secret names to inject as environment variables. Each name must match a secret created with `banyan-cli secret create`. See [Secrets](#secrets) below. |
 
 ## Container naming
 
@@ -598,6 +603,42 @@ services:
       placement:
         node: app-server
 ```
+
+## Secrets
+
+Reference encrypted secrets stored on the engine. Each secret name becomes an environment variable inside the container.
+
+```yaml
+services:
+  api:
+    image: myapp/api:latest
+    environment:
+      - DB_HOST=db.my-app.internal
+    secrets:
+      - DB_PASSWORD
+      - API_KEY
+```
+
+Secrets must be created before deploying:
+
+```bash
+banyan-cli secret create DB_PASSWORD
+banyan-cli secret create API_KEY
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `secrets` | list of strings | Secret names to inject as environment variables. Each must match a secret created with `banyan-cli secret create`. |
+
+**Naming**: Secret names must be valid environment variable identifiers — letters, digits, and underscores, starting with a letter or underscore.
+
+**Collision**: If a secret has the same name as an `environment:` variable, the secret value wins.
+
+**Deploy validation**: If a manifest references a secret that doesn't exist, the deploy fails with an actionable error message.
+
+See the [Secrets guide](/guides/secrets/) for the full workflow and security model.
+
+---
 
 ## Validation
 

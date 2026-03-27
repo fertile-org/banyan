@@ -11,7 +11,7 @@ Banyan uses three binaries. Install only what each machine needs.
 |--------|------|------------|---------------|
 | `banyan-engine` | Control plane (state store, gRPC server, scheduling) | Engine node | Yes (all commands) |
 | `banyan-agent` | Agent (task execution, container management) | Agent nodes | Yes (all commands) |
-| `banyan-cli` | Client (up, down, scale, engine, agent, deployment, container, events, logs, dashboard) | Any machine | `init` and `login` |
+| `banyan-cli` | Client (up, down, scale, secret, engine, agent, deployment, container, events, logs, dashboard) | Any machine | `init` and `login` |
 
 ---
 
@@ -349,6 +349,102 @@ banyan-cli scale my-app api=5 --tags staging
 :::tip
 For automatic scaling based on CPU metrics, define `deploy.autoscale` in your manifest instead. See [Manifest Reference — Auto-scaling](/reference/manifest/#auto-scaling).
 :::
+
+### secret
+
+Manage encrypted secrets stored on the engine.
+
+#### secret create
+
+Create or update an encrypted secret.
+
+```bash
+banyan-cli secret create DB_PASSWORD
+```
+
+```
+Enter secret value: ********
+Secret "DB_PASSWORD" created.
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--value` | | Secret value inline (visible in shell history) |
+| `--from-file` | | Read secret value from a file |
+
+If neither flag is provided, the CLI prompts for the value with hidden input. Creating a secret that already exists updates its value.
+
+```bash
+# From a file
+banyan-cli secret create TLS_KEY --from-file ./server.key
+
+# Inline (for scripting — value visible in process list)
+banyan-cli secret create API_KEY --value "abc123"
+```
+
+#### secret list
+
+List all secrets (names and timestamps, no values).
+
+```bash
+banyan-cli secret list
+```
+
+```
+NAME                           CREATED              UPDATED
+------------------------------------------------------------------------
+API_KEY                        2h ago               2h ago
+DB_PASSWORD                    5d ago               1h ago
+```
+
+#### secret get
+
+Show secret metadata. Add `--reveal` to include the decrypted value.
+
+```bash
+banyan-cli secret get DB_PASSWORD
+```
+
+```
+Secret: DB_PASSWORD
+  Created:  2026-03-27T10:00:00Z
+  Updated:  2026-03-27T15:30:00Z
+```
+
+```bash
+banyan-cli secret get DB_PASSWORD --reveal
+```
+
+```
+Secret: DB_PASSWORD
+  Created:  2026-03-27T10:00:00Z
+  Updated:  2026-03-27T15:30:00Z
+  Value:    s3cret-passw0rd
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--reveal` | `false` | Show the decrypted secret value |
+
+#### secret delete
+
+Delete a secret. Blocked if any running deployment references it.
+
+```bash
+banyan-cli secret delete DB_PASSWORD
+```
+
+```
+Secret "DB_PASSWORD" deleted.
+```
+
+If the secret is in use:
+
+```
+Error: cannot delete secret "DB_PASSWORD": referenced by deployment "my-app" (service: api)
+```
+
+See the [Secrets guide](/guides/secrets/) for the full workflow.
 
 ### engine
 

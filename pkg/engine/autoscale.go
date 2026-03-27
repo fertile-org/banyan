@@ -147,6 +147,7 @@ func (e *Engine) scaleService(ctx context.Context, deployment *types.DeploymentR
 				MemoryReservation: svc.MemoryReservation,
 				Healthcheck:       svc.Healthcheck,
 				Volumes:           svc.Volumes,
+				SecretRefs:        svc.Secrets,
 				CreatedAt:         now,
 				UpdatedAt:         now,
 			}

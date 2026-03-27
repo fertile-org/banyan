@@ -398,6 +398,7 @@ Before documenting any feature, verify its implementation status:
 | Multi-engine HA | Done (M7) | Document fully |
 | Volumes (named, bind, tmpfs, NFS) | Done (M8) | Document fully |
 | Auto-scaling & rebalancing | Done (M9) | Document fully |
+| Secrets management | Done (M11) | Document fully |
 | mTLS | Planned | Mention as upcoming |
 
 **Rule**: Never document a planned feature as if it exists. Use "coming in [milestone]" or link to the roadmap.

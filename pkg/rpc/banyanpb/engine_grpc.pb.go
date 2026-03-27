@@ -32,6 +32,10 @@ const (
 	EngineService_Health_FullMethodName                = "/banyan.v1.EngineService/Health"
 	EngineService_Scale_FullMethodName                 = "/banyan.v1.EngineService/Scale"
 	EngineService_GetDashboardData_FullMethodName      = "/banyan.v1.EngineService/GetDashboardData"
+	EngineService_CreateSecret_FullMethodName          = "/banyan.v1.EngineService/CreateSecret"
+	EngineService_ListSecrets_FullMethodName           = "/banyan.v1.EngineService/ListSecrets"
+	EngineService_GetSecret_FullMethodName             = "/banyan.v1.EngineService/GetSecret"
+	EngineService_DeleteSecret_FullMethodName          = "/banyan.v1.EngineService/DeleteSecret"
 )
 
 // EngineServiceClient is the client API for EngineService service.
@@ -56,6 +60,11 @@ type EngineServiceClient interface {
 	Scale(ctx context.Context, in *ScaleRequest, opts ...grpc.CallOption) (*ScaleResponse, error)
 	// Dashboard RPCs
 	GetDashboardData(ctx context.Context, in *GetDashboardDataRequest, opts ...grpc.CallOption) (*GetDashboardDataResponse, error)
+	// Secret RPCs
+	CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error)
+	ListSecrets(ctx context.Context, in *ListSecretsRequest, opts ...grpc.CallOption) (*ListSecretsResponse, error)
+	GetSecret(ctx context.Context, in *GetSecretRequest, opts ...grpc.CallOption) (*GetSecretResponse, error)
+	DeleteSecret(ctx context.Context, in *DeleteSecretRequest, opts ...grpc.CallOption) (*DeleteSecretResponse, error)
 }
 
 type engineServiceClient struct {
@@ -205,6 +214,46 @@ func (c *engineServiceClient) GetDashboardData(ctx context.Context, in *GetDashb
 	return out, nil
 }
 
+func (c *engineServiceClient) CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateSecretResponse)
+	err := c.cc.Invoke(ctx, EngineService_CreateSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ListSecrets(ctx context.Context, in *ListSecretsRequest, opts ...grpc.CallOption) (*ListSecretsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListSecretsResponse)
+	err := c.cc.Invoke(ctx, EngineService_ListSecrets_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) GetSecret(ctx context.Context, in *GetSecretRequest, opts ...grpc.CallOption) (*GetSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetSecretResponse)
+	err := c.cc.Invoke(ctx, EngineService_GetSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) DeleteSecret(ctx context.Context, in *DeleteSecretRequest, opts ...grpc.CallOption) (*DeleteSecretResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteSecretResponse)
+	err := c.cc.Invoke(ctx, EngineService_DeleteSecret_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EngineServiceServer is the server API for EngineService service.
 // All implementations must embed UnimplementedEngineServiceServer
 // for forward compatibility.
@@ -227,6 +276,11 @@ type EngineServiceServer interface {
 	Scale(context.Context, *ScaleRequest) (*ScaleResponse, error)
 	// Dashboard RPCs
 	GetDashboardData(context.Context, *GetDashboardDataRequest) (*GetDashboardDataResponse, error)
+	// Secret RPCs
+	CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error)
+	ListSecrets(context.Context, *ListSecretsRequest) (*ListSecretsResponse, error)
+	GetSecret(context.Context, *GetSecretRequest) (*GetSecretResponse, error)
+	DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error)
 	mustEmbedUnimplementedEngineServiceServer()
 }
 
@@ -275,6 +329,18 @@ func (UnimplementedEngineServiceServer) Scale(context.Context, *ScaleRequest) (*
 }
 func (UnimplementedEngineServiceServer) GetDashboardData(context.Context, *GetDashboardDataRequest) (*GetDashboardDataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDashboardData not implemented")
+}
+func (UnimplementedEngineServiceServer) CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateSecret not implemented")
+}
+func (UnimplementedEngineServiceServer) ListSecrets(context.Context, *ListSecretsRequest) (*ListSecretsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListSecrets not implemented")
+}
+func (UnimplementedEngineServiceServer) GetSecret(context.Context, *GetSecretRequest) (*GetSecretResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetSecret not implemented")
+}
+func (UnimplementedEngineServiceServer) DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteSecret not implemented")
 }
 func (UnimplementedEngineServiceServer) mustEmbedUnimplementedEngineServiceServer() {}
 func (UnimplementedEngineServiceServer) testEmbeddedByValue()                       {}
@@ -524,6 +590,78 @@ func _EngineService_GetDashboardData_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineService_CreateSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).CreateSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_CreateSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).CreateSecret(ctx, req.(*CreateSecretRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ListSecrets_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListSecretsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ListSecrets(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ListSecrets_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ListSecrets(ctx, req.(*ListSecretsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_GetSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).GetSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_GetSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).GetSecret(ctx, req.(*GetSecretRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_DeleteSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteSecretRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).DeleteSecret(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_DeleteSecret_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).DeleteSecret(ctx, req.(*DeleteSecretRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EngineService_ServiceDesc is the grpc.ServiceDesc for EngineService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -578,6 +716,22 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetDashboardData",
 			Handler:    _EngineService_GetDashboardData_Handler,
+		},
+		{
+			MethodName: "CreateSecret",
+			Handler:    _EngineService_CreateSecret_Handler,
+		},
+		{
+			MethodName: "ListSecrets",
+			Handler:    _EngineService_ListSecrets_Handler,
+		},
+		{
+			MethodName: "GetSecret",
+			Handler:    _EngineService_GetSecret_Handler,
+		},
+		{
+			MethodName: "DeleteSecret",
+			Handler:    _EngineService_DeleteSecret_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

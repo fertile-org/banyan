@@ -455,6 +455,40 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		existingCfg.Engine.EngineID = engine.GenerateEngineID()
 	}
 
+	// --- Secrets encryption key ---
+	secretsKeyPath := filepath.Join(types.DefaultKeysDir, "secrets.key")
+	if _, err := os.Stat(secretsKeyPath); os.IsNotExist(err) {
+		var keyChoice string
+		desc := "Used to encrypt secrets at rest."
+		if multiEngine {
+			desc = "All engines must use the same key. Generate on the first engine, provide existing on others."
+		}
+		keyForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewSelect[string]().
+					Title("Secrets encryption key").
+					Description(desc).
+					Options(
+						huh.NewOption("Generate new key", "generate"),
+						huh.NewOption("Provide existing key file", "file"),
+					).
+					Value(&keyChoice),
+			),
+		)
+		if formErr := keyForm.Run(); formErr != nil {
+			if errors.Is(formErr, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("secrets key choice: %w", formErr)
+		}
+		if writeErr := handleSecretsKeyChoice(keyChoice, secretsKeyPath, multiEngine, styleOK, styleInfo); writeErr != nil {
+			return writeErr
+		}
+	} else {
+		fmt.Printf("  %s Secrets encryption key already exists\n", styleOK.Render("[OK]"))
+	}
+
 	// --- Save config ---
 	fmt.Println()
 	if err := types.SaveConfig(configPath, &existingCfg); err != nil {
@@ -1074,4 +1108,50 @@ func runInitCmd(name string, args ...string) error {
 	c.Stdout = os.Stdout
 	c.Stderr = os.Stderr
 	return c.Run()
+}
+
+// handleSecretsKeyChoice processes the user's choice for secrets key setup.
+func handleSecretsKeyChoice(choice, destPath string, multiEngine bool, styleOK, styleInfo lipgloss.Style) error { //nolint:gocritic // lipgloss.Style is value-type by design
+	switch choice {
+	case "generate":
+		if err := engine.GenerateSecretsKey(destPath); err != nil {
+			return fmt.Errorf("failed to generate secrets key: %w", err)
+		}
+		fmt.Printf("  %s Secrets encryption key: %s\n", styleOK.Render("[OK]"), destPath)
+		if multiEngine {
+			fmt.Printf("  %s Copy this file to all other engines: scp %s <other-engine>:%s\n",
+				styleInfo.Render("[INFO]"), destPath, destPath)
+		}
+		return nil
+
+	case "file":
+		var srcPath string
+		pathForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("Path to existing secrets.key").
+					Description("Copy from the first engine's /etc/banyan/keys/secrets.key").
+					Value(&srcPath),
+			),
+		)
+		if err := pathForm.Run(); err != nil {
+			return fmt.Errorf("secrets key path: %w", err)
+		}
+		data, readErr := os.ReadFile(srcPath)
+		if readErr != nil {
+			return fmt.Errorf("failed to read secrets key from %s: %w", srcPath, readErr)
+		}
+		if len(data) != 32 {
+			return fmt.Errorf("invalid secrets key: expected 32 bytes, got %d", len(data))
+		}
+		if err := os.MkdirAll(filepath.Dir(destPath), 0o700); err != nil {
+			return fmt.Errorf("failed to create keys directory: %w", err)
+		}
+		if err := os.WriteFile(destPath, data, 0o600); err != nil {
+			return fmt.Errorf("failed to write secrets key: %w", err)
+		}
+		fmt.Printf("  %s Secrets encryption key copied from %s\n", styleOK.Render("[OK]"), srcPath)
+		return nil
+	}
+	return nil
 }

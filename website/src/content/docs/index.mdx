@@ -114,6 +114,9 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
   <Card title="Auto-scaling built in" icon="approve-check">
     Define `target_cpu` in your manifest and Banyan scales replicas automatically. Scale up under load, scale down when idle. Graceful drain prevents dropped requests. Or scale manually with `banyan-cli scale my-app api=5`.
   </Card>
+  <Card title="Encrypted secrets" icon="approve-check">
+    `banyan-cli secret create DB_PASSWORD` — encrypted at rest, injected into containers as env vars. No plaintext in manifests or source control. No external Vault to set up.
+  </Card>
   <Card title="High availability" icon="approve-check">
     Run multiple engines for zero-downtime control plane. All engines are active — no leader election, no manual failover. Start with one engine, add more when you need them.
   </Card>

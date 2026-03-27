@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/types"
@@ -152,7 +153,9 @@ func (e *Engine) scaleService(ctx context.Context, deployment *types.DeploymentR
 				UpdatedAt:         now,
 			}
 			taskKey := types.KeyTasks + agent.Name + "/" + task.ID
-			_ = e.store.Save(ctx, taskKey, task)
+			if saveErr := e.store.Save(ctx, taskKey, task); saveErr != nil {
+				e.logger().Error("Failed to save scale task", "task", task.ID, "error", saveErr)
+			}
 		}
 	} else if target < current {
 		// Scale down (highest index first)
@@ -174,7 +177,9 @@ func (e *Engine) scaleService(ctx context.Context, deployment *types.DeploymentR
 				UpdatedAt:     time.Now(),
 			}
 			taskKey := types.KeyTasks + orig.AgentID + "/" + stopTask.ID
-			_ = e.store.Save(ctx, taskKey, stopTask)
+			if saveErr := e.store.Save(ctx, taskKey, stopTask); saveErr != nil {
+				e.logger().Error("Failed to save scale-down task", "task", stopTask.ID, "error", saveErr)
+			}
 		}
 	}
 
@@ -183,7 +188,9 @@ func (e *Engine) scaleService(ctx context.Context, deployment *types.DeploymentR
 	svc.LastScaleAt = time.Now()
 	deployment.Services[svcName] = svc
 	deployment.UpdatedAt = time.Now()
-	_ = e.store.Save(ctx, deploymentKey, deployment)
+	if saveErr := e.store.Save(ctx, deploymentKey, deployment); saveErr != nil {
+		e.logger().Error("Failed to update deployment after scale", "deployment", deployment.Name, "error", saveErr)
+	}
 }
 
 // parseDuration parses a duration string, returning defaultVal on error.
@@ -200,7 +207,18 @@ func parseDuration(s string, defaultVal time.Duration) time.Duration {
 
 // rebalanceMigrationCooldown tracks recently migrated containers to prevent ping-pong.
 // Key: container name, value: time of last migration.
-var rebalanceMigrationCooldown = make(map[string]time.Time)
+// Protected by rebalanceMu.
+var (
+	rebalanceMigrationCooldown   = make(map[string]time.Time)
+	rebalanceMu                  sync.Mutex
+)
+
+// agentStalenessThreshold is how long since last heartbeat before an agent is considered stale.
+// Used by scheduling, rebalancing, and dashboard status.
+const agentStalenessThreshold = 60 * time.Second
+
+// deploymentLockTimeout is the maximum time to hold a distributed lock for deployment operations.
+const deploymentLockTimeout = 30 * time.Second
 
 // rebalanceCooldownDuration is the minimum time before a container can be migrated again.
 const rebalanceCooldownDuration = 10 * time.Minute
@@ -244,7 +262,7 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 		if err := e.store.Get(ctx, key, &node); err != nil {
 			continue
 		}
-		if node.Status != "ready" || time.Since(node.LastSeen) > 60*time.Second {
+		if node.Status != "ready" || time.Since(node.LastSeen) > agentStalenessThreshold {
 			continue
 		}
 		cpu := node.CPUUsageRatio * 100
@@ -279,11 +297,13 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 	}
 
 	// Clean up expired cooldown entries
+	rebalanceMu.Lock()
 	for name, t := range rebalanceMigrationCooldown {
 		if time.Since(t) > rebalanceCooldownDuration {
 			delete(rebalanceMigrationCooldown, name)
 		}
 	}
+	rebalanceMu.Unlock()
 
 	// For each overloaded agent, try to migrate one stateless container
 	migrated := make(map[string]bool)
@@ -299,10 +319,11 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 		}
 
 		// Check per-container cooldown — prevent ping-pong
-		if lastMigrated, ok := rebalanceMigrationCooldown[candidate.ContainerName]; ok {
-			if time.Since(lastMigrated) < rebalanceCooldownDuration {
-				continue // recently migrated, skip
-			}
+		rebalanceMu.Lock()
+		lastMigrated, hasCooldown := rebalanceMigrationCooldown[candidate.ContainerName]
+		rebalanceMu.Unlock()
+		if hasCooldown && time.Since(lastMigrated) < rebalanceCooldownDuration {
+			continue // recently migrated, skip
 		}
 
 		// Pick the least loaded target agent
@@ -333,7 +354,9 @@ func (e *Engine) evaluateRebalance(ctx context.Context) {
 
 		e.migrateTask(ctx, candidate, over.node.Name, bestTarget.node.Name)
 		migrated[over.node.Name] = true
+		rebalanceMu.Lock()
 		rebalanceMigrationCooldown[candidate.ContainerName] = time.Now()
+		rebalanceMu.Unlock()
 	}
 }
 
@@ -393,7 +416,9 @@ func (e *Engine) migrateTask(ctx context.Context, task *types.TaskRecord, fromAg
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
-	_ = e.store.Save(ctx, types.KeyTasks+fromAgent+"/"+stopTask.ID, stopTask)
+	if saveErr := e.store.Save(ctx, types.KeyTasks+fromAgent+"/"+stopTask.ID, stopTask); saveErr != nil {
+		e.logger().Error("Failed to save migration stop task", "task", stopTask.ID, "error", saveErr)
+	}
 
 	// Create start task on new agent
 	startTask := &types.TaskRecord{
@@ -420,7 +445,9 @@ func (e *Engine) migrateTask(ctx context.Context, task *types.TaskRecord, fromAg
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	_ = e.store.Save(ctx, types.KeyTasks+toAgent+"/"+startTask.ID, startTask)
+	if saveErr := e.store.Save(ctx, types.KeyTasks+toAgent+"/"+startTask.ID, startTask); saveErr != nil {
+		e.logger().Error("Failed to save migration start task", "task", startTask.ID, "error", saveErr)
+	}
 
 	e.emitEvent("rebalance.migrate",
 		fmt.Sprintf("Migrating %s from %s to %s", task.ContainerName, fromAgent, toAgent), "info")

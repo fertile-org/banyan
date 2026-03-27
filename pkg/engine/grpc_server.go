@@ -1818,7 +1818,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 			continue
 		}
 		totalAgents++
-		connected := node.Status == "ready" && time.Since(node.LastSeen) < 60*time.Second
+		connected := node.Status == "ready" && time.Since(node.LastSeen) < agentStalenessThreshold
 		if connected {
 			connectedAgents++
 		}

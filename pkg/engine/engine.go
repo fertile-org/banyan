@@ -399,7 +399,7 @@ func (e *Engine) collectClusterStats(ctx context.Context) metrics.ClusterStats {
 		if err := e.store.Get(ctx, key, &node); err != nil {
 			continue
 		}
-		if node.Status == "ready" && time.Since(node.LastSeen) < 60*time.Second {
+		if node.Status == "ready" && time.Since(node.LastSeen) < agentStalenessThreshold {
 			stats.ConnectedAgents++
 		}
 	}
@@ -547,7 +547,7 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 	// Acquire per-deployment lock to prevent duplicate scheduling across engines.
 	// When the store doesn't support locks (e.g., MemoryStore in tests), skip locking.
 	if lockStore, ok := e.store.(storage.LockStore); ok {
-		unlock, lockErr := lockStore.Lock(ctx, "locks/deploy/"+deployment.ID, 30*time.Second)
+		unlock, lockErr := lockStore.Lock(ctx, "locks/deploy/"+deployment.ID, deploymentLockTimeout)
 		if lockErr != nil {
 			return // another engine is handling this, or etcd issue
 		}
@@ -628,7 +628,7 @@ func (e *Engine) schedulePendingDeployment(ctx context.Context, deployment *type
 // Uses a per-deployment lock because blueGreenTeardownOld creates stop tasks (non-idempotent).
 func (e *Engine) checkDeployingDeployment(ctx context.Context, deployment *types.DeploymentRecord) {
 	if lockStore, ok := e.store.(storage.LockStore); ok {
-		unlock, lockErr := lockStore.Lock(ctx, "locks/deploy/"+deployment.ID, 30*time.Second)
+		unlock, lockErr := lockStore.Lock(ctx, "locks/deploy/"+deployment.ID, deploymentLockTimeout)
 		if lockErr != nil {
 			return
 		}

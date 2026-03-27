@@ -2432,3 +2432,168 @@ func TestEngineLoopScheduleCh(t *testing.T) {
 		}
 	})
 }
+
+// newTestEngine creates an Engine with a MemoryStore for unit testing.
+func newTestEngine(t *testing.T) *Engine {
+	t.Helper()
+	store := storage.NewMemoryStore()
+	return &Engine{
+		store:            store,
+		engineID:         "test-engine-1",
+		registryURL:      "localhost:5000",
+		scheduleCh:       make(chan struct{}, 1),
+		metricsRegistry:  metrics.NewEngineMetricsRegistry(),
+		metricsCollector: metrics.NewSystemCollector(),
+		events:           NewEventBuffer(100),
+		startedAt:        time.Now(),
+		log:              nil,
+	}
+}
+
+func TestCollectClusterStats(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+
+	t.Run("empty cluster", func(t *testing.T) {
+		stats := e.collectClusterStats(ctx)
+		if stats.TotalAgents != 0 {
+			t.Errorf("expected 0 agents, got %d", stats.TotalAgents)
+		}
+		if stats.TotalContainers != 0 {
+			t.Errorf("expected 0 containers, got %d", stats.TotalContainers)
+		}
+	})
+
+	t.Run("with agents and deployments", func(t *testing.T) {
+		// Add agents
+		_ = e.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
+			Name: "agent-1", Status: "ready", LastSeen: time.Now(),
+		})
+		_ = e.store.Save(ctx, types.KeyNodes+"agent-2", &types.NodeRecord{
+			Name: "agent-2", Status: "ready", LastSeen: time.Now().Add(-5 * time.Minute), // stale
+		})
+
+		// Add deployment
+		_ = e.store.Save(ctx, types.KeyDeployments+"dep-1", &types.DeploymentRecord{
+			ID: "dep-1", Name: "myapp", Status: types.StatusRunning,
+		})
+
+		// Add tasks
+		_ = e.store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+			ID: "task-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, ContainerStatus: types.StatusRunning,
+		})
+
+		stats := e.collectClusterStats(ctx)
+		if stats.TotalAgents != 2 {
+			t.Errorf("expected 2 total agents, got %d", stats.TotalAgents)
+		}
+		if stats.ConnectedAgents != 1 {
+			t.Errorf("expected 1 connected agent, got %d", stats.ConnectedAgents)
+		}
+		if stats.TotalContainers != 1 {
+			t.Errorf("expected 1 container, got %d", stats.TotalContainers)
+		}
+		if stats.HealthyContainers != 1 {
+			t.Errorf("expected 1 healthy container, got %d", stats.HealthyContainers)
+		}
+		if stats.DeploymentsByStatus[types.StatusRunning] != 1 {
+			t.Errorf("expected 1 running deployment, got %d", stats.DeploymentsByStatus[types.StatusRunning])
+		}
+	})
+}
+
+func TestCollectDeploymentMetrics(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+
+	// Add deployment with 2 services
+	_ = e.store.Save(ctx, types.KeyDeployments+"dep-1", &types.DeploymentRecord{
+		ID: "dep-1", Name: "myapp", Status: types.StatusRunning,
+		Services: map[string]types.ServiceRecord{
+			"web": {Image: "nginx", Replicas: 3},
+			"db":  {Image: "postgres", Replicas: 1},
+		},
+	})
+
+	// Add tasks for agent-1
+	_ = e.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1"})
+	for i := 0; i < 3; i++ {
+		_ = e.store.Save(ctx, types.KeyTasks+fmt.Sprintf("agent-1/dep-1-web-%d", i), &types.TaskRecord{
+			ID: fmt.Sprintf("dep-1-web-%d", i), DeploymentID: "dep-1", ServiceName: "web",
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerStatus: types.StatusRunning, AgentID: "agent-1",
+		})
+	}
+	_ = e.store.Save(ctx, types.KeyTasks+"agent-1/dep-1-db-0", &types.TaskRecord{
+		ID: "dep-1-db-0", DeploymentID: "dep-1", ServiceName: "db",
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerStatus: types.StatusRunning, AgentID: "agent-1",
+	})
+
+	result := e.collectDeploymentMetrics(ctx)
+	if len(result) != 1 {
+		t.Fatalf("expected 1 deployment metric, got %d", len(result))
+	}
+	dm := result[0]
+	if dm.Name != "myapp" {
+		t.Errorf("expected name myapp, got %s", dm.Name)
+	}
+	if dm.Services["web"].Desired != 3 {
+		t.Errorf("expected web desired=3, got %d", dm.Services["web"].Desired)
+	}
+	if dm.Services["web"].Healthy != 3 {
+		t.Errorf("expected web healthy=3, got %d", dm.Services["web"].Healthy)
+	}
+	if dm.Services["db"].Healthy != 1 {
+		t.Errorf("expected db healthy=1, got %d", dm.Services["db"].Healthy)
+	}
+}
+
+func TestUpdateMetrics(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+
+	// Should not panic with empty store
+	e.updateMetrics(ctx)
+
+	// Add data and run again
+	_ = e.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
+		Name: "agent-1", Status: "ready", LastSeen: time.Now(),
+	})
+	_ = e.store.Save(ctx, types.KeyDeployments+"dep-1", &types.DeploymentRecord{
+		ID: "dep-1", Name: "app", Status: types.StatusRunning,
+		Services: map[string]types.ServiceRecord{"web": {Replicas: 1}},
+	})
+
+	e.updateMetrics(ctx)
+	// If we got here without panic, the test passes
+}
+
+func TestRegisterEngine_NonEtcd(t *testing.T) {
+	e := newTestEngine(t)
+	ctx := context.Background()
+
+	// registerEngine with MemoryStore should be a no-op (not panic)
+	e.registerEngine(ctx, "10.200.0.1:50051")
+}
+
+func TestStartMetricsHTTP(t *testing.T) {
+	e := newTestEngine(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Use port 0 to get a random available port
+	err := e.startMetricsHTTP(ctx, "0")
+	if err != nil {
+		t.Fatalf("startMetricsHTTP: %v", err)
+	}
+	// Cancel context to shut down the server cleanly
+	cancel()
+}
+
+func TestClose(t *testing.T) {
+	e := newTestEngine(t)
+	// Should not panic
+	e.Close()
+}

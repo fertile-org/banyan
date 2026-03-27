@@ -166,6 +166,7 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		),
 		grpc.ChainStreamInterceptor(
 			engineSrv.panicRecoveryStreamInterceptor(),
+			engineSrv.rateLimitStreamInterceptor(),
 			engineSrv.auditLogStreamInterceptor(),
 		),
 	)
@@ -235,6 +236,18 @@ func (s *engineGRPCServer) rateLimitInterceptor() grpc.UnaryServerInterceptor {
 			return nil, status.Errorf(codes.ResourceExhausted, "rate limit exceeded — try again later")
 		}
 		return handler(ctx, req)
+	}
+}
+
+// rateLimitStreamInterceptor returns a stream interceptor that enforces per-IP rate limiting.
+func (s *engineGRPCServer) rateLimitStreamInterceptor() grpc.StreamServerInterceptor {
+	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		peerIP, _ := banyanrpc.PeerIPFromContext(ss.Context())
+		if peerIP != "" && !s.limiter.allow(peerIP) {
+			s.logger().Warn("Rate limited (stream)", "peer_ip", peerIP, "method", info.FullMethod)
+			return status.Errorf(codes.ResourceExhausted, "rate limit exceeded — try again later")
+		}
+		return handler(srv, ss)
 	}
 }
 
@@ -763,6 +776,26 @@ func (s *engineGRPCServer) Deploy(ctx context.Context, req *banyanpb.DeployRPCRe
 		}
 	}
 
+	// Validate autoscale bounds
+	for svcName, svc := range allServices {
+		if svc.Autoscale == nil {
+			continue
+		}
+		as := svc.Autoscale
+		if as.Min < 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: autoscale.min must be >= 0, got %d", svcName, as.Min)
+		}
+		if as.Max < 1 {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: autoscale.max must be >= 1, got %d", svcName, as.Max)
+		}
+		if as.Min > as.Max {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: autoscale.min (%d) cannot exceed autoscale.max (%d)", svcName, as.Min, as.Max)
+		}
+		if as.Max > types.MaxReplicas {
+			return nil, status.Errorf(codes.InvalidArgument, "service %q: autoscale.max (%d) exceeds maximum replicas (%d)", svcName, as.Max, types.MaxReplicas)
+		}
+	}
+
 	tags := types.SortTags(req.Tags)
 
 	// Per-service deploy path
@@ -1055,6 +1088,12 @@ func (s *engineGRPCServer) Scale(ctx context.Context, req *banyanpb.ScaleRequest
 	current := make(map[string]int32)
 
 	for svcName, targetReplicas := range req.Replicas {
+		if targetReplicas < 0 {
+			return nil, status.Errorf(codes.InvalidArgument, "replica count for %q must be >= 0, got %d", svcName, targetReplicas)
+		}
+		if targetReplicas > int32(types.MaxReplicas) { //nolint:gosec // MaxReplicas is always small
+			return nil, status.Errorf(codes.InvalidArgument, "replica count for %q exceeds maximum (%d)", svcName, types.MaxReplicas)
+		}
 		svc, ok := deployment.Services[svcName]
 		if !ok {
 			return nil, status.Errorf(codes.InvalidArgument, "service %q not found in deployment %q", svcName, req.Name)
@@ -1779,7 +1818,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 			continue
 		}
 		totalAgents++
-		connected := node.Status == "ready" && time.Since(node.LastSeen) < 60*time.Second
+		connected := node.Status == "ready" && time.Since(node.LastSeen) < agentStalenessThreshold
 		if connected {
 			connectedAgents++
 		}

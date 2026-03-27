@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
@@ -413,6 +414,13 @@ func executeCreateAndStart(ctx context.Context, task *types.TaskRecord) (*types.
 
 	args := buildNerdctlRunArgs(task, vpcNetworkEnabled)
 
+	// Clean up secrets env file after container starts (created by buildNerdctlRunArgs)
+	for i, arg := range args {
+		if arg == "--env-file" && i+1 < len(args) {
+			defer os.Remove(args[i+1]) //nolint:errcheck // best-effort cleanup
+		}
+	}
+
 	logging.Info("Starting container", "container", task.ContainerName)
 	if err := commandRunner(ctx, "nerdctl", args...); err != nil {
 		return nil, fmt.Errorf("failed to start container: %w", err)
@@ -557,9 +565,14 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 	for _, env := range task.Environment {
 		args = append(args, "-e", env)
 	}
-	// Secrets override env vars (nerdctl uses last -e value for duplicates)
-	for name, value := range task.ResolvedSecrets {
-		args = append(args, "-e", name+"="+value)
+	// Secrets injected via --env-file (not -e) to avoid exposure in process args.
+	// The temp file is deleted after nerdctl reads it (by the caller).
+	if len(task.ResolvedSecrets) > 0 {
+		envFile, envErr := writeSecretsEnvFile(task.ResolvedSecrets)
+		if envErr == nil {
+			args = append(args, "--env-file", envFile)
+			// Caller (executeCreateAndStart) removes the file after commandRunner returns
+		}
 	}
 
 	// Volume mounts
@@ -597,6 +610,30 @@ func buildNerdctlRunArgs(task *types.TaskRecord, vpcEnabled bool) []string {
 	}
 	args = append(args, task.Command...)
 	return args
+}
+
+// writeSecretsEnvFile writes secrets to a temporary env file with restricted permissions.
+// Returns the file path. The caller must remove the file after use.
+func writeSecretsEnvFile(secrets map[string]string) (string, error) {
+	f, err := os.CreateTemp("", "banyan-secrets-*.env")
+	if err != nil {
+		return "", fmt.Errorf("create secrets env file: %w", err)
+	}
+	// Restrict permissions before writing content
+	if chErr := f.Chmod(0o600); chErr != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return "", fmt.Errorf("chmod secrets env file: %w", chErr)
+	}
+	for name, value := range secrets {
+		if _, wErr := fmt.Fprintf(f, "%s=%s\n", name, value); wErr != nil {
+			f.Close()
+			os.Remove(f.Name())
+			return "", fmt.Errorf("write secrets env file: %w", wErr)
+		}
+	}
+	f.Close()
+	return f.Name(), nil
 }
 
 // getContainerStatus runs nerdctl inspect to get the container's current status.

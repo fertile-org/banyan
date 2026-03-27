@@ -87,7 +87,7 @@ func TestEncryptDecrypt(t *testing.T) {
 	sm := newTestSecretsManager(t)
 	plaintext := []byte("super-secret-password")
 
-	encrypted, err := sm.encrypt(plaintext)
+	encrypted, err := sm.encrypt(plaintext, "TEST_SECRET")
 	if err != nil {
 		t.Fatalf("encrypt: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestEncryptDecrypt(t *testing.T) {
 		t.Error("encrypted should differ from plaintext")
 	}
 
-	decrypted, err := sm.decrypt(encrypted)
+	decrypted, err := sm.decrypt(encrypted, "TEST_SECRET")
 	if err != nil {
 		t.Fatalf("decrypt: %v", err)
 	}
@@ -111,8 +111,8 @@ func TestEncryptDifferentNonce(t *testing.T) {
 	sm := newTestSecretsManager(t)
 	plaintext := []byte("same-value")
 
-	enc1, _ := sm.encrypt(plaintext)
-	enc2, _ := sm.encrypt(plaintext)
+	enc1, _ := sm.encrypt(plaintext, "KEY")
+	enc2, _ := sm.encrypt(plaintext, "KEY")
 
 	if bytes.Equal(enc1, enc2) {
 		t.Error("same plaintext should produce different ciphertext (random nonce)")
@@ -121,14 +121,14 @@ func TestEncryptDifferentNonce(t *testing.T) {
 
 func TestDecryptTampered(t *testing.T) {
 	sm := newTestSecretsManager(t)
-	encrypted, _ := sm.encrypt([]byte("secret"))
+	encrypted, _ := sm.encrypt([]byte("secret"), "KEY")
 
 	// Tamper with ciphertext
 	tampered := make([]byte, len(encrypted))
 	copy(tampered, encrypted)
 	tampered[len(tampered)-1] ^= 0xff
 
-	_, err := sm.decrypt(tampered)
+	_, err := sm.decrypt(tampered, "KEY")
 	if err == nil {
 		t.Error("expected error for tampered ciphertext")
 	}
@@ -136,7 +136,7 @@ func TestDecryptTampered(t *testing.T) {
 
 func TestDecryptTooShort(t *testing.T) {
 	sm := newTestSecretsManager(t)
-	_, err := sm.decrypt([]byte("short"))
+	_, err := sm.decrypt([]byte("short"), "KEY")
 	if err == nil {
 		t.Error("expected error for short ciphertext")
 	}

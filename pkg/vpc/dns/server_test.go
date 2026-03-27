@@ -369,8 +369,8 @@ func TestServer_ConfigMethods(t *testing.T) {
 func TestServer_DefaultConfig(t *testing.T) {
 	config := dns.DefaultServerConfig()
 
-	if config.BindAddr != "0.0.0.0:53" {
-		t.Errorf("Expected default bind addr 0.0.0.0:53, got %s", config.BindAddr)
+	if config.BindAddr != "127.0.0.1:53" {
+		t.Errorf("Expected default bind addr 127.0.0.1:53, got %s", config.BindAddr)
 	}
 
 	if config.InternalZone != "internal" {

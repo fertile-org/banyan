@@ -2231,3 +2231,120 @@ func TestPbTaskToLocal_Volumes(t *testing.T) {
 		}
 	})
 }
+
+func TestWriteSecretsEnvFile(t *testing.T) {
+	t.Run("writes secrets to temp file", func(t *testing.T) {
+		secrets := map[string]string{
+			"DB_PASSWORD": "secret123",
+			"API_KEY":     "key456",
+		}
+		path, err := writeSecretsEnvFile(secrets)
+		if err != nil {
+			t.Fatalf("writeSecretsEnvFile: %v", err)
+		}
+		defer os.Remove(path)
+
+		data, _ := os.ReadFile(path)
+		content := string(data)
+		if !strings.Contains(content, "DB_PASSWORD=secret123") {
+			t.Errorf("expected DB_PASSWORD in file, got: %s", content)
+		}
+		if !strings.Contains(content, "API_KEY=key456") {
+			t.Errorf("expected API_KEY in file, got: %s", content)
+		}
+
+		info, _ := os.Stat(path)
+		if info.Mode().Perm() != 0o600 {
+			t.Errorf("expected 0600 permissions, got %o", info.Mode().Perm())
+		}
+	})
+
+	t.Run("empty secrets", func(t *testing.T) {
+		path, err := writeSecretsEnvFile(map[string]string{})
+		if err != nil {
+			t.Fatalf("writeSecretsEnvFile: %v", err)
+		}
+		defer os.Remove(path)
+
+		data, _ := os.ReadFile(path)
+		if len(data) != 0 {
+			t.Errorf("expected empty file, got %d bytes", len(data))
+		}
+	})
+}
+
+func TestBuildNerdctlRunArgsWithSecrets(t *testing.T) {
+	task := &types.TaskRecord{
+		Image:         "nginx",
+		ContainerName: "app-0",
+		Environment:   []string{"APP_NAME=test"},
+		ResolvedSecrets: map[string]string{
+			"DB_PASSWORD": "secret123",
+		},
+	}
+	args := buildNerdctlRunArgs(task, false)
+	argsStr := strings.Join(args, " ")
+
+	// Should have --env-file (not direct -e for secrets)
+	if !strings.Contains(argsStr, "--env-file") {
+		t.Error("expected --env-file for secrets injection")
+	}
+
+	// Regular env vars should use -e
+	found := false
+	for i, a := range args {
+		if a == "-e" && i+1 < len(args) && args[i+1] == "APP_NAME=test" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected -e APP_NAME=test for regular env var")
+	}
+}
+
+func TestSanitizeNFSMountOpts(t *testing.T) {
+	t.Run("valid options", func(t *testing.T) {
+		result, err := sanitizeNFSMountOpts("vers=4,soft,addr=nfs.internal,ro")
+		if err != nil {
+			t.Fatalf("sanitizeNFSMountOpts: %v", err)
+		}
+		if result != "vers=4,soft,addr=nfs.internal,ro" {
+			t.Errorf("got %q", result)
+		}
+	})
+
+	t.Run("dangerous option rejected", func(t *testing.T) {
+		_, err := sanitizeNFSMountOpts("vers=4,suid,addr=nfs.internal")
+		if err == nil {
+			t.Fatal("expected error for 'suid' option")
+		}
+	})
+
+	t.Run("exec rejected", func(t *testing.T) {
+		_, err := sanitizeNFSMountOpts("exec,addr=nfs.internal")
+		if err == nil {
+			t.Fatal("expected error for 'exec' option")
+		}
+	})
+
+	t.Run("noexec allowed", func(t *testing.T) {
+		result, err := sanitizeNFSMountOpts("noexec,nosuid,nodev")
+		if err != nil {
+			t.Fatalf("sanitizeNFSMountOpts: %v", err)
+		}
+		if result != "noexec,nosuid,nodev" {
+			t.Errorf("got %q", result)
+		}
+	})
+
+	t.Run("empty string", func(t *testing.T) {
+		result, err := sanitizeNFSMountOpts("")
+		if err != nil {
+			t.Fatalf("sanitizeNFSMountOpts: %v", err)
+		}
+		if result != "" {
+			t.Errorf("expected empty, got %q", result)
+		}
+	})
+}

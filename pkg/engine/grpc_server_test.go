@@ -4593,3 +4593,412 @@ func TestTriggerSchedule(t *testing.T) {
 		}
 	})
 }
+
+// setupTestServerWithSecrets creates a test server with SecretsManager enabled.
+func setupTestServerWithSecrets(t *testing.T) (banyanpb.EngineServiceClient, *engineGRPCServer, func()) {
+	t.Helper()
+	store := storage.NewMemoryStore()
+	key := make([]byte, 32)
+	for i := range key {
+		key[i] = byte(i)
+	}
+	sm, err := NewSecretsManagerFromKey(store, key)
+	if err != nil {
+		t.Fatalf("NewSecretsManagerFromKey: %v", err)
+	}
+
+	lis := bufconn.Listen(bufSize)
+	srv := grpc.NewServer()
+	engineSrv := &engineGRPCServer{
+		store:       store,
+		secrets:     sm,
+		registryURL: "localhost:5000",
+	}
+	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	client := banyanpb.NewEngineServiceClient(conn)
+	cleanup := func() { conn.Close(); srv.Stop() }
+	return client, engineSrv, cleanup
+}
+
+func TestSecretRPCs(t *testing.T) {
+	client, srv, cleanup := setupTestServerWithSecrets(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t.Run("create secret", func(t *testing.T) {
+		_, err := client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{
+			Name:  "DB_PASSWORD",
+			Value: []byte("secret123"),
+		})
+		if err != nil {
+			t.Fatalf("CreateSecret: %v", err)
+		}
+	})
+
+	t.Run("create duplicate updates", func(t *testing.T) {
+		_, err := client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{
+			Name:  "DB_PASSWORD",
+			Value: []byte("updated"),
+		})
+		if err != nil {
+			t.Fatalf("CreateSecret (update): %v", err)
+		}
+	})
+
+	t.Run("create invalid name", func(t *testing.T) {
+		_, err := client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{
+			Name:  "bad-name",
+			Value: []byte("value"),
+		})
+		if err == nil {
+			t.Fatal("expected error for invalid name")
+		}
+	})
+
+	t.Run("list secrets", func(t *testing.T) {
+		resp, err := client.ListSecrets(ctx, &banyanpb.ListSecretsRequest{})
+		if err != nil {
+			t.Fatalf("ListSecrets: %v", err)
+		}
+		if len(resp.Secrets) != 1 {
+			t.Errorf("expected 1 secret, got %d", len(resp.Secrets))
+		}
+		if resp.Secrets[0].Name != "DB_PASSWORD" {
+			t.Errorf("expected DB_PASSWORD, got %s", resp.Secrets[0].Name)
+		}
+	})
+
+	t.Run("get secret metadata", func(t *testing.T) {
+		resp, err := client.GetSecret(ctx, &banyanpb.GetSecretRequest{Name: "DB_PASSWORD"})
+		if err != nil {
+			t.Fatalf("GetSecret: %v", err)
+		}
+		if resp.Name != "DB_PASSWORD" {
+			t.Errorf("expected DB_PASSWORD, got %s", resp.Name)
+		}
+		if len(resp.Value) != 0 {
+			t.Error("expected empty value without reveal")
+		}
+	})
+
+	t.Run("get secret with reveal", func(t *testing.T) {
+		resp, err := client.GetSecret(ctx, &banyanpb.GetSecretRequest{Name: "DB_PASSWORD", Reveal: true})
+		if err != nil {
+			t.Fatalf("GetSecret with reveal: %v", err)
+		}
+		if string(resp.Value) != "updated" {
+			t.Errorf("expected 'updated', got %q", resp.Value)
+		}
+	})
+
+	t.Run("get nonexistent secret", func(t *testing.T) {
+		_, err := client.GetSecret(ctx, &banyanpb.GetSecretRequest{Name: "NOPE"})
+		if err == nil {
+			t.Fatal("expected error for nonexistent secret")
+		}
+	})
+
+	t.Run("delete in-use secret blocked", func(t *testing.T) {
+		// Create a running deployment that references the secret
+		dep := &types.DeploymentRecord{
+			ID:     "dep-1",
+			Name:   "myapp",
+			Status: types.StatusRunning,
+			Services: map[string]types.ServiceRecord{
+				"api": {Image: "nginx", Secrets: []string{"DB_PASSWORD"}},
+			},
+		}
+		_ = srv.store.Save(ctx, types.KeyDeployments+"dep-1", dep)
+
+		_, err := client.DeleteSecret(ctx, &banyanpb.DeleteSecretRequest{Name: "DB_PASSWORD"})
+		if err == nil {
+			t.Fatal("expected error for in-use secret")
+		}
+
+		// Clean up
+		_ = srv.store.Delete(ctx, types.KeyDeployments+"dep-1")
+	})
+
+	t.Run("delete secret", func(t *testing.T) {
+		_, err := client.DeleteSecret(ctx, &banyanpb.DeleteSecretRequest{Name: "DB_PASSWORD"})
+		if err != nil {
+			t.Fatalf("DeleteSecret: %v", err)
+		}
+	})
+
+	t.Run("delete nonexistent", func(t *testing.T) {
+		_, err := client.DeleteSecret(ctx, &banyanpb.DeleteSecretRequest{Name: "GONE"})
+		if err == nil {
+			t.Fatal("expected error for nonexistent secret")
+		}
+	})
+}
+
+func TestSecretRPCs_NoSecretsManager(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t.Run("create without secrets enabled", func(t *testing.T) {
+		_, err := client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{Name: "X", Value: []byte("v")})
+		if err == nil {
+			t.Fatal("expected FailedPrecondition error")
+		}
+	})
+
+	t.Run("get without secrets enabled", func(t *testing.T) {
+		_, err := client.GetSecret(ctx, &banyanpb.GetSecretRequest{Name: "X"})
+		if err == nil {
+			t.Fatal("expected FailedPrecondition error")
+		}
+	})
+
+	t.Run("delete without secrets enabled", func(t *testing.T) {
+		_, err := client.DeleteSecret(ctx, &banyanpb.DeleteSecretRequest{Name: "X"})
+		if err == nil {
+			t.Fatal("expected FailedPrecondition error")
+		}
+	})
+
+	t.Run("list without secrets returns empty", func(t *testing.T) {
+		resp, err := client.ListSecrets(ctx, &banyanpb.ListSecretsRequest{})
+		if err != nil {
+			t.Fatalf("ListSecrets: %v", err)
+		}
+		if len(resp.Secrets) != 0 {
+			t.Errorf("expected 0 secrets, got %d", len(resp.Secrets))
+		}
+	})
+}
+
+func TestScale_RPC(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Register an agent
+	_, _ = client.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName:  "worker-1",
+		ApiAddress: "worker-1:9090",
+	})
+
+	// Deploy an app
+	_, _ = client.Deploy(ctx, &banyanpb.DeployRPCRequest{
+		Manifest: &banyanpb.Manifest{
+			Name: "myapp",
+			Services: map[string]*banyanpb.ManifestService{
+				"web": {Image: "nginx:alpine", Deploy: &banyanpb.ManifestDeploy{Replicas: 1}},
+			},
+		},
+	})
+
+	// Simulate deployment running with tasks
+	keys, _ := srv.store.List(ctx, types.KeyDeployments)
+	if len(keys) > 0 {
+		var dep types.DeploymentRecord
+		_ = srv.store.Get(ctx, keys[0], &dep)
+		dep.Status = types.StatusRunning
+		_ = srv.store.Save(ctx, keys[0], &dep)
+
+		// Create a completed task so Scale knows current count
+		task := &types.TaskRecord{
+			ID: dep.ID + "-web-0", DeploymentID: dep.ID, ServiceName: "web",
+			AgentID: "worker-1", Type: types.TaskTypeCreateAndStart,
+			Status: types.StatusCompleted, Image: "nginx:alpine",
+			ContainerName: "myapp-web-0",
+		}
+		_ = srv.store.Save(ctx, types.KeyTasks+"worker-1/"+task.ID, task)
+	}
+
+	t.Run("scale up", func(t *testing.T) {
+		resp, err := client.Scale(ctx, &banyanpb.ScaleRequest{
+			Name:     "myapp",
+			Replicas: map[string]int32{"web": 3},
+		})
+		if err != nil {
+			t.Fatalf("Scale: %v", err)
+		}
+		if resp.Previous["web"] != 1 {
+			t.Errorf("expected previous=1, got %d", resp.Previous["web"])
+		}
+		if resp.Current["web"] != 3 {
+			t.Errorf("expected current=3, got %d", resp.Current["web"])
+		}
+	})
+
+	t.Run("negative replicas rejected", func(t *testing.T) {
+		_, err := client.Scale(ctx, &banyanpb.ScaleRequest{
+			Name:     "myapp",
+			Replicas: map[string]int32{"web": -1},
+		})
+		if err == nil {
+			t.Fatal("expected error for negative replicas")
+		}
+	})
+
+	t.Run("exceeds max replicas", func(t *testing.T) {
+		_, err := client.Scale(ctx, &banyanpb.ScaleRequest{
+			Name:     "myapp",
+			Replicas: map[string]int32{"web": int32(types.MaxReplicas + 1)}, //nolint:gosec // test value
+		})
+		if err == nil {
+			t.Fatal("expected error for exceeding max replicas")
+		}
+	})
+
+	t.Run("unknown service", func(t *testing.T) {
+		_, err := client.Scale(ctx, &banyanpb.ScaleRequest{
+			Name:     "myapp",
+			Replicas: map[string]int32{"db": 2},
+		})
+		if err == nil {
+			t.Fatal("expected error for unknown service")
+		}
+	})
+
+	t.Run("missing name", func(t *testing.T) {
+		_, err := client.Scale(ctx, &banyanpb.ScaleRequest{
+			Replicas: map[string]int32{"web": 2},
+		})
+		if err == nil {
+			t.Fatal("expected error for missing name")
+		}
+	})
+}
+
+func TestDeployValidatesAutoscaleBounds(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t.Run("min greater than max rejected", func(t *testing.T) {
+		_, err := client.Deploy(ctx, &banyanpb.DeployRPCRequest{
+			Manifest: &banyanpb.Manifest{
+				Name: "bad-autoscale",
+				Services: map[string]*banyanpb.ManifestService{
+					"api": {
+						Image: "nginx",
+						Deploy: &banyanpb.ManifestDeploy{
+							Replicas:  1,
+							Autoscale: &banyanpb.ManifestAutoscale{Min: 10, Max: 5},
+						},
+					},
+				},
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for min > max")
+		}
+	})
+
+	t.Run("max exceeds MaxReplicas", func(t *testing.T) {
+		_, err := client.Deploy(ctx, &banyanpb.DeployRPCRequest{
+			Manifest: &banyanpb.Manifest{
+				Name: "bad-autoscale2",
+				Services: map[string]*banyanpb.ManifestService{
+					"api": {
+						Image: "nginx",
+						Deploy: &banyanpb.ManifestDeploy{
+							Replicas:  1,
+							Autoscale: &banyanpb.ManifestAutoscale{Min: 1, Max: int32(types.MaxReplicas + 1)}, //nolint:gosec // test value
+						},
+					},
+				},
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for max > MaxReplicas")
+		}
+	})
+}
+
+func TestDeployValidatesSecretRefs(t *testing.T) {
+	client, _, cleanup := setupTestServerWithSecrets(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	t.Run("missing secret rejected", func(t *testing.T) {
+		_, err := client.Deploy(ctx, &banyanpb.DeployRPCRequest{
+			Manifest: &banyanpb.Manifest{
+				Name: "needs-secret",
+				Services: map[string]*banyanpb.ManifestService{
+					"api": {Image: "nginx", Secrets: []string{"NONEXISTENT"}},
+				},
+			},
+		})
+		if err == nil {
+			t.Fatal("expected error for missing secret reference")
+		}
+	})
+
+	t.Run("existing secret accepted", func(t *testing.T) {
+		// Create the secret first
+		_, _ = client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{
+			Name: "DB_PASS", Value: []byte("value"),
+		})
+		resp, err := client.Deploy(ctx, &banyanpb.DeployRPCRequest{
+			Manifest: &banyanpb.Manifest{
+				Name: "has-secret",
+				Services: map[string]*banyanpb.ManifestService{
+					"api": {Image: "nginx", Secrets: []string{"DB_PASS"}},
+				},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Deploy with valid secret: %v", err)
+		}
+		if resp.DeploymentId == "" {
+			t.Error("expected deployment ID")
+		}
+	})
+}
+
+func TestPollTasksResolvesSecrets(t *testing.T) {
+	client, srv, cleanup := setupTestServerWithSecrets(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// Create secret
+	_, _ = client.CreateSecret(ctx, &banyanpb.CreateSecretRequest{
+		Name: "MY_SECRET", Value: []byte("secret-value"),
+	})
+
+	// Register agent
+	_, _ = client.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName: "agent-1", ApiAddress: "agent-1:9090",
+	})
+
+	// Create a pending task with secret refs
+	task := &types.TaskRecord{
+		ID: "task-1", AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
+		Status: types.StatusPending, Image: "nginx", ContainerName: "app-0",
+		SecretRefs: []string{"MY_SECRET"},
+	}
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-1", task)
+
+	// Poll tasks — should resolve secrets
+	resp, err := client.PollTasks(ctx, &banyanpb.PollTasksRequest{AgentName: "agent-1"})
+	if err != nil {
+		t.Fatalf("PollTasks: %v", err)
+	}
+	if len(resp.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(resp.Tasks))
+	}
+	if resp.Tasks[0].ResolvedSecrets["MY_SECRET"] != "secret-value" {
+		t.Errorf("expected resolved secret, got %v", resp.Tasks[0].ResolvedSecrets)
+	}
+}

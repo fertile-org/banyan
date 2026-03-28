@@ -11,11 +11,11 @@ Banyan runs as three binaries — install only what each machine needs.
 
 | Platform | Architecture | Status |
 |----------|-------------|--------|
-| <img src="https://cdn.simpleicons.org/linux/FCC624" width="16" /> **Linux** (Debian, Ubuntu, Pop!_OS, Mint, Zorin) | x86_64, ARM64 | <img src="https://cdn.simpleicons.org/checkmarx/22C55E" width="14" /> Supported |
-| <img src="https://cdn.simpleicons.org/linux/FCC624" width="16" /> **Linux** (RHEL, CentOS, Fedora, Rocky, AlmaLinux) | x86_64, ARM64 | <img src="https://cdn.simpleicons.org/checkmarx/22C55E" width="14" /> Supported |
-| <img src="https://cdn.simpleicons.org/linux/FCC624" width="16" /> **Linux** (other distros with apt, dnf, or yum) | x86_64, ARM64 | <img src="https://cdn.simpleicons.org/clockify/F59E0B" width="14" /> Should work (not regularly tested) |
-| <img src="https://cdn.simpleicons.org/apple/999999" width="16" /> **macOS** | | <img src="https://cdn.simpleicons.org/clockify/F59E0B" width="14" /> Coming soon |
-| <img src="https://cdn.simpleicons.org/windows11/0078D4" width="16" /> **Windows** | | <img src="https://cdn.simpleicons.org/x/EF4444" width="14" /> Not planned |
+| <img src="/icons/linux.svg" width="16" /> **Linux** (Debian, Ubuntu, Pop!_OS, Mint, Zorin) | x86_64, ARM64 | ✅ Supported |
+| <img src="/icons/linux.svg" width="16" /> **Linux** (RHEL, CentOS, Fedora, Rocky, AlmaLinux) | x86_64, ARM64 | ✅ Supported |
+| <img src="/icons/linux.svg" width="16" /> **Linux** (other distros with apt, dnf, or yum) | x86_64, ARM64 | ⚠️ Should work (not regularly tested) |
+| <img src="/icons/apple.svg" width="16" /> **macOS** | | 🔜 Coming soon |
+| <img src="/icons/windows.png" width="16" /> **Windows** | | ❌ Not planned |
 
 Banyan requires Linux for its networking stack (WireGuard, iptables, containerd). The CLI can run on any machine that has a WireGuard tunnel to the engine — macOS CLI support is on the roadmap.
 

@@ -24,11 +24,11 @@
 
 <table align="center">
   <tr>
-    <td align="center" valign="top" style="background-color: white; padding: 16px; border-radius: 8px;">
+    <td align="center" valign="top" bgcolor="white">
       <sub><strong>SECURED BY</strong></sub><br><br>
       <img src="website/public/wireguard.webp" alt="WireGuard" height="100">
     </td>
-    <td align="center" valign="top" style="background-color: white; padding: 16px; border-radius: 8px;">
+    <td align="center" valign="top" bgcolor="white">
       <sub><strong>BUILT WITH</strong></sub><br><br>
       <img src="website/public/containerd-logo.png" alt="containerd" height="40">
       &nbsp;&nbsp;

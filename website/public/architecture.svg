@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 540" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%">
+      <feDropShadow dx="0" dy="1" stdDeviation="2" flood-opacity="0.08"/>
+    </filter>
+    <linearGradient id="headerGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background -->
+  <rect width="800" height="540" rx="16" fill="#f8fafc"/>
+  <rect x="0.5" y="0.5" width="799" height="539" rx="16" fill="none" stroke="#e2e8f0" stroke-width="1"/>
+
+  <!-- CLI Layer -->
+  <rect x="24" y="20" width="752" height="64" rx="10" fill="url(#headerGrad)" filter="url(#shadow)"/>
+  <text x="400" y="46" text-anchor="middle" fill="white" font-size="15" font-weight="700" letter-spacing="0.5">banyan-cli</text>
+  <text x="400" y="66" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-size="11">up · down · scale · secret · logs · dashboard</text>
+
+  <!-- Connector -->
+  <line x1="400" y1="84" x2="400" y2="104" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="400" y="100" text-anchor="middle" fill="#475569" font-size="10">gRPC</text>
+
+  <!-- Engine Layer — stacked rectangles to show multi-engine -->
+  <rect x="32" y="118" width="752" height="120" rx="10" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1"/>
+  <rect x="28" y="114" width="752" height="120" rx="10" fill="#eef2f7" stroke="#d1d9e4" stroke-width="1"/>
+  <rect x="24" y="110" width="752" height="120" rx="10" fill="white" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="24" y="110" width="752" height="30" rx="10" fill="url(#headerGrad)"/>
+  <rect x="24" y="128" width="752" height="2" fill="url(#headerGrad)"/>
+  <text x="346" y="130" text-anchor="middle" fill="white" font-size="13" font-weight="600">banyan-engine — control plane</text>
+  <text x="700" y="130" text-anchor="middle" fill="rgba(255,255,255,0.6)" font-size="10">× N (active-active HA)</text>
+
+  <rect x="40" y="150" width="165" height="62" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="122" y="175" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">etcd</text>
+  <text x="122" y="195" text-anchor="middle" fill="#475569" font-size="10">state store</text>
+
+  <rect x="220" y="150" width="165" height="62" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="302" y="175" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Image Registry</text>
+  <text x="302" y="195" text-anchor="middle" fill="#475569" font-size="10">OCI distribution</text>
+
+  <rect x="400" y="150" width="165" height="62" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="482" y="175" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Secrets</text>
+  <text x="482" y="195" text-anchor="middle" fill="#475569" font-size="10">AES-256-GCM</text>
+
+  <rect x="580" y="150" width="180" height="62" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="670" y="175" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Scheduler</text>
+  <text x="670" y="195" text-anchor="middle" fill="#475569" font-size="10">resource-aware · autoscale</text>
+
+  <!-- Connector -->
+  <line x1="400" y1="238" x2="400" y2="258" stroke="#cbd5e1" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="400" y="254" text-anchor="middle" fill="#475569" font-size="10">gRPC</text>
+
+  <!-- VPC Layer -->
+  <rect x="24" y="264" width="752" height="170" rx="10" fill="white" stroke="#e2e8f0" stroke-width="1" filter="url(#shadow)"/>
+  <rect x="24" y="264" width="752" height="30" rx="10" fill="url(#headerGrad)"/>
+  <rect x="24" y="282" width="752" height="2" fill="url(#headerGrad)"/>
+  <text x="400" y="284" text-anchor="middle" fill="white" font-size="13" font-weight="600">Banyan VPC — WireGuard encrypted overlay</text>
+
+  <!-- Agent 1 -->
+  <rect x="40" y="304" width="225" height="112" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="152" y="324" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Agent 1</text>
+  <rect x="55" y="336" width="90" height="30" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="100" y="355" text-anchor="middle" fill="#334155" font-size="11">caddy-0</text>
+  <rect x="157" y="336" width="90" height="30" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="202" y="355" text-anchor="middle" fill="#334155" font-size="11">api-0</text>
+  <text x="152" y="393" text-anchor="middle" fill="#475569" font-size="10">DNS · proxy · health</text>
+
+  <!-- Agent 2 -->
+  <rect x="282" y="304" width="225" height="112" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="394" y="324" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Agent 2</text>
+  <rect x="297" y="336" width="90" height="30" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="342" y="355" text-anchor="middle" fill="#334155" font-size="11">api-1</text>
+  <rect x="399" y="336" width="90" height="30" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="444" y="355" text-anchor="middle" fill="#334155" font-size="11">api-2</text>
+  <text x="394" y="393" text-anchor="middle" fill="#475569" font-size="10">DNS · proxy · health</text>
+
+  <!-- Agent N -->
+  <rect x="524" y="304" width="236" height="112" rx="8" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="642" y="324" text-anchor="middle" fill="#1e293b" font-size="12" font-weight="600">Agent N</text>
+  <rect x="544" y="336" width="90" height="30" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="589" y="355" text-anchor="middle" fill="#334155" font-size="11">db-0</text>
+  <rect x="646" y="336" width="96" height="30" rx="6" fill="white" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="694" y="355" text-anchor="middle" fill="#334155" font-size="11">worker-0</text>
+  <text x="642" y="393" text-anchor="middle" fill="#475569" font-size="10">DNS · proxy · health</text>
+
+  <!-- Observability Layer -->
+  <rect x="24" y="454" width="752" height="56" rx="10" fill="url(#headerGrad)" filter="url(#shadow)"/>
+  <text x="175" y="487" text-anchor="middle" fill="white" font-size="12" font-weight="600">Prometheus /metrics</text>
+  <line x1="310" y1="464" x2="310" y2="500" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+  <text x="400" y="487" text-anchor="middle" fill="white" font-size="12" font-weight="600">Terminal Dashboard</text>
+  <line x1="500" y1="464" x2="500" y2="500" stroke="rgba(255,255,255,0.2)" stroke-width="1"/>
+  <text x="630" y="487" text-anchor="middle" fill="white" font-size="12" font-weight="600">Web Dashboard</text>
+
+  <!-- WireGuard badge -->
+  <rect x="24" y="514" width="752" height="20" rx="4" fill="none"/>
+  <text x="400" y="528" text-anchor="middle" fill="#475569" font-size="10">All traffic encrypted with WireGuard · Authenticated via public key whitelist</text>
+</svg>

@@ -175,6 +175,8 @@ graph TD
     subgraph Engine[fa:fa-server banyan-engine]
         Store[(fa:fa-database etcd)]
         Registry[fa:fa-box-open Image Registry]
+        Secrets[fa:fa-lock Secrets]
+        Sched[fa:fa-bolt Scheduler]
     end
 
     Engine -->|gRPC| Agent1
@@ -209,4 +211,4 @@ graph TD
     Engine -.-|/metrics| Prom
 ```
 
-The **CLI** sends your manifest to the **Engine**, which stores state in etcd and schedules containers across **Agents**. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard and authenticated via public key whitelist. For high availability, run [multiple engines](/guides/high-availability/) — they coordinate automatically.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd, manages encrypted secrets, and schedules containers across **Agents** (with auto-scaling). Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard. For high availability, run [multiple engines](/guides/high-availability/) — they coordinate automatically.

@@ -7,6 +7,18 @@ sidebar:
 
 Banyan runs as three binaries — install only what each machine needs.
 
+## Platform support
+
+| Platform | Architecture | Status |
+|----------|-------------|--------|
+| **Linux** (Debian, Ubuntu, Pop!_OS, Mint, Zorin) | x86_64, ARM64 | Supported |
+| **Linux** (RHEL, CentOS, Fedora, Rocky, AlmaLinux) | x86_64, ARM64 | Supported |
+| **Linux** (other distros with apt, dnf, or yum) | x86_64, ARM64 | Should work (not regularly tested) |
+| **macOS** | | Coming soon |
+| **Windows** | | Not planned |
+
+Banyan requires Linux for its networking stack (WireGuard, iptables, containerd). The CLI can run on any machine that has a WireGuard tunnel to the engine — macOS CLI support is on the roadmap.
+
 ## Quick install
 
 The install script detects your OS, downloads the Banyan binaries, and installs all runtime dependencies.

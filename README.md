@@ -170,50 +170,11 @@ See the [Quickstart](https://getbanyan.dev/getting-started/quickstart/) for a co
 
 ## Architecture
 
-```mermaid
-graph TD
-    CLI[fa:fa-terminal banyan-cli] -->|gRPC| Engine
+<div align="center">
+  <img src="website/public/architecture.svg" alt="Banyan architecture — CLI, Engine, VPC, Observability" width="100%">
+</div>
 
-    subgraph Engine[fa:fa-server banyan-engine]
-        Store[(fa:fa-database etcd)]
-        Registry[fa:fa-box-open Image Registry]
-        Secrets[fa:fa-lock Secrets]
-        Sched[fa:fa-bolt Scheduler]
-    end
-
-    Engine -->|gRPC| Agent1
-    Engine -->|gRPC| Agent2
-    Engine -->|gRPC| AgentN
-
-    subgraph VPC[fa:fa-network-wired Banyan VPC]
-        subgraph G1[Gateway]
-            Agent1[fa:fa-cube banyan-agent]
-            C1{{fa:fa-box container: caddy-0}}
-            Agent1 ~~~ C1
-        end
-
-        subgraph A2[Agent 1]
-            Agent2[fa:fa-cube banyan-agent]
-            C2{{fa:fa-box container: api-0}}
-            C3{{fa:fa-box container: api-1}}
-            Agent2 ~~~ C2
-            Agent2 ~~~ C3
-        end
-
-        subgraph AN[Agent 2]
-            AgentN[fa:fa-cube banyan-agent]
-            C4{{fa:fa-box container: api-2}}
-            C5{{fa:fa-box container: db-0}}
-            AgentN ~~~ C4
-            AgentN ~~~ C5
-        end
-    end
-
-    CLI ~~~ Prom(fa:fa-chart-line Prometheus-compatible)
-    Engine -.-|/metrics| Prom
-```
-
-The **CLI** sends your manifest to the **Engine**, which stores state in etcd, manages encrypted secrets, and schedules containers across **Agents** (with auto-scaling). Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard. For high availability, run [multiple engines](https://getbanyan.dev/guides/high-availability/) — they coordinate automatically.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd, manages encrypted secrets, and schedules containers across **Agents** (with auto-scaling). Each Agent runs containerd and pulls images from the built-in registry. All communication is encrypted with WireGuard. For high availability, run [multiple engines](https://getbanyan.dev/guides/high-availability/) — they coordinate automatically.
 
 ## Documentation
 

@@ -24,11 +24,11 @@
 
 <table align="center">
   <tr>
-    <td align="center" valign="top">
+    <td align="center" valign="top" style="background-color: white; padding: 16px; border-radius: 8px;">
       <sub><strong>SECURED BY</strong></sub><br><br>
       <img src="website/public/wireguard.webp" alt="WireGuard" height="100">
     </td>
-    <td align="center" valign="top">
+    <td align="center" valign="top" style="background-color: white; padding: 16px; border-radius: 8px;">
       <sub><strong>BUILT WITH</strong></sub><br><br>
       <img src="website/public/containerd-logo.png" alt="containerd" height="40">
       &nbsp;&nbsp;
@@ -127,9 +127,9 @@ Banyan handles the orchestration so you can focus on the software you're buildin
 
 | Platform | Architecture | Status |
 |----------|-------------|--------|
-| **Linux** (Ubuntu, Debian, Pop!_OS, Mint, RHEL, Fedora, Rocky) | x86_64, ARM64 | Supported |
-| **macOS** | | Coming soon |
-| **Windows** | | Not planned |
+| <img src="website/public/icons/linux.svg" width="16"> **Linux** (Ubuntu, Debian, Pop!_OS, Mint, RHEL, Fedora, Rocky) | x86_64, ARM64 | ✅ Supported |
+| <img src="website/public/icons/apple.svg" width="16"> **macOS** | | 🔜 Coming soon |
+| <img src="website/public/icons/windows.png" width="16"> **Windows** | | ❌ Not planned |
 
 ## Install
 

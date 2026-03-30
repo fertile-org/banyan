@@ -2877,6 +2877,9 @@ type TaskInfo struct {
 	UpdatedAtUnix          int64                  `protobuf:"varint,16,opt,name=updated_at_unix,json=updatedAtUnix,proto3" json:"updated_at_unix,omitempty"`
 	Error                  string                 `protobuf:"bytes,17,opt,name=error,proto3" json:"error,omitempty"`
 	HealthStatus           string                 `protobuf:"bytes,18,opt,name=health_status,json=healthStatus,proto3" json:"health_status,omitempty"`
+	CpuPercent             float64                `protobuf:"fixed64,19,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"` // 0.0-100.0 (from container stats)
+	MemoryUsedBytes        uint64                 `protobuf:"varint,20,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
+	MemoryLimitBytes       uint64                 `protobuf:"varint,21,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
 	unknownFields          protoimpl.UnknownFields
 	sizeCache              protoimpl.SizeCache
 }
@@ -3035,6 +3038,27 @@ func (x *TaskInfo) GetHealthStatus() string {
 		return x.HealthStatus
 	}
 	return ""
+}
+
+func (x *TaskInfo) GetCpuPercent() float64 {
+	if x != nil {
+		return x.CpuPercent
+	}
+	return 0
+}
+
+func (x *TaskInfo) GetMemoryUsedBytes() uint64 {
+	if x != nil {
+		return x.MemoryUsedBytes
+	}
+	return 0
+}
+
+func (x *TaskInfo) GetMemoryLimitBytes() uint64 {
+	if x != nil {
+		return x.MemoryLimitBytes
+	}
+	return 0
 }
 
 type GetLogsRequest struct {
@@ -4545,7 +4569,7 @@ const file_engine_proto_rawDesc = "" +
 	"depends_on\x18\x06 \x03(\v2%.banyan.v1.ServiceInfo.DependsOnEntryR\tdependsOn\x1a[\n" +
 	"\x0eDependsOnEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x123\n" +
-	"\x05value\x18\x02 \x01(\v2\x1d.banyan.v1.DependsOnConditionR\x05value:\x028\x01\"\xce\x04\n" +
+	"\x05value\x18\x02 \x01(\v2\x1d.banyan.v1.DependsOnConditionR\x05value:\x028\x01\"\xc9\x05\n" +
 	"\bTaskInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
 	"\rdeployment_id\x18\x02 \x01(\tR\fdeploymentId\x12!\n" +
@@ -4565,7 +4589,11 @@ const file_engine_proto_rawDesc = "" +
 	"\x0fcreated_at_unix\x18\x0f \x01(\x03R\rcreatedAtUnix\x12&\n" +
 	"\x0fupdated_at_unix\x18\x10 \x01(\x03R\rupdatedAtUnix\x12\x14\n" +
 	"\x05error\x18\x11 \x01(\tR\x05error\x12#\n" +
-	"\rhealth_status\x18\x12 \x01(\tR\fhealthStatus\"c\n" +
+	"\rhealth_status\x18\x12 \x01(\tR\fhealthStatus\x12\x1f\n" +
+	"\vcpu_percent\x18\x13 \x01(\x01R\n" +
+	"cpuPercent\x12*\n" +
+	"\x11memory_used_bytes\x18\x14 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
+	"\x12memory_limit_bytes\x18\x15 \x01(\x04R\x10memoryLimitBytes\"c\n" +
 	"\x0eGetLogsRequest\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06follow\x18\x02 \x01(\bR\x06follow\x12\x12\n" +

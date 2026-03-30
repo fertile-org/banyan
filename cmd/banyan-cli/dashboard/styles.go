@@ -185,6 +185,56 @@ func eventIcon(eventType, severity string) string {
 	}
 }
 
+// sparklineBlocks are the Unicode block characters used for sparklines, ordered low→high.
+var sparklineBlocks = []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+// sparkline renders a mini sparkline from a slice of values (0.0–100.0).
+// Returns a colored string of Unicode block characters.
+func sparkline(values []float64, maxWidth int) string {
+	if len(values) == 0 {
+		return ""
+	}
+
+	// Use last maxWidth values
+	start := 0
+	if len(values) > maxWidth {
+		start = len(values) - maxWidth
+	}
+	vals := values[start:]
+
+	var sb strings.Builder
+	for _, v := range vals {
+		// Clamp to 0–100
+		if v < 0 {
+			v = 0
+		}
+		if v > 100 {
+			v = 100
+		}
+		// Map to block index (0–7)
+		idx := int(v / 100.0 * float64(len(sparklineBlocks)-1))
+		if idx >= len(sparklineBlocks) {
+			idx = len(sparklineBlocks) - 1
+		}
+		sb.WriteRune(sparklineBlocks[idx])
+	}
+
+	result := sb.String()
+
+	// Color based on latest value
+	latest := vals[len(vals)-1]
+	var color lipgloss.Color
+	switch {
+	case latest >= 80:
+		color = colorRed
+	case latest >= 50:
+		color = colorYellow
+	default:
+		color = colorGreen
+	}
+	return lipgloss.NewStyle().Foreground(color).Render(result)
+}
+
 // truncate truncates a string to maxLen, adding "…" if truncated.
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {

@@ -215,6 +215,9 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				CreatedAtUnix:          allTasks[j].CreatedAt.Unix(),
 				UpdatedAtUnix:          allTasks[j].UpdatedAt.Unix(),
 				Error:                  allTasks[j].Error,
+				CpuPercent:             allTasks[j].CPUPercent,
+				MemoryUsedBytes:        allTasks[j].MemoryUsedBytes,
+				MemoryLimitBytes:       allTasks[j].MemoryLimitBytes,
 				// Environment intentionally omitted — may contain secrets
 			})
 		}

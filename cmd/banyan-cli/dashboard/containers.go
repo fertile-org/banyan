@@ -6,7 +6,8 @@ import (
 )
 
 // renderContainerList renders the flat container list view with cursor.
-func renderContainerList(data *DashboardData, width, cursor int) string {
+// cpuHistory provides per-container CPU history for sparkline rendering.
+func renderContainerList(data *DashboardData, width, cursor int, cpuHistory map[string][]float64) string {
 	if data == nil {
 		return styleDim.Render("  Loading...")
 	}
@@ -15,11 +16,12 @@ func renderContainerList(data *DashboardData, width, cursor int) string {
 	}
 
 	const (
-		colName    = 28
-		colService = 14
-		colAgent   = 16
-		colDeploy  = 16
+		colName    = 26
+		colService = 12
+		colAgent   = 14
+		colDeploy  = 14
 		colStatus  = 12
+		colCPU     = 10 // sparkline column
 		colPorts   = 12
 	)
 
@@ -27,8 +29,9 @@ func renderContainerList(data *DashboardData, width, cursor int) string {
 		padRight(styleBold.Render("Container"), colName) +
 		padRight(styleBold.Render("Service"), colService) +
 		padRight(styleBold.Render("Agent"), colAgent) +
-		padRight(styleBold.Render("Deployment"), colDeploy) +
+		padRight(styleBold.Render("Deploy"), colDeploy) +
 		padRight(styleBold.Render("Status"), colStatus) +
+		padRight(styleBold.Render("CPU"), colCPU) +
 		styleBold.Render("Ports")
 
 	var rows []string
@@ -46,6 +49,14 @@ func renderContainerList(data *DashboardData, width, cursor int) string {
 			ports = "-"
 		}
 
+		// Build sparkline from CPU history
+		cpuSpark := styleDim.Render("-")
+		if cpuHistory != nil {
+			if history := cpuHistory[c.Name]; len(history) > 0 {
+				cpuSpark = sparkline(history, 8)
+			}
+		}
+
 		prefix := "  "
 		nameStyle := styleNone
 		if i == cursor {
@@ -59,6 +70,7 @@ func renderContainerList(data *DashboardData, width, cursor int) string {
 			padRight(truncate(c.AgentName, colAgent-2), colAgent) +
 			padRight(truncate(c.DeploymentName, colDeploy-2), colDeploy) +
 			padRight(statusDot(displayStatus)+" "+truncate(displayStatus, 8), colStatus) +
+			padRight(cpuSpark, colCPU) +
 			truncate(ports, colPorts)
 
 		rows = append(rows, row)

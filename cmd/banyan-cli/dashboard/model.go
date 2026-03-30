@@ -63,6 +63,9 @@ type Model struct { //nolint:govet // bubbletea model readability over fieldalig
 	// Action status message (auto-clears after 5 seconds)
 	actionStatus     string
 	actionStatusTime time.Time
+
+	// CPU history per container for sparklines (container name → last N values)
+	cpuHistory map[string][]float64
 }
 
 // New creates a new dashboard model.
@@ -128,6 +131,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 		m.data = &msg.data
 		m.err = nil
 		m.exportStatus = ""
+		// Accumulate CPU history for sparklines
+		m.updateCPUHistory()
 		// Clamp cursor to current data bounds after refresh
 		if m.isListView() {
 			maxIdx := m.maxListIndex()
@@ -840,7 +845,7 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 	case ViewDeploys:
 		content = renderDeploymentList(fd, m.width, m.listCursor)
 	case ViewContainers:
-		content = renderContainerList(fd, m.width, m.listCursor)
+		content = renderContainerList(fd, m.width, m.listCursor, m.cpuHistory)
 	case ViewEngine:
 		content = renderEngineDetail(m.data, m.width)
 	case ViewEvents:
@@ -1013,6 +1018,47 @@ func tickAfter(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg {
 		return tickMsg(t)
 	})
+}
+
+const maxCPUHistory = 20 // keep last 20 samples per container
+
+// updateCPUHistory appends the current CPU value for each container.
+// Maps are reference types so mutation through value receiver works.
+func (m *Model) updateCPUHistory() {
+	if m.data == nil {
+		return
+	}
+	if m.cpuHistory == nil {
+		m.cpuHistory = make(map[string][]float64)
+	}
+
+	// Track which containers are still alive
+	alive := make(map[string]bool, len(m.data.Containers))
+	for i := range m.data.Containers {
+		c := &m.data.Containers[i]
+		alive[c.Name] = true
+		history := m.cpuHistory[c.Name]
+		history = append(history, c.CPUPercent)
+		if len(history) > maxCPUHistory {
+			history = history[len(history)-maxCPUHistory:]
+		}
+		m.cpuHistory[c.Name] = history
+	}
+
+	// Prune containers that no longer exist
+	for name := range m.cpuHistory {
+		if !alive[name] {
+			delete(m.cpuHistory, name)
+		}
+	}
+}
+
+// getCPUHistory returns the CPU history for a container name.
+func (m Model) getCPUHistory(name string) []float64 { //nolint:gocritic // bubbletea value-receiver pattern
+	if m.cpuHistory == nil {
+		return nil
+	}
+	return m.cpuHistory[name]
 }
 
 // splitLines splits a string into lines.

@@ -89,6 +89,9 @@ type ContainerData struct {
 	HealthStatus    string
 	Image           string
 	Ports           []string
+	CPUPercent      float64
+	MemUsed         uint64
+	MemLimit        uint64
 	ReplicaIndex    int32
 }
 
@@ -204,6 +207,9 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 				HealthStatus:    t.HealthStatus,
 				Image:           t.Image,
 				Ports:           t.Ports,
+				CPUPercent:      t.CpuPercent,
+				MemUsed:         t.MemoryUsedBytes,
+				MemLimit:        t.MemoryLimitBytes,
 				ReplicaIndex:    t.ReplicaIndex,
 				CreatedAt:       time.Unix(t.CreatedAtUnix, 0),
 				UpdatedAt:       time.Unix(t.UpdatedAtUnix, 0),

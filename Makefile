@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -123,3 +123,7 @@ test-integration-shell:
 test-integration-list:
 	@echo "Available integration tests:"
 	@find ./test/integration -name "run_*.go" -type f | sort
+
+# Record terminal demo (requires vhs: https://github.com/charmbracelet/vhs)
+demo:
+	vhs demo.tape

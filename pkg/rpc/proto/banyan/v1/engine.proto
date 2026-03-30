@@ -349,6 +349,9 @@ message TaskInfo {
   int64 updated_at_unix = 16;
   string error = 17;
   string health_status = 18;
+  double cpu_percent = 19;          // 0.0-100.0 (from container stats)
+  uint64 memory_used_bytes = 20;
+  uint64 memory_limit_bytes = 21;
 }
 
 message GetLogsRequest {

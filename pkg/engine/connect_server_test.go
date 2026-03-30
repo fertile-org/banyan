@@ -607,6 +607,49 @@ func TestConnectAdapter_ReportTaskResult_MissingTaskID(t *testing.T) {
 	}
 }
 
+func TestConnectAdapter_StopTask(t *testing.T) {
+	client, srv, ts := setupConnectTestServer(t)
+	defer ts.Close()
+
+	ctx := context.Background()
+
+	// Seed a running task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+		ID:              "task-1",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: types.StatusRunning,
+		ContainerName:   "myapp-web-0",
+	})
+
+	resp, err := client.StopTask(ctx, connect.NewRequest(&banyanpb.StopTaskRequest{
+		TaskId:  "task-1",
+		AgentId: "agent-1",
+	}))
+	if err != nil {
+		t.Fatalf("StopTask failed: %v", err)
+	}
+	if resp.Msg.StopTaskId != "task-1-stop" {
+		t.Errorf("expected stop task ID 'task-1-stop', got %q", resp.Msg.StopTaskId)
+	}
+	if resp.Msg.Status != "stopping" {
+		t.Errorf("expected status 'stopping', got %q", resp.Msg.Status)
+	}
+}
+
+func TestConnectAdapter_StopTask_MissingFields(t *testing.T) {
+	client, _, ts := setupConnectTestServer(t)
+	defer ts.Close()
+
+	_, err := client.StopTask(context.Background(), connect.NewRequest(&banyanpb.StopTaskRequest{}))
+	if err == nil {
+		t.Fatal("expected error for missing fields")
+	}
+}
+
 func TestConnectAdapter_GetLogs_MissingContainerName(t *testing.T) {
 	client, _, ts := setupConnectTestServer(t)
 	defer ts.Close()

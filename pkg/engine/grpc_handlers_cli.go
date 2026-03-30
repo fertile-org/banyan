@@ -827,6 +827,58 @@ func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName
 	return nil, nil, fmt.Errorf("container %q not found in cluster", containerName)
 }
 
+// StopTask stops a single container by creating a stop_and_remove task for the given task.
+func (s *engineGRPCServer) StopTask(ctx context.Context, req *banyanpb.StopTaskRequest) (*banyanpb.StopTaskResponse, error) {
+	if req.TaskId == "" || req.AgentId == "" {
+		return nil, status.Error(codes.InvalidArgument, "task_id and agent_id are required")
+	}
+
+	// Look up the original task
+	taskKey := types.KeyTasks + req.AgentId + "/" + req.TaskId
+	var task types.TaskRecord
+	if err := s.store.Get(ctx, taskKey, &task); err != nil {
+		return nil, status.Errorf(codes.NotFound, "task %q not found on agent %q", req.TaskId, req.AgentId)
+	}
+
+	// Verify it's a running container
+	if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted || task.ContainerStatus != types.StatusRunning {
+		return nil, status.Error(codes.FailedPrecondition, "container not running")
+	}
+
+	// Check if a stop task already exists
+	stopTaskID := req.TaskId + "-stop"
+	stopTaskKey := types.KeyTasks + req.AgentId + "/" + stopTaskID
+	var existing types.TaskRecord
+	if err := s.store.Get(ctx, stopTaskKey, &existing); err == nil {
+		return nil, status.Error(codes.AlreadyExists, "already stopping")
+	}
+
+	// Create the stop task
+	now := time.Now()
+	stopTask := &types.TaskRecord{
+		ID:            stopTaskID,
+		DeploymentID:  task.DeploymentID,
+		ServiceName:   task.ServiceName,
+		ReplicaIndex:  task.ReplicaIndex,
+		AgentID:       task.AgentID,
+		Type:          types.TaskTypeStopAndRemove,
+		Status:        types.StatusPending,
+		ContainerName: task.ContainerName,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := s.store.Save(ctx, stopTaskKey, stopTask); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create stop task: %v", err)
+	}
+
+	s.emitEvent("task.stopped", fmt.Sprintf("Stopping container %s on %s", task.ContainerName, req.AgentId), "info")
+
+	return &banyanpb.StopTaskResponse{
+		StopTaskId: stopTaskID,
+		Status:     "stopping",
+	}, nil
+}
+
 // dependsOnToProto converts types.DependsOnConfig to the proto map representation.
 func dependsOnToProto(deps types.DependsOnConfig) map[string]*banyanpb.DependsOnCondition {
 	if len(deps) == 0 {

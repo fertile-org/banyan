@@ -20,6 +20,9 @@ service EngineService {
   rpc Health(HealthRequest) returns (HealthResponse);
   rpc Scale(ScaleRequest) returns (ScaleResponse);
 
+  // Operational RPCs (dashboard actions)
+  rpc StopTask(StopTaskRequest) returns (StopTaskResponse);
+
   // Dashboard RPCs
   rpc GetDashboardData(GetDashboardDataRequest) returns (GetDashboardDataResponse);
 
@@ -451,3 +454,14 @@ message DeleteSecretRequest {
   string name = 1;
 }
 message DeleteSecretResponse {}
+
+// --- StopTask (operational) ---
+
+message StopTaskRequest {
+  string task_id = 1;    // ID of the create_and_start task to stop
+  string agent_id = 2;   // agent running the container
+}
+message StopTaskResponse {
+  string stop_task_id = 1; // ID of the created stop_and_remove task
+  string status = 2;       // "stopping"
+}

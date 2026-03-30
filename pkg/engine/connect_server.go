@@ -151,6 +151,14 @@ func (a *connectAdapter) Scale(ctx context.Context, req *connect.Request[banyanp
 	return connect.NewResponse(resp), nil
 }
 
+func (a *connectAdapter) StopTask(ctx context.Context, req *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error) {
+	resp, err := a.srv.StopTask(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // --- Dashboard RPCs ---
 
 func (a *connectAdapter) GetDashboardData(ctx context.Context, req *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error) {

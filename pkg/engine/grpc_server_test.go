@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -5000,5 +5001,166 @@ func TestPollTasksResolvesSecrets(t *testing.T) {
 	}
 	if resp.Tasks[0].ResolvedSecrets["MY_SECRET"] != "secret-value" {
 		t.Errorf("expected resolved secret, got %v", resp.Tasks[0].ResolvedSecrets)
+	}
+}
+
+func TestStopTask_HappyPath(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Seed a running container task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+		ID:              "task-1",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: types.StatusRunning,
+		ContainerName:   "myapp-web-0",
+		ReplicaIndex:    0,
+	})
+
+	resp, err := client.StopTask(ctx, &banyanpb.StopTaskRequest{
+		TaskId:  "task-1",
+		AgentId: "agent-1",
+	})
+	if err != nil {
+		t.Fatalf("StopTask: %v", err)
+	}
+	if resp.StopTaskId != "task-1-stop" {
+		t.Errorf("stop task ID = %q, want task-1-stop", resp.StopTaskId)
+	}
+	if resp.Status != "stopping" {
+		t.Errorf("status = %q, want stopping", resp.Status)
+	}
+
+	// Verify the stop task was created in the store
+	var stopTask types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"agent-1/task-1-stop", &stopTask); err != nil {
+		t.Fatalf("stop task not found in store: %v", err)
+	}
+	if stopTask.Type != types.TaskTypeStopAndRemove {
+		t.Errorf("stop task type = %q, want stop_and_remove", stopTask.Type)
+	}
+	if stopTask.ContainerName != "myapp-web-0" {
+		t.Errorf("stop task container = %q, want myapp-web-0", stopTask.ContainerName)
+	}
+}
+
+func TestStopTask_NotFound(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	_, err := client.StopTask(context.Background(), &banyanpb.StopTaskRequest{
+		TaskId:  "nonexistent",
+		AgentId: "agent-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent task")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+func TestStopTask_NotRunning(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Task exists but container is not running
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-2", &types.TaskRecord{
+		ID:              "task-2",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: "stopped",
+		ContainerName:   "myapp-web-0",
+	})
+
+	_, err := client.StopTask(ctx, &banyanpb.StopTaskRequest{
+		TaskId:  "task-2",
+		AgentId: "agent-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-running container")
+	}
+	if !strings.Contains(err.Error(), "container not running") {
+		t.Errorf("expected 'container not running' error, got: %v", err)
+	}
+}
+
+func TestStopTask_AlreadyStopping(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Seed running task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-3", &types.TaskRecord{
+		ID:              "task-3",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: types.StatusRunning,
+		ContainerName:   "myapp-web-0",
+	})
+	// Seed existing stop task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-3-stop", &types.TaskRecord{
+		ID:      "task-3-stop",
+		AgentID: "agent-1",
+		Type:    types.TaskTypeStopAndRemove,
+		Status:  types.StatusPending,
+	})
+
+	_, err := client.StopTask(ctx, &banyanpb.StopTaskRequest{
+		TaskId:  "task-3",
+		AgentId: "agent-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for already stopping")
+	}
+	if !strings.Contains(err.Error(), "already stopping") {
+		t.Errorf("expected 'already stopping' error, got: %v", err)
+	}
+}
+
+func TestStopTask_MissingFields(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	tests := []struct {
+		name    string
+		taskID  string
+		agentID string
+	}{
+		{"empty task_id", "", "agent-1"},
+		{"empty agent_id", "task-1", ""},
+		{"both empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.StopTask(context.Background(), &banyanpb.StopTaskRequest{
+				TaskId:  tt.taskID,
+				AgentId: tt.agentID,
+			})
+			if err == nil {
+				t.Fatal("expected error for missing fields")
+			}
+			st, ok := status.FromError(err)
+			if !ok || st.Code() != codes.InvalidArgument {
+				t.Errorf("expected InvalidArgument, got %v", err)
+			}
+		})
 	}
 }

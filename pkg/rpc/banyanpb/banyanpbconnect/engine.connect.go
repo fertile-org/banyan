@@ -59,6 +59,8 @@ const (
 	EngineServiceHealthProcedure = "/banyan.v1.EngineService/Health"
 	// EngineServiceScaleProcedure is the fully-qualified name of the EngineService's Scale RPC.
 	EngineServiceScaleProcedure = "/banyan.v1.EngineService/Scale"
+	// EngineServiceStopTaskProcedure is the fully-qualified name of the EngineService's StopTask RPC.
+	EngineServiceStopTaskProcedure = "/banyan.v1.EngineService/StopTask"
 	// EngineServiceGetDashboardDataProcedure is the fully-qualified name of the EngineService's
 	// GetDashboardData RPC.
 	EngineServiceGetDashboardDataProcedure = "/banyan.v1.EngineService/GetDashboardData"
@@ -91,6 +93,8 @@ type EngineServiceClient interface {
 	GetInfo(context.Context, *connect.Request[banyanpb.GetInfoRequest]) (*connect.Response[banyanpb.GetInfoResponse], error)
 	Health(context.Context, *connect.Request[banyanpb.HealthRequest]) (*connect.Response[banyanpb.HealthResponse], error)
 	Scale(context.Context, *connect.Request[banyanpb.ScaleRequest]) (*connect.Response[banyanpb.ScaleResponse], error)
+	// Operational RPCs (dashboard actions)
+	StopTask(context.Context, *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error)
 	// Dashboard RPCs
 	GetDashboardData(context.Context, *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error)
 	// Secret RPCs
@@ -183,6 +187,12 @@ func NewEngineServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(engineServiceMethods.ByName("Scale")),
 			connect.WithClientOptions(opts...),
 		),
+		stopTask: connect.NewClient[banyanpb.StopTaskRequest, banyanpb.StopTaskResponse](
+			httpClient,
+			baseURL+EngineServiceStopTaskProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("StopTask")),
+			connect.WithClientOptions(opts...),
+		),
 		getDashboardData: connect.NewClient[banyanpb.GetDashboardDataRequest, banyanpb.GetDashboardDataResponse](
 			httpClient,
 			baseURL+EngineServiceGetDashboardDataProcedure,
@@ -230,6 +240,7 @@ type engineServiceClient struct {
 	getInfo               *connect.Client[banyanpb.GetInfoRequest, banyanpb.GetInfoResponse]
 	health                *connect.Client[banyanpb.HealthRequest, banyanpb.HealthResponse]
 	scale                 *connect.Client[banyanpb.ScaleRequest, banyanpb.ScaleResponse]
+	stopTask              *connect.Client[banyanpb.StopTaskRequest, banyanpb.StopTaskResponse]
 	getDashboardData      *connect.Client[banyanpb.GetDashboardDataRequest, banyanpb.GetDashboardDataResponse]
 	createSecret          *connect.Client[banyanpb.CreateSecretRequest, banyanpb.CreateSecretResponse]
 	listSecrets           *connect.Client[banyanpb.ListSecretsRequest, banyanpb.ListSecretsResponse]
@@ -297,6 +308,11 @@ func (c *engineServiceClient) Scale(ctx context.Context, req *connect.Request[ba
 	return c.scale.CallUnary(ctx, req)
 }
 
+// StopTask calls banyan.v1.EngineService.StopTask.
+func (c *engineServiceClient) StopTask(ctx context.Context, req *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error) {
+	return c.stopTask.CallUnary(ctx, req)
+}
+
 // GetDashboardData calls banyan.v1.EngineService.GetDashboardData.
 func (c *engineServiceClient) GetDashboardData(ctx context.Context, req *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error) {
 	return c.getDashboardData.CallUnary(ctx, req)
@@ -338,6 +354,8 @@ type EngineServiceHandler interface {
 	GetInfo(context.Context, *connect.Request[banyanpb.GetInfoRequest]) (*connect.Response[banyanpb.GetInfoResponse], error)
 	Health(context.Context, *connect.Request[banyanpb.HealthRequest]) (*connect.Response[banyanpb.HealthResponse], error)
 	Scale(context.Context, *connect.Request[banyanpb.ScaleRequest]) (*connect.Response[banyanpb.ScaleResponse], error)
+	// Operational RPCs (dashboard actions)
+	StopTask(context.Context, *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error)
 	// Dashboard RPCs
 	GetDashboardData(context.Context, *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error)
 	// Secret RPCs
@@ -426,6 +444,12 @@ func NewEngineServiceHandler(svc EngineServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(engineServiceMethods.ByName("Scale")),
 		connect.WithHandlerOptions(opts...),
 	)
+	engineServiceStopTaskHandler := connect.NewUnaryHandler(
+		EngineServiceStopTaskProcedure,
+		svc.StopTask,
+		connect.WithSchema(engineServiceMethods.ByName("StopTask")),
+		connect.WithHandlerOptions(opts...),
+	)
 	engineServiceGetDashboardDataHandler := connect.NewUnaryHandler(
 		EngineServiceGetDashboardDataProcedure,
 		svc.GetDashboardData,
@@ -482,6 +506,8 @@ func NewEngineServiceHandler(svc EngineServiceHandler, opts ...connect.HandlerOp
 			engineServiceHealthHandler.ServeHTTP(w, r)
 		case EngineServiceScaleProcedure:
 			engineServiceScaleHandler.ServeHTTP(w, r)
+		case EngineServiceStopTaskProcedure:
+			engineServiceStopTaskHandler.ServeHTTP(w, r)
 		case EngineServiceGetDashboardDataProcedure:
 			engineServiceGetDashboardDataHandler.ServeHTTP(w, r)
 		case EngineServiceCreateSecretProcedure:
@@ -547,6 +573,10 @@ func (UnimplementedEngineServiceHandler) Health(context.Context, *connect.Reques
 
 func (UnimplementedEngineServiceHandler) Scale(context.Context, *connect.Request[banyanpb.ScaleRequest]) (*connect.Response[banyanpb.ScaleResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.Scale is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) StopTask(context.Context, *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.StopTask is not implemented"))
 }
 
 func (UnimplementedEngineServiceHandler) GetDashboardData(context.Context, *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error) {

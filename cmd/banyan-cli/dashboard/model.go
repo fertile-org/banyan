@@ -27,7 +27,7 @@ const (
 )
 
 // Model is the main bubbletea model for the dashboard.
-type Model struct {
+type Model struct { //nolint:govet // bubbletea model readability over fieldalignment
 	client          banyanpb.EngineServiceClient
 	data            *DashboardData
 	err             error
@@ -46,6 +46,23 @@ type Model struct {
 	paletteOpen     bool
 	helpOpen        bool
 	filterEditing   bool
+
+	// Action menu state
+	actionMenuOpen   bool
+	actionMenuCursor int
+	actionMenuTarget string // container or deployment name being acted on
+	actionMenuItems  []actionMenuItem
+
+	// Confirmation dialog state
+	confirmState  *confirmState
+	confirmAction string // "kill", "restart", "teardown"
+
+	// Log pane state
+	logPane *logPaneState
+
+	// Action status message (auto-clears after 5 seconds)
+	actionStatus     string
+	actionStatusTime time.Time
 }
 
 // New creates a new dashboard model.
@@ -83,6 +100,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 		if m.helpOpen {
 			return m.handleHelpKey(msg)
 		}
+		if m.confirmState != nil {
+			return m.handleConfirmKey(msg)
+		}
+		if m.actionMenuOpen {
+			return m.handleActionMenuKey(msg)
+		}
 		if m.paletteOpen {
 			return m.handlePaletteKey(msg)
 		}
@@ -92,6 +115,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 		return m.handleKey(msg)
 
 	case tickMsg:
+		// Clear stale action status (older than 5 seconds)
+		if m.actionStatus != "" && time.Since(m.actionStatusTime) > 5*time.Second {
+			m.actionStatus = ""
+		}
 		return m, tea.Batch(
 			fetchDataCmd(m.client),
 			tickAfter(m.refreshInterval),
@@ -113,6 +140,38 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 	case errMsg:
 		m.err = msg.err
 		return m, nil
+
+	case actionResultMsg:
+		if msg.success {
+			m.actionStatus = lipgloss.NewStyle().Foreground(colorGreen).Render("✓ " + msg.message)
+		} else {
+			m.actionStatus = lipgloss.NewStyle().Foreground(colorRed).Render("✗ " + msg.message)
+		}
+		m.actionStatusTime = time.Now()
+		return m, fetchDataCmd(m.client)
+
+	case logLineMsg:
+		if m.logPane != nil {
+			// Split incoming data into lines and append
+			incoming := strings.Split(strings.TrimRight(msg.line, "\n"), "\n")
+			m.logPane.lines = append(m.logPane.lines, incoming...)
+			// Keep last 200 lines
+			if len(m.logPane.lines) > 200 {
+				m.logPane.lines = m.logPane.lines[len(m.logPane.lines)-200:]
+			}
+			return m, startLogStream(m.client, m.logPane.containerName)
+		}
+		return m, nil
+
+	case logStreamEndMsg:
+		if m.logPane != nil {
+			m.logPane.streaming = false
+			if msg.err != nil {
+				m.logPane.err = msg.err
+			}
+			m.logPane.lines = append(m.logPane.lines, "[stream ended]")
+		}
+		return m, nil
 	}
 
 	return m, nil
@@ -122,6 +181,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) { //nolint:gocritic // b
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
 	switch msg.String() {
 	case "q", "ctrl+c":
+		if m.logPane != nil {
+			m.logPane = nil
+			return m, nil
+		}
 		return m, tea.Quit
 	case "?":
 		m.helpOpen = true
@@ -133,6 +196,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 		m.filterEditing = false
 		return m, nil
 	case "esc":
+		// Close log pane first
+		if m.logPane != nil {
+			m.logPane = nil
+			return m, nil
+		}
 		// First Esc clears filter; second Esc navigates back
 		if m.filterText != "" {
 			m.filterText = ""
@@ -207,8 +275,272 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocriti
 		m.adjustListScroll()
 	case "enter":
 		return m.handleEnter()
+	case "a":
+		return m.openActionMenu()
+	case "l":
+		if m.activeView == ViewContainers {
+			return m.openLogPane()
+		}
+	case "d":
+		if m.activeView == ViewDeploys {
+			return m.startTeardownConfirm()
+		}
+	case "+":
+		if m.activeView == ViewDeploymentDetail {
+			return m.scaleUp()
+		}
+	case "-":
+		if m.activeView == ViewDeploymentDetail {
+			return m.scaleDown()
+		}
 	}
 	return m, nil
+}
+
+// handleActionMenuKey processes key events when the action menu is open.
+func (m Model) handleActionMenuKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	switch msg.String() {
+	case "esc":
+		m.actionMenuOpen = false
+		return m, nil
+	case "up", "k":
+		m.actionMenuCursor = max(m.actionMenuCursor-1, 0)
+		return m, nil
+	case "down", "j":
+		m.actionMenuCursor = min(m.actionMenuCursor+1, max(len(m.actionMenuItems)-1, 0))
+		return m, nil
+	case "enter":
+		if m.actionMenuCursor >= len(m.actionMenuItems) {
+			return m, nil
+		}
+		item := m.actionMenuItems[m.actionMenuCursor]
+		m.actionMenuOpen = false
+		return m.executeActionMenuItem(item)
+	}
+	return m, nil
+}
+
+// handleConfirmKey processes key events in the confirmation dialog.
+func (m Model) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	if m.confirmState == nil {
+		return m, nil
+	}
+
+	if m.confirmState.typeName != "" {
+		// Type-to-confirm mode
+		switch msg.String() {
+		case "esc":
+			m.confirmState = nil
+			m.confirmAction = ""
+			return m, nil
+		case "enter":
+			if m.confirmState.input == m.confirmState.typeName {
+				return m.executeConfirmedAction()
+			}
+			return m, nil
+		case "backspace":
+			if m.confirmState.input != "" {
+				m.confirmState.input = m.confirmState.input[:len(m.confirmState.input)-1]
+			}
+			return m, nil
+		default:
+			if msg.Type == tea.KeyRunes {
+				m.confirmState.input += string(msg.Runes)
+			}
+			return m, nil
+		}
+	}
+
+	// Simple y/n mode
+	switch msg.String() {
+	case "y":
+		return m.executeConfirmedAction()
+	case "n", "esc":
+		m.confirmState = nil
+		m.confirmAction = ""
+		return m, nil
+	}
+	return m, nil
+}
+
+// openActionMenu opens the action menu for the current list view context.
+func (m Model) openActionMenu() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	switch m.activeView {
+	case ViewContainers:
+		fd := filteredData(m.data, m.activeView, m.filterText)
+		if fd == nil || m.listCursor >= len(fd.Containers) {
+			return m, nil
+		}
+		c := fd.Containers[m.listCursor]
+		m.actionMenuOpen = true
+		m.actionMenuCursor = 0
+		m.actionMenuTarget = c.Name
+		m.actionMenuItems = containerActions()
+	case ViewDeploys:
+		fd := filteredData(m.data, m.activeView, m.filterText)
+		if fd == nil {
+			return m, nil
+		}
+		groups := groupDeployments(fd.Deployments)
+		if m.listCursor >= len(groups) {
+			return m, nil
+		}
+		m.actionMenuOpen = true
+		m.actionMenuCursor = 0
+		m.actionMenuTarget = groups[m.listCursor].Latest.Name
+		m.actionMenuItems = deploymentActions()
+	}
+	return m, nil
+}
+
+// executeActionMenuItem handles selection of an action menu item.
+func (m Model) executeActionMenuItem(item actionMenuItem) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	switch item.key {
+	case "cancel":
+		return m, nil
+	case "kill":
+		m.confirmState = &confirmState{
+			message: fmt.Sprintf("Kill %s? [y/n]", m.actionMenuTarget),
+		}
+		m.confirmAction = "kill"
+		return m, nil
+	case "restart":
+		m.confirmState = &confirmState{
+			message: fmt.Sprintf("Restart %s? [y/n]", m.actionMenuTarget),
+		}
+		m.confirmAction = "restart"
+		return m, nil
+	case "logs":
+		return m.openLogPaneForContainer(m.actionMenuTarget)
+	case "teardown":
+		m.confirmState = &confirmState{
+			message:  fmt.Sprintf("Teardown deployment %s?", m.actionMenuTarget),
+			typeName: m.actionMenuTarget,
+		}
+		m.confirmAction = "teardown"
+		return m, nil
+	case "scale":
+		// For scale, find the first service and delegate to detail view
+		m.actionStatus = "Use +/- in deployment detail view to scale"
+		m.actionStatusTime = time.Now()
+		return m, nil
+	}
+	return m, nil
+}
+
+// executeConfirmedAction runs the confirmed action.
+func (m Model) executeConfirmedAction() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	action := m.confirmAction
+	target := m.actionMenuTarget
+	m.confirmState = nil
+	m.confirmAction = ""
+
+	if m.client == nil {
+		return m, nil
+	}
+
+	switch action {
+	case "kill", "restart":
+		// Find container data to get taskID and agentName
+		c := m.findContainerByName(target)
+		if c == nil {
+			m.actionStatus = lipgloss.NewStyle().Foreground(colorRed).Render("✗ Container not found")
+			m.actionStatusTime = time.Now()
+			return m, nil
+		}
+		return m, stopContainerCmd(m.client, c.TaskID, c.AgentName)
+	case "teardown":
+		return m, teardownDeploymentCmd(m.client, target)
+	}
+	return m, nil
+}
+
+// findContainerByName finds a container in the current data by name.
+func (m Model) findContainerByName(name string) *ContainerData { //nolint:gocritic // bubbletea value-receiver pattern
+	if m.data == nil {
+		return nil
+	}
+	for i := range m.data.Containers {
+		if m.data.Containers[i].Name == name {
+			return &m.data.Containers[i]
+		}
+	}
+	return nil
+}
+
+// openLogPane opens the log pane for the currently selected container.
+func (m Model) openLogPane() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	fd := filteredData(m.data, m.activeView, m.filterText)
+	if fd == nil || m.listCursor >= len(fd.Containers) {
+		return m, nil
+	}
+	c := fd.Containers[m.listCursor]
+	return m.openLogPaneForContainer(c.Name)
+}
+
+// openLogPaneForContainer opens the log pane for a specific container name.
+func (m Model) openLogPaneForContainer(containerName string) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	m.logPane = &logPaneState{
+		containerName: containerName,
+		streaming:     true,
+	}
+	if m.client == nil {
+		return m, nil
+	}
+	return m, startLogStream(m.client, containerName)
+}
+
+// startTeardownConfirm opens a type-to-confirm dialog for the selected deployment.
+func (m Model) startTeardownConfirm() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	fd := filteredData(m.data, m.activeView, m.filterText)
+	if fd == nil {
+		return m, nil
+	}
+	groups := groupDeployments(fd.Deployments)
+	if m.listCursor >= len(groups) {
+		return m, nil
+	}
+	name := groups[m.listCursor].Latest.Name
+	m.actionMenuTarget = name
+	m.confirmState = &confirmState{
+		message:  fmt.Sprintf("Teardown deployment %s?", name),
+		typeName: name,
+	}
+	m.confirmAction = "teardown"
+	return m, nil
+}
+
+// scaleUp sends a scale +1 command for the first service in the deployment.
+func (m Model) scaleUp() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	return m.scaleBy(1)
+}
+
+// scaleDown sends a scale -1 command for the first service in the deployment.
+func (m Model) scaleDown() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	return m.scaleBy(-1)
+}
+
+// scaleBy adjusts the replica count of the first service in the selected deployment.
+func (m Model) scaleBy(delta int32) (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	if m.data == nil || m.client == nil {
+		return m, nil
+	}
+	var deploy *DeploymentData
+	for i := range m.data.Deployments {
+		if m.data.Deployments[i].ID == m.selectedDeploy {
+			deploy = &m.data.Deployments[i]
+			break
+		}
+	}
+	if deploy == nil || len(deploy.ServiceDetails) == 0 {
+		return m, nil
+	}
+	svc := deploy.ServiceDetails[0]
+	newCount := svc.Replicas + delta
+	if newCount < 0 {
+		newCount = 0
+	}
+	return m, scaleDeploymentCmd(m.client, deploy.Name, svc.Name, newCount)
 }
 
 // handleFilterKey processes key events when the filter input is active.
@@ -488,6 +820,11 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 		header = header + "\n" + statusLine
 	}
 
+	// Show action status below header (auto-clears after 5 seconds)
+	if m.actionStatus != "" {
+		header = header + "\n  " + m.actionStatus
+	}
+
 	// Compute filtered data for list views
 	fd := m.data
 	if m.filterText != "" && m.data != nil {
@@ -560,6 +897,13 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 	sections = append(sections, content, "", footer)
 	view := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
+	// Split view for log pane
+	if m.logPane != nil {
+		logHeight := max(m.height/3, 5)
+		pane := renderLogPane(*m.logPane, m.width, logHeight)
+		view = lipgloss.JoinVertical(lipgloss.Left, view, pane)
+	}
+
 	// Composite overlays on top of the rendered dashboard
 	if m.helpOpen {
 		boxWidth := max(min(50, m.width-4), 30)
@@ -568,6 +912,14 @@ func (m Model) View() string { //nolint:gocritic // bubbletea requires value rec
 	if m.paletteOpen {
 		boxWidth := max(min(56, m.width-4), 30)
 		return applyOverlay(view, renderPaletteBox(m.paletteFilter, m.paletteCursor, boxWidth, m.activeView), m.width, m.height)
+	}
+	if m.actionMenuOpen {
+		boxWidth := max(min(50, m.width-4), 30)
+		return applyOverlay(view, renderActionMenu(m.actionMenuTarget, m.actionMenuItems, m.actionMenuCursor, boxWidth), m.width, m.height)
+	}
+	if m.confirmState != nil {
+		boxWidth := max(min(50, m.width-4), 30)
+		return applyOverlay(view, renderConfirmDialog(*m.confirmState, boxWidth), m.width, m.height)
 	}
 
 	return view

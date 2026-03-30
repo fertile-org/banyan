@@ -78,6 +78,7 @@ type ServiceData struct {
 type ContainerData struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	TaskID          string
 	Name            string
 	ServiceName     string
 	AgentName       string
@@ -192,6 +193,7 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 				continue
 			}
 			c := ContainerData{
+				TaskID:          t.Id,
 				Name:            t.ContainerName,
 				ServiceName:     t.ServiceName,
 				AgentName:       t.AgentId,

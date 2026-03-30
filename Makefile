@@ -29,6 +29,7 @@ proto:
 	protoc --proto_path=pkg/rpc/proto/banyan/v1 \
 		--go_out=pkg/rpc/banyanpb --go_opt=paths=source_relative \
 		--go-grpc_out=pkg/rpc/banyanpb --go-grpc_opt=paths=source_relative \
+		--connect-go_out=pkg/rpc/banyanpb --connect-go_opt=paths=source_relative \
 		pkg/rpc/proto/banyan/v1/*.proto
 
 # Lint and format code

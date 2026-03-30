@@ -29,6 +29,7 @@ type Options struct {
 	RegistryPort    string
 	GRPCPort        string
 	MetricsPort     string // Prometheus /metrics HTTP port (default "9090")
+	APIPort         string // Connect HTTP API port for web dashboard (default "9091")
 	DataDir         string
 	EtcdUsername    string            // etcd RBAC username
 	EtcdPassword    string            // etcd RBAC password
@@ -247,6 +248,15 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to start metrics server: %w", startErr)
 	}
 
+	// Start Connect HTTP API server for web dashboard
+	apiPort := e.opts.APIPort
+	if apiPort == "" {
+		apiPort = "9091"
+	}
+	if startErr := startConnectAPI(ctx, grpcSrv, apiPort); startErr != nil {
+		return fmt.Errorf("failed to start Connect API server: %w", startErr)
+	}
+
 	// Register engine in etcd (for discovery by other engines / CLI)
 	grpcAddr := grpcBindAddr + ":" + e.opts.GRPCPort
 	e.registerEngine(ctx, grpcAddr)
@@ -257,6 +267,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	// Single summary line after all components are ready
 	e.logger().Info("Engine ready",
 		"grpc", grpcAddr,
+		"api", ":"+apiPort,
 		"registry", e.registryURL,
 		"metrics", ":"+metricsPort,
 		"clients", len(e.opts.WhitelistedKeys),

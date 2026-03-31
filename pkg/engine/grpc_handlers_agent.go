@@ -361,12 +361,21 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 	// Track which deployments have changed container status
 	affectedDeployments := make(map[string]bool)
 
+	// Build set of latest deployment IDs so we only update tasks from the
+	// current deployment. Old deployments may have tasks with the same container
+	// name — updating them would cause stale records to mirror live status.
+	latestDeployIDs := s.latestDeploymentIDs(ctx)
+
 	for _, key := range keys {
 		var task types.TaskRecord
 		if err := s.store.Get(ctx, key, &task); err != nil {
 			continue
 		}
 		if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted {
+			continue
+		}
+		// Only update tasks from the latest deployment per name
+		if !latestDeployIDs[task.DeploymentID] {
 			continue
 		}
 		if containerStatus, ok := statusMap[task.ContainerName]; ok {
@@ -392,12 +401,178 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		}
 	}
 
+	// Detect unreported containers: tasks the engine thinks are running on this agent
+	// but the agent didn't include in its health report. This handles the case where
+	// an agent restarts with no containers (e.g., after host reboot).
+	reportedContainers := make(map[string]bool, len(req.Containers))
+	for _, c := range req.Containers {
+		reportedContainers[c.ContainerName] = true
+	}
+	for _, key := range keys {
+		var task types.TaskRecord
+		if err := s.store.Get(ctx, key, &task); err != nil {
+			continue
+		}
+		if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted {
+			continue
+		}
+		if task.ContainerStatus != types.StatusRunning {
+			continue
+		}
+		// Only check tasks from the latest deployment per name
+		if !latestDeployIDs[task.DeploymentID] {
+			continue
+		}
+		// This task is "running" but the agent didn't report it — container is gone
+		if !reportedContainers[task.ContainerName] {
+			task.ContainerStatus = "exited"
+			task.ContainerCheckedAt = time.Now()
+			if saveErr := s.store.Save(ctx, key, &task); saveErr != nil {
+				s.logger().Warn("Failed to mark unreported container as exited", "container", task.ContainerName, "error", saveErr)
+			} else {
+				s.logger().Info("Marked unreported container as exited", "container", task.ContainerName, "agent", req.AgentName)
+			}
+			// Create a stop_and_remove task so the agent cleans up the container
+			// from nerdctl's name store (prevents "name already used" on redeploy)
+			now := time.Now()
+			stopTask := &types.TaskRecord{
+				ID:            task.ID + "-cleanup",
+				DeploymentID:  task.DeploymentID,
+				ServiceName:   task.ServiceName,
+				AgentID:       task.AgentID,
+				Type:          types.TaskTypeStopAndRemove,
+				Status:        types.StatusPending,
+				ContainerName: task.ContainerName,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			stopKey := types.KeyTasks + task.AgentID + "/" + stopTask.ID
+			if saveErr := s.store.Save(ctx, stopKey, stopTask); saveErr != nil {
+				s.logger().Warn("Failed to create cleanup task", "container", task.ContainerName, "error", saveErr)
+			} else {
+				s.logger().Info("Created cleanup task for stale container", "container", task.ContainerName, "agent", req.AgentName)
+			}
+			if task.DeploymentID != "" {
+				affectedDeployments[task.DeploymentID] = true
+			}
+		}
+	}
+
 	// Reconcile deployment status: if all containers are dead, mark deployment as stopped
 	for deployID := range affectedDeployments {
 		s.reconcileDeploymentStatus(ctx, deployID)
 	}
 
 	return &banyanpb.ReportContainerHealthResponse{}, nil
+}
+
+// latestDeploymentIDs returns a set of deployment IDs that are the latest version
+// per deployment name. Used to avoid updating stale task records from old deployments
+// that share the same container names as the current deployment.
+func (s *engineGRPCServer) latestDeploymentIDs(ctx context.Context) map[string]bool {
+	depKeys, err := s.store.List(ctx, types.KeyDeployments)
+	if err != nil {
+		return nil
+	}
+
+	type depInfo struct {
+		id        string
+		createdAt time.Time
+	}
+	latestByName := make(map[string]depInfo)
+
+	for _, key := range depKeys {
+		var record types.DeploymentRecord
+		if err := s.store.Get(ctx, key, &record); err != nil {
+			continue
+		}
+		if prev, exists := latestByName[record.Name]; !exists || record.CreatedAt.After(prev.createdAt) {
+			latestByName[record.Name] = depInfo{id: record.ID, createdAt: record.CreatedAt}
+		}
+	}
+
+	result := make(map[string]bool, len(latestByName))
+	for _, info := range latestByName {
+		result[info.id] = true
+	}
+	return result
+}
+
+// reconcileStaleAgents checks for agents that have gone stale (no heartbeat)
+// and marks their "running" containers as exited + creates cleanup tasks.
+// This handles the case where an agent dies and never sends a health report.
+func (s *engineGRPCServer) reconcileStaleAgents(ctx context.Context) {
+	nodeKeys, err := s.store.List(ctx, types.KeyNodes)
+	if err != nil {
+		return
+	}
+
+	for _, nodeKey := range nodeKeys {
+		var node types.NodeRecord
+		if err := s.store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+		// Only reconcile agents that are stale (ready but no heartbeat)
+		if node.Status != "ready" || time.Since(node.LastSeen) < agentStalenessThreshold {
+			continue
+		}
+
+		// Check for running tasks on this stale agent
+		taskKeys, listErr := s.store.List(ctx, types.KeyTasks+node.Name+"/")
+		if listErr != nil {
+			continue
+		}
+
+		affectedDeployments := make(map[string]bool)
+		for _, taskKey := range taskKeys {
+			var task types.TaskRecord
+			if err := s.store.Get(ctx, taskKey, &task); err != nil {
+				continue
+			}
+			if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted {
+				continue
+			}
+			if task.ContainerStatus != types.StatusRunning {
+				continue
+			}
+
+			// Mark container as exited
+			task.ContainerStatus = "exited"
+			task.ContainerCheckedAt = time.Now()
+			if saveErr := s.store.Save(ctx, taskKey, &task); saveErr != nil {
+				continue
+			}
+			s.logger().Info("Marked container as exited (agent stale)", "container", task.ContainerName, "agent", node.Name)
+
+			// Create cleanup task (will execute when agent comes back)
+			now := time.Now()
+			stopTask := &types.TaskRecord{
+				ID:            task.ID + "-cleanup",
+				DeploymentID:  task.DeploymentID,
+				ServiceName:   task.ServiceName,
+				AgentID:       task.AgentID,
+				Type:          types.TaskTypeStopAndRemove,
+				Status:        types.StatusPending,
+				ContainerName: task.ContainerName,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+			stopKey := types.KeyTasks + task.AgentID + "/" + stopTask.ID
+			// Only create if not already exists (idempotent across loop iterations)
+			var existing types.TaskRecord
+			if getErr := s.store.Get(ctx, stopKey, &existing); getErr != nil {
+				s.store.Save(ctx, stopKey, stopTask)
+			}
+
+			if task.DeploymentID != "" {
+				affectedDeployments[task.DeploymentID] = true
+			}
+		}
+
+		for deployID := range affectedDeployments {
+			s.reconcileDeploymentStatus(ctx, deployID)
+		}
+	}
 }
 
 // reconcileDeploymentStatus checks if all containers for a deployment are dead

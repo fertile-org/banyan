@@ -126,4 +126,4 @@ test-integration-list:
 
 # Record terminal demo (requires vhs: https://github.com/charmbracelet/vhs)
 demo:
-	vhs demo.tape
+	sudo env VHS_NO_SANDBOX=true $(shell which vhs) demo.tape

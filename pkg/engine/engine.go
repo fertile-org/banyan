@@ -379,6 +379,7 @@ func (e *Engine) engineLoop(ctx context.Context) {
 			e.evaluateAutoscale(ctx)
 		case <-rebalanceTicker.C:
 			e.evaluateRebalance(ctx)
+			e.grpcServer.reconcileStaleAgents(ctx)
 		}
 	}
 }

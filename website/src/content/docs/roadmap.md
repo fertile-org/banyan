@@ -248,3 +248,86 @@ Service discovery, traffic policies, and encrypted communication across the clus
 - **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
 - **VPC peering**: Allow explicit cross-deployment communication — deployments are isolated by default (per-deployment iptables chains); VPC peering lets users define exceptions so specific services in one deployment can reach services in another (e.g., a shared database deployment)
 - **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
+
+---
+
+## Milestone 14 — Self-Healing Deployments
+
+Redesign the deployment lifecycle so Banyan keeps user workloads running through any failure — container crashes, agent deaths, engine restarts, or full cluster outages. Replace the current case-by-case patches with a systematic desired-state reconciliation engine.
+
+### Core architecture
+
+- **Desired state model**: The deployment record IS the desired state. A "running" deployment with 3 web replicas and 1 db replica means Banyan must ensure exactly that is running at all times, not just at deploy time.
+- **Actual state tracking**: Each agent reports its full container inventory (name, status, IP, metrics) in every health report. The engine maintains an authoritative map of actual state per agent.
+- **Reconciliation loop**: A dedicated engine loop (every 10s, configurable) compares desired vs actual state for every running deployment and generates repair tasks. This is the single source of all recovery — not scattered across health reports, registration, and dashboard queries.
+
+### Failure recovery matrix
+
+Every failure scenario has a defined detection method, recovery action, and timing guarantee:
+
+- **Container crashes on healthy agent**: Detected via health report (container status → exited). Recovery: create new `create_and_start` task on same agent. Respects `restart:` policy from manifest (always, on-failure, no). Timing: within one health check interval (~10s).
+- **Agent restarts, containers gone**: Detected via health report with 0 containers (agent alive, nothing running). Recovery: re-create all tasks for that agent's share of every running deployment. Timing: within one health check interval (~10s).
+- **Single agent dies**: Detected via staleness (no heartbeat for >60s). Recovery: reschedule the dead agent's tasks to other available agents using resource-aware scheduling. Grace period before rescheduling (configurable, default 2 min) to avoid flapping if agent is just rebooting. Timing: grace period + scheduling cycle.
+- **Agent comes back after rescheduling**: Re-registers, receives cleanup tasks for old containers. No duplicate work — tasks already rescheduled elsewhere are not re-assigned.
+- **Engine restarts**: On startup, engine runs a full reconciliation pass before accepting new deploys. Compares all "running" deployment records against last-known task states. Generates repair tasks for any drift found. Timing: immediate on startup.
+- **All agents die**: All deployments marked as degraded (not stopped — desired state preserved). Tasks are queued. As agents come back and register, engine immediately schedules pending repair tasks. First agent gets work within seconds of registering.
+- **Network partition**: Agent can't reach engine but containers are fine. Engine sees agent as stale, but uses an extended grace period (configurable, default 5 min) before rescheduling — partitions are usually transient. If agent reconnects, it sends a health report and the engine sees containers are still running. No unnecessary rescheduling.
+- **Partial deployment failure**: Some tasks succeed, some fail. Engine retries failed tasks (up to configurable limit, default 3). If retry limit exceeded, deployment marked as degraded with clear error. Successful containers keep running — no full rollback for partial failures.
+
+### Restart policy support
+
+Respect Docker Compose `restart:` field in the manifest:
+- `restart: always` (default) — always restart crashed containers
+- `restart: on-failure` — restart only on non-zero exit code
+- `restart: no` — never restart; mark as exited and leave it
+
+### Rescheduling safeguards
+
+Prevent cascading failures and flapping:
+- **Grace period**: Don't reschedule immediately when an agent goes stale. Wait for it to come back (default 2 min).
+- **Anti-flapping**: Per-container cooldown (5 min) prevents the same container from being rescheduled repeatedly between agents.
+- **Capacity check**: Don't reschedule if remaining agents lack capacity. Mark deployment as degraded with actionable error instead.
+- **Stateful pinning**: Services with `deploy.placement.node` or local volume mounts are NOT rescheduled to other agents — they wait for their agent to come back.
+
+### Observability
+
+- **Deployment health status**: New field on DeploymentRecord — `healthy`, `degraded`, `recovering`, `stopped`. Dashboard and CLI show this prominently.
+- **Reconciliation events**: Every drift detection and repair action emits a cluster event (visible in dashboard and `banyan-cli events`).
+- **Reconciliation metrics**: Prometheus counters for drift detections, repair tasks created, rescheduling events, and failed recoveries.
+
+### Agent lifecycle cleanup
+
+- **Graceful shutdown**: Agent traps SIGTERM/SIGINT and cleans up all resources — VXLAN interface, WireGuard tunnel, CNI config, DNS server, iptables rules. No stale interfaces left behind.
+- **Stale interface recovery on startup**: Before initializing networking, agent detects and removes leftover interfaces (banyan0, vxlan1, wg-control) from a previous unclean shutdown. Startup always succeeds regardless of prior state.
+
+### Critical design constraint: container name is NOT a unique identifier
+
+Container names like `my-app-api-0` are reused across deployments. The same app deployed three times creates three tasks all named `my-app-api-0`. Any logic that matches by container name alone will incorrectly update/affect tasks from old deployments. This applies to:
+- Health report processing (status updates, IP assignment, metrics)
+- Unreported container detection (marking containers as exited)
+- Cleanup task creation (stop_and_remove)
+- Log streaming (which container to stream from)
+- StopTask routing (which task to stop)
+
+**All operations must scope by deployment ID** (or use the task ID directly). Container name is only unique within a single deployment, never across deployments. The reconciliation engine must enforce this invariant everywhere.
+
+### What this replaces
+
+This milestone consolidates and replaces all current ad-hoc recovery logic:
+- Health report unreported-container detection (current quick fix)
+- Stale agent reconciliation in engine loop (current quick fix)
+- Dashboard auto-reconcile for superseded deployments
+- Agent-side `restoreActiveContainers()` on Register
+
+---
+
+## Milestone 15 — Rootless CLI
+
+Remove the sudo requirement from `banyan-cli`. Engine and agent need root (they manage containers, networking, and system services) but the CLI is a user tool — it should work without elevated privileges.
+
+- **User-space config**: Move CLI config from `/etc/banyan/banyan.yaml` (root-owned) to `~/.config/banyan/config.yaml` (user-owned). `banyan-cli init` writes to user dir. Engine/agent config stays in `/etc/banyan/`.
+- **Userspace WireGuard**: Replace kernel WireGuard (`wg-ctl-cli` interface, requires root) with a userspace implementation (e.g., `wireguard-go` or embedded Go WireGuard via `golang.zx2c4.com/wireguard`). No kernel interface, no root needed. The tunnel runs in-process for the duration of the CLI command.
+- **No sudo for any CLI command**: `banyan-cli up`, `dashboard`, `logs`, `scale`, `down`, `secret` — all work as a normal user.
+- **Migration path**: `banyan-cli init` detects existing `/etc/banyan/` config and offers to migrate CLI section to `~/.config/banyan/`. Existing root-based setups keep working.
+- **Key storage**: CLI private key moves to `~/.config/banyan/keys/cli.key` with `0600` permissions (user-owned, not root-owned).
+- **`banyan-cli login`**: No longer needs sudo — sets up userspace WireGuard tunnel in the background or per-command.

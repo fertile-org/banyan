@@ -158,6 +158,16 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 		data.Agents = append(data.Agents, ad)
 	}
 
+	// Build map of latest deployment ID per name (most recent CreatedAt wins)
+	latestDeployByName := make(map[string]string) // name → deployment ID
+	latestDeployTime := make(map[string]int64)    // name → created_at_unix
+	for _, d := range resp.Deployments {
+		if d.CreatedAtUnix > latestDeployTime[d.Name] {
+			latestDeployByName[d.Name] = d.Id
+			latestDeployTime[d.Name] = d.CreatedAtUnix
+		}
+	}
+
 	// Deployments
 	for _, d := range resp.Deployments {
 		dd := DeploymentData{
@@ -215,17 +225,30 @@ func ConvertFromProto(resp *banyanpb.GetDashboardDataResponse) DashboardData {
 				UpdatedAt:       time.Unix(t.UpdatedAtUnix, 0),
 			}
 			dd.Containers = append(dd.Containers, c)
-			data.Containers = append(data.Containers, c)
+			// Only add to global container list from the latest deployment per name
+			if latestDeployByName[d.Name] == d.Id {
+				data.Containers = append(data.Containers, c)
+			}
 		}
 
 		data.Deployments = append(data.Deployments, dd)
 	}
 
-	// Sort global containers: deployment → service → replica
+	// Sort global containers: deployment (oldest first) → service → replica
+	// Group by deployment ID so containers from the same deployment stay together,
+	// then sort deployments by creation time (oldest to newest).
+	deployOrder := make(map[string]time.Time, len(data.Deployments))
+	for i := range data.Deployments {
+		deployOrder[data.Deployments[i].ID] = data.Deployments[i].CreatedAt
+	}
 	sort.Slice(data.Containers, func(i, j int) bool {
 		ci, cj := &data.Containers[i], &data.Containers[j]
-		if ci.DeploymentName != cj.DeploymentName {
-			return ci.DeploymentName < cj.DeploymentName
+		if ci.DeploymentID != cj.DeploymentID {
+			ti, tj := deployOrder[ci.DeploymentID], deployOrder[cj.DeploymentID]
+			if !ti.Equal(tj) {
+				return ti.Before(tj)
+			}
+			return ci.DeploymentID < cj.DeploymentID
 		}
 		if ci.ServiceName != cj.ServiceName {
 			return ci.ServiceName < cj.ServiceName

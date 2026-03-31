@@ -3,7 +3,36 @@ package dashboard
 import (
 	"fmt"
 	"strings"
+	"time"
 )
+
+// deployShortLabel returns a deployment label with a relative age
+// to distinguish multiple deployments of the same app.
+// e.g., "my-app 5m" or "my-app 2h".
+func deployShortLabel(name string, createdAt time.Time) string {
+	if name == "" {
+		return name
+	}
+	if createdAt.IsZero() {
+		return name
+	}
+	age := shortAge(time.Since(createdAt))
+	return name + " " + age
+}
+
+// shortAge returns a compact age string like "5s", "3m", "2h", "1d".
+func shortAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", max(int(d.Seconds()), 0))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours())/24)
+	}
+}
 
 // renderContainerList renders the flat container list view with cursor.
 // cpuHistory provides per-container CPU history for sparkline rendering.
@@ -57,6 +86,10 @@ func renderContainerList(data *DashboardData, width, cursor int, cpuHistory map[
 			}
 		}
 
+		// Show deployment name with age to distinguish versions
+		// e.g., "my-app 5m" or "my-app 2h"
+		deployLabel := deployShortLabel(c.DeploymentName, c.CreatedAt)
+
 		prefix := "  "
 		nameStyle := styleNone
 		if i == cursor {
@@ -68,7 +101,7 @@ func renderContainerList(data *DashboardData, width, cursor int, cpuHistory map[
 			padRight(nameStyle.Render(truncate(c.Name, colName-2)), colName) +
 			padRight(truncate(c.ServiceName, colService-2), colService) +
 			padRight(truncate(c.AgentName, colAgent-2), colAgent) +
-			padRight(truncate(c.DeploymentName, colDeploy-2), colDeploy) +
+			padRight(truncate(deployLabel, colDeploy-2), colDeploy) +
 			padRight(statusDot(displayStatus)+" "+truncate(displayStatus, 8), colStatus) +
 			padRight(cpuSpark, colCPU) +
 			truncate(ports, colPorts)

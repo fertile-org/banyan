@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -374,10 +375,16 @@ func TestReportContainerHealth(t *testing.T) {
 
 	ctx := context.Background()
 
+	// Create a deployment so the task is recognized as belonging to the latest
+	srv.store.Save(ctx, types.KeyDeployments+"dep-hc", &types.DeploymentRecord{
+		ID: "dep-hc", Name: "test-app", Status: types.StatusRunning, CreatedAt: time.Now(),
+	})
+
 	// Create a completed task
 	task := &types.TaskRecord{
 		ID:            "task-1",
 		AgentID:       "worker-1",
+		DeploymentID:  "dep-hc",
 		Type:          types.TaskTypeCreateAndStart,
 		Status:        types.StatusCompleted,
 		ContainerName: "test-web-0",
@@ -3306,9 +3313,11 @@ func TestReportContainerHealth_StoresIP(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Create a completed task
+	srv.store.Save(ctx, types.KeyDeployments+"dep-ip", &types.DeploymentRecord{
+		ID: "dep-ip", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
+	})
 	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-ip1", &types.TaskRecord{
-		ID: "task-ip1", AgentID: "worker-1",
+		ID: "task-ip1", AgentID: "worker-1", DeploymentID: "dep-ip",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-0",
 	})
@@ -3341,8 +3350,11 @@ func TestReportContainerHealth_StoresHealthStatus(t *testing.T) {
 
 	ctx := context.Background()
 
+	srv.store.Save(ctx, types.KeyDeployments+"dep-hc2", &types.DeploymentRecord{
+		ID: "dep-hc2", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
+	})
 	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-hc1", &types.TaskRecord{
-		ID: "task-hc1", AgentID: "worker-1",
+		ID: "task-hc1", AgentID: "worker-1", DeploymentID: "dep-hc2",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-db-0",
 	})
@@ -3366,6 +3378,156 @@ func TestReportContainerHealth_StoresHealthStatus(t *testing.T) {
 	}
 	if updated.ContainerStatus != "running" {
 		t.Errorf("expected container status 'running', got %q", updated.ContainerStatus)
+	}
+}
+
+func TestReportContainerHealth_UnreportedContainersMarkedExited(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register node so CollectDeploymentTasks can find tasks
+	srv.store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1"})
+
+	// Create a running deployment
+	depID := "dep-unreported-1"
+	srv.store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+		ID: depID, Name: "my-app", Status: types.StatusRunning,
+	})
+
+	// Create tasks the engine thinks are running on worker-1
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-a", &types.TaskRecord{
+		ID: "task-a", AgentID: "worker-1", DeploymentID: depID,
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "my-app-web-0", ContainerStatus: types.StatusRunning,
+	})
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-b", &types.TaskRecord{
+		ID: "task-b", AgentID: "worker-1", DeploymentID: depID,
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "my-app-db-0", ContainerStatus: types.StatusRunning,
+	})
+
+	// Agent reports 0 containers (restarted with nothing running)
+	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+		AgentName:  "worker-1",
+		Containers: []*banyanpb.ContainerStatus{},
+	})
+	if err != nil {
+		t.Fatalf("ReportContainerHealth failed: %v", err)
+	}
+
+	// Both tasks should be marked as exited
+	var taskA, taskB types.TaskRecord
+	srv.store.Get(ctx, types.KeyTasks+"worker-1/task-a", &taskA)
+	srv.store.Get(ctx, types.KeyTasks+"worker-1/task-b", &taskB)
+
+	if taskA.ContainerStatus != "exited" {
+		t.Errorf("task-a container status = %q, want exited", taskA.ContainerStatus)
+	}
+	if taskB.ContainerStatus != "exited" {
+		t.Errorf("task-b container status = %q, want exited", taskB.ContainerStatus)
+	}
+
+	// Deployment should be marked stopped (all containers dead)
+	var dep types.DeploymentRecord
+	srv.store.Get(ctx, types.KeyDeployments+depID, &dep)
+	if dep.Status != types.StatusStopped {
+		t.Errorf("deployment status = %q, want stopped", dep.Status)
+	}
+
+	// Cleanup tasks should be created for both containers
+	var cleanupA, cleanupB types.TaskRecord
+	errA := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-a-cleanup", &cleanupA)
+	errB := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-b-cleanup", &cleanupB)
+	if errA != nil {
+		t.Errorf("cleanup task for task-a not created: %v", errA)
+	}
+	if errB != nil {
+		t.Errorf("cleanup task for task-b not created: %v", errB)
+	}
+	if cleanupA.Type != types.TaskTypeStopAndRemove {
+		t.Errorf("cleanup-a type = %q, want stop_and_remove", cleanupA.Type)
+	}
+	if cleanupA.Status != types.StatusPending {
+		t.Errorf("cleanup-a status = %q, want pending", cleanupA.Status)
+	}
+	if cleanupA.ContainerName != "my-app-web-0" {
+		t.Errorf("cleanup-a container = %q, want my-app-web-0", cleanupA.ContainerName)
+	}
+}
+
+func TestReportContainerHealth_PartialReport(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Register node so CollectDeploymentTasks can find tasks
+	srv.store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1"})
+
+	depID := "dep-partial-1"
+	srv.store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+		ID: depID, Name: "my-app", Status: types.StatusRunning,
+	})
+
+	// Two running tasks on worker-1
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-a", &types.TaskRecord{
+		ID: "task-a", AgentID: "worker-1", DeploymentID: depID,
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "my-app-web-0", ContainerStatus: types.StatusRunning,
+	})
+	srv.store.Save(ctx, types.KeyTasks+"worker-1/task-b", &types.TaskRecord{
+		ID: "task-b", AgentID: "worker-1", DeploymentID: depID,
+		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+		ContainerName: "my-app-db-0", ContainerStatus: types.StatusRunning,
+	})
+
+	// Agent reports only web-0 (db-0 is gone)
+	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+		AgentName: "worker-1",
+		Containers: []*banyanpb.ContainerStatus{
+			{ContainerName: "my-app-web-0", Status: "running"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReportContainerHealth failed: %v", err)
+	}
+
+	// web-0 should still be running
+	var taskA types.TaskRecord
+	srv.store.Get(ctx, types.KeyTasks+"worker-1/task-a", &taskA)
+	if taskA.ContainerStatus != "running" {
+		t.Errorf("task-a container status = %q, want running", taskA.ContainerStatus)
+	}
+
+	// db-0 should be marked exited
+	var taskB types.TaskRecord
+	srv.store.Get(ctx, types.KeyTasks+"worker-1/task-b", &taskB)
+	if taskB.ContainerStatus != "exited" {
+		t.Errorf("task-b container status = %q, want exited", taskB.ContainerStatus)
+	}
+
+	// Cleanup task should be created for db-0 only (web-0 is still running)
+	var cleanupB types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-b-cleanup", &cleanupB); err != nil {
+		t.Errorf("cleanup task for db-0 not created: %v", err)
+	}
+	if cleanupB.ContainerName != "my-app-db-0" {
+		t.Errorf("cleanup container = %q, want my-app-db-0", cleanupB.ContainerName)
+	}
+
+	// No cleanup task for web-0 (it's still running)
+	var cleanupA types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"worker-1/task-a-cleanup", &cleanupA); err == nil {
+		t.Error("cleanup task should NOT exist for web-0 (still running)")
+	}
+
+	// Deployment should still be running (web-0 is alive)
+	var dep types.DeploymentRecord
+	srv.store.Get(ctx, types.KeyDeployments+depID, &dep)
+	if dep.Status != types.StatusRunning {
+		t.Errorf("deployment status = %q, want running", dep.Status)
 	}
 }
 
@@ -4151,6 +4313,135 @@ func TestReconcileDeploymentStatus(t *testing.T) {
 		_ = store.Get(ctx, types.KeyDeployments+depID, &record)
 		if record.Status != types.StatusStopped {
 			t.Errorf("deployment status = %q, want stopped (unchanged)", record.Status)
+		}
+	})
+}
+
+func TestReconcileStaleAgents(t *testing.T) {
+	t.Run("marks containers exited and creates cleanup tasks for stale agent", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+		events := NewEventBuffer(10)
+
+		srv := &engineGRPCServer{store: store, events: events}
+
+		// Agent that hasn't sent a heartbeat in 2 minutes (stale)
+		_ = store.Save(ctx, types.KeyNodes+"dead-agent", &types.NodeRecord{
+			Name:     "dead-agent",
+			Status:   "ready",
+			LastSeen: time.Now().Add(-2 * time.Minute),
+		})
+
+		depID := "dep-stale-1"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID: depID, Name: "my-app", Status: types.StatusRunning,
+		})
+
+		_ = store.Save(ctx, types.KeyTasks+"dead-agent/task-1", &types.TaskRecord{
+			ID: "task-1", AgentID: "dead-agent", DeploymentID: depID,
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "my-app-web-0", ContainerStatus: types.StatusRunning,
+		})
+
+		srv.reconcileStaleAgents(ctx)
+
+		// Task should be marked exited
+		var task types.TaskRecord
+		_ = store.Get(ctx, types.KeyTasks+"dead-agent/task-1", &task)
+		if task.ContainerStatus != "exited" {
+			t.Errorf("task container status = %q, want exited", task.ContainerStatus)
+		}
+
+		// Cleanup task should exist
+		var cleanup types.TaskRecord
+		if err := store.Get(ctx, types.KeyTasks+"dead-agent/task-1-cleanup", &cleanup); err != nil {
+			t.Fatalf("cleanup task not created: %v", err)
+		}
+		if cleanup.Type != types.TaskTypeStopAndRemove {
+			t.Errorf("cleanup type = %q, want stop_and_remove", cleanup.Type)
+		}
+
+		// Deployment should be stopped
+		var dep types.DeploymentRecord
+		_ = store.Get(ctx, types.KeyDeployments+depID, &dep)
+		if dep.Status != types.StatusStopped {
+			t.Errorf("deployment status = %q, want stopped", dep.Status)
+		}
+	})
+
+	t.Run("skips connected agents", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+
+		srv := &engineGRPCServer{store: store}
+
+		// Agent with recent heartbeat (not stale)
+		_ = store.Save(ctx, types.KeyNodes+"alive-agent", &types.NodeRecord{
+			Name:     "alive-agent",
+			Status:   "ready",
+			LastSeen: time.Now(),
+		})
+
+		depID := "dep-alive-1"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID: depID, Name: "my-app", Status: types.StatusRunning,
+		})
+
+		_ = store.Save(ctx, types.KeyTasks+"alive-agent/task-1", &types.TaskRecord{
+			ID: "task-1", AgentID: "alive-agent", DeploymentID: depID,
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "my-app-web-0", ContainerStatus: types.StatusRunning,
+		})
+
+		srv.reconcileStaleAgents(ctx)
+
+		// Task should still be running (agent is alive)
+		var task types.TaskRecord
+		_ = store.Get(ctx, types.KeyTasks+"alive-agent/task-1", &task)
+		if task.ContainerStatus != types.StatusRunning {
+			t.Errorf("task container status = %q, want running", task.ContainerStatus)
+		}
+	})
+
+	t.Run("idempotent - does not duplicate cleanup tasks", func(t *testing.T) {
+		store := storage.NewMemoryStore()
+		ctx := context.Background()
+
+		srv := &engineGRPCServer{store: store}
+
+		_ = store.Save(ctx, types.KeyNodes+"dead-agent", &types.NodeRecord{
+			Name: "dead-agent", Status: "ready",
+			LastSeen: time.Now().Add(-2 * time.Minute),
+		})
+
+		depID := "dep-idem-1"
+		_ = store.Save(ctx, types.KeyDeployments+depID, &types.DeploymentRecord{
+			ID: depID, Name: "my-app", Status: types.StatusRunning,
+		})
+
+		_ = store.Save(ctx, types.KeyTasks+"dead-agent/task-1", &types.TaskRecord{
+			ID: "task-1", AgentID: "dead-agent", DeploymentID: depID,
+			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
+			ContainerName: "my-app-web-0", ContainerStatus: types.StatusRunning,
+		})
+
+		// Run twice
+		srv.reconcileStaleAgents(ctx)
+		srv.reconcileStaleAgents(ctx)
+
+		// Should still have exactly one cleanup task (second run is a no-op
+		// because task-1 is already exited, not running)
+		keys, _ := store.List(ctx, types.KeyTasks+"dead-agent/")
+		cleanupCount := 0
+		for _, k := range keys {
+			var t types.TaskRecord
+			store.Get(ctx, k, &t)
+			if t.Type == types.TaskTypeStopAndRemove {
+				cleanupCount++
+			}
+		}
+		if cleanupCount != 1 {
+			t.Errorf("cleanup task count = %d, want 1 (idempotent)", cleanupCount)
 		}
 	})
 }
@@ -5000,5 +5291,166 @@ func TestPollTasksResolvesSecrets(t *testing.T) {
 	}
 	if resp.Tasks[0].ResolvedSecrets["MY_SECRET"] != "secret-value" {
 		t.Errorf("expected resolved secret, got %v", resp.Tasks[0].ResolvedSecrets)
+	}
+}
+
+func TestStopTask_HappyPath(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Seed a running container task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
+		ID:              "task-1",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: types.StatusRunning,
+		ContainerName:   "myapp-web-0",
+		ReplicaIndex:    0,
+	})
+
+	resp, err := client.StopTask(ctx, &banyanpb.StopTaskRequest{
+		TaskId:  "task-1",
+		AgentId: "agent-1",
+	})
+	if err != nil {
+		t.Fatalf("StopTask: %v", err)
+	}
+	if resp.StopTaskId != "task-1-stop" {
+		t.Errorf("stop task ID = %q, want task-1-stop", resp.StopTaskId)
+	}
+	if resp.Status != "stopping" {
+		t.Errorf("status = %q, want stopping", resp.Status)
+	}
+
+	// Verify the stop task was created in the store
+	var stopTask types.TaskRecord
+	if err := srv.store.Get(ctx, types.KeyTasks+"agent-1/task-1-stop", &stopTask); err != nil {
+		t.Fatalf("stop task not found in store: %v", err)
+	}
+	if stopTask.Type != types.TaskTypeStopAndRemove {
+		t.Errorf("stop task type = %q, want stop_and_remove", stopTask.Type)
+	}
+	if stopTask.ContainerName != "myapp-web-0" {
+		t.Errorf("stop task container = %q, want myapp-web-0", stopTask.ContainerName)
+	}
+}
+
+func TestStopTask_NotFound(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	_, err := client.StopTask(context.Background(), &banyanpb.StopTaskRequest{
+		TaskId:  "nonexistent",
+		AgentId: "agent-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for nonexistent task")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.NotFound {
+		t.Errorf("expected NotFound, got %v", err)
+	}
+}
+
+func TestStopTask_NotRunning(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Task exists but container is not running
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-2", &types.TaskRecord{
+		ID:              "task-2",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: "stopped",
+		ContainerName:   "myapp-web-0",
+	})
+
+	_, err := client.StopTask(ctx, &banyanpb.StopTaskRequest{
+		TaskId:  "task-2",
+		AgentId: "agent-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for non-running container")
+	}
+	if !strings.Contains(err.Error(), "container not running") {
+		t.Errorf("expected 'container not running' error, got: %v", err)
+	}
+}
+
+func TestStopTask_AlreadyStopping(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Seed running task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-3", &types.TaskRecord{
+		ID:              "task-3",
+		DeploymentID:    "deploy-1",
+		ServiceName:     "web",
+		AgentID:         "agent-1",
+		Type:            types.TaskTypeCreateAndStart,
+		Status:          types.StatusCompleted,
+		ContainerStatus: types.StatusRunning,
+		ContainerName:   "myapp-web-0",
+	})
+	// Seed existing stop task
+	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-3-stop", &types.TaskRecord{
+		ID:      "task-3-stop",
+		AgentID: "agent-1",
+		Type:    types.TaskTypeStopAndRemove,
+		Status:  types.StatusPending,
+	})
+
+	_, err := client.StopTask(ctx, &banyanpb.StopTaskRequest{
+		TaskId:  "task-3",
+		AgentId: "agent-1",
+	})
+	if err == nil {
+		t.Fatal("expected error for already stopping")
+	}
+	if !strings.Contains(err.Error(), "already stopping") {
+		t.Errorf("expected 'already stopping' error, got: %v", err)
+	}
+}
+
+func TestStopTask_MissingFields(t *testing.T) {
+	client, _, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	tests := []struct {
+		name    string
+		taskID  string
+		agentID string
+	}{
+		{"empty task_id", "", "agent-1"},
+		{"empty agent_id", "task-1", ""},
+		{"both empty", "", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := client.StopTask(context.Background(), &banyanpb.StopTaskRequest{
+				TaskId:  tt.taskID,
+				AgentId: tt.agentID,
+			})
+			if err == nil {
+				t.Fatal("expected error for missing fields")
+			}
+			st, ok := status.FromError(err)
+			if !ok || st.Code() != codes.InvalidArgument {
+				t.Errorf("expected InvalidArgument, got %v", err)
+			}
+		})
 	}
 }

@@ -6,7 +6,7 @@ import (
 )
 
 func TestRenderContainerList_NilData(t *testing.T) {
-	got := renderContainerList(nil, 120, 0)
+	got := renderContainerList(nil, 120, 0, nil)
 	if !strings.Contains(got, "Loading") {
 		t.Error("nil data should show loading")
 	}
@@ -14,7 +14,7 @@ func TestRenderContainerList_NilData(t *testing.T) {
 
 func TestRenderContainerList_Empty(t *testing.T) {
 	data := &DashboardData{}
-	got := renderContainerList(data, 120, 0)
+	got := renderContainerList(data, 120, 0, nil)
 	if !strings.Contains(got, "No containers") {
 		t.Error("empty should show no containers")
 	}
@@ -29,7 +29,7 @@ func TestRenderContainerList_WithData(t *testing.T) {
 		},
 	}
 
-	got := renderContainerList(data, 140, 0)
+	got := renderContainerList(data, 140, 0, nil)
 
 	if !strings.Contains(got, "All Containers (3)") {
 		t.Error("container list missing count")
@@ -59,7 +59,7 @@ func TestRenderContainerList_CursorPosition(t *testing.T) {
 		},
 	}
 
-	got := renderContainerList(data, 120, 1)
+	got := renderContainerList(data, 120, 1, nil)
 	lines := strings.Split(got, "\n")
 
 	foundCursorOnB := false
@@ -80,7 +80,7 @@ func TestRenderContainerList_FallbackStatus(t *testing.T) {
 		},
 	}
 
-	got := renderContainerList(data, 120, 0)
+	got := renderContainerList(data, 120, 0, nil)
 	if !strings.Contains(got, "pending") {
 		t.Error("should fall back to task status when container status is empty")
 	}

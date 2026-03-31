@@ -44,6 +44,10 @@ func renderHelpBox(width int) string {
 		line(stKey.Render(padRight("Enter", 12)) + "Drill into detail"),
 		line(stKey.Render(padRight("/", 12)) + "Filter list"),
 		line(stKey.Render(padRight("e", 12)) + "Export to CSV"),
+		line(stKey.Render(padRight("a", 12)) + "Actions menu"),
+		line(stKey.Render(padRight("l", 12)) + "Stream logs (containers)"),
+		line(stKey.Render(padRight("d", 12)) + "Teardown (deployments)"),
+		line(stKey.Render(padRight("+/-", 12)) + "Scale (deployment detail)"),
 		line(""),
 		// General section
 		line(stSection.Render("General")),

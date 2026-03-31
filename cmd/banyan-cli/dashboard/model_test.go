@@ -841,6 +841,156 @@ func TestExportKeyIgnoredOnNonListView(t *testing.T) {
 	}
 }
 
+// --- Action menu tests ---
+
+func TestActionMenu_OpenClose(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewContainers
+	m.data = &DashboardData{
+		Containers: []ContainerData{{Name: "web-0", TaskID: "task-1", AgentName: "agent-1"}},
+	}
+
+	// Press 'a' to open action menu
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model := updated.(Model)
+
+	if !model.actionMenuOpen {
+		t.Error("'a' should open action menu in container list")
+	}
+	if model.actionMenuTarget != "web-0" {
+		t.Errorf("action menu target = %q, want web-0", model.actionMenuTarget)
+	}
+
+	// Press Esc to close
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model = updated.(Model)
+
+	if model.actionMenuOpen {
+		t.Error("Esc should close action menu")
+	}
+}
+
+func TestActionMenu_Kill(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewContainers
+	m.data = &DashboardData{
+		Containers: []ContainerData{{Name: "web-0", TaskID: "task-1", AgentName: "agent-1"}},
+	}
+
+	// Open action menu
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model := updated.(Model)
+
+	// Select "Kill" (first item, cursor already at 0)
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	model = updated.(Model)
+
+	// Should show confirm dialog
+	if model.confirmState == nil {
+		t.Fatal("selecting Kill should open confirm dialog")
+	}
+	if model.confirmAction != "kill" {
+		t.Errorf("confirmAction = %q, want kill", model.confirmAction)
+	}
+
+	// Press 'n' to cancel
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")})
+	model = updated.(Model)
+
+	if model.confirmState != nil {
+		t.Error("'n' should close confirm dialog")
+	}
+}
+
+func TestScaleKeys(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewDeploymentDetail
+	m.selectedDeploy = "dep-001"
+	m.data = &DashboardData{
+		Deployments: []DeploymentData{{
+			ID:   "dep-001",
+			Name: "my-app",
+			ServiceDetails: []ServiceData{
+				{Name: "web", Replicas: 2},
+			},
+		}},
+	}
+
+	// Press '+' — should return a command (but client is nil so it's nil)
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("+")})
+	model := updated.(Model)
+	// No crash means success; with nil client the cmd returns nil
+	_ = model
+}
+
+func TestLogPane_OpenClose(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewContainers
+	m.data = &DashboardData{
+		Containers: []ContainerData{{Name: "web-0", TaskID: "task-1"}},
+	}
+
+	// Press 'l' to open log pane
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
+	model := updated.(Model)
+
+	if model.logPane == nil {
+		t.Fatal("'l' should open log pane in container list")
+	}
+	if model.logPane.containerName != "web-0" {
+		t.Errorf("log pane container = %q, want web-0", model.logPane.containerName)
+	}
+
+	// Press 'q' to close log pane
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	model = updated.(Model)
+
+	if model.logPane != nil {
+		t.Error("'q' should close log pane")
+	}
+}
+
+func TestActionMenu_NotOpenOnOverview(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.activeView = ViewOverview
+	m.data = &DashboardData{}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
+	model := updated.(Model)
+
+	if model.actionMenuOpen {
+		t.Error("'a' should not open action menu on Overview")
+	}
+}
+
+func TestActionResultMsg(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.width = 100
+	m.height = 40
+
+	updated, _ := m.Update(actionResultMsg{success: true, message: "Stopped"})
+	model := updated.(Model)
+
+	if model.actionStatus == "" {
+		t.Error("action status should be set after actionResultMsg")
+	}
+}
+
+func TestLogStreamEndMsg(t *testing.T) {
+	m := New(nil, 5*time.Second)
+	m.logPane = &logPaneState{containerName: "test", streaming: true}
+
+	updated, _ := m.Update(logStreamEndMsg{err: nil})
+	model := updated.(Model)
+
+	if model.logPane.streaming {
+		t.Error("streaming should be false after logStreamEndMsg")
+	}
+	if len(model.logPane.lines) == 0 || model.logPane.lines[len(model.logPane.lines)-1] != "[stream ended]" {
+		t.Error("should append [stream ended] marker")
+	}
+}
+
 func TestExportWithFilter(t *testing.T) {
 	original := exportViewCSV
 	defer func() { exportViewCSV = original }()

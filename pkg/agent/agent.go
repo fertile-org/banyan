@@ -833,9 +833,6 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 		return
 	}
 	tracked := a.containers.List()
-	if len(tracked) == 0 {
-		return
-	}
 
 	// Collect per-container resource metrics
 	var names []string
@@ -864,6 +861,9 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 		statuses = append(statuses, cs)
 	}
 
+	// Always send health report, even with 0 containers. This lets the engine
+	// detect that containers it thought were running on this agent are gone
+	// (e.g., after agent restart with no containers restored).
 	if err := a.client.ReportContainerHealth(ctx, a.opts.AgentName, statuses); err != nil {
 		a.logger().Warn("Failed to report container health", "error", err)
 	}

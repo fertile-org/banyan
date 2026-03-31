@@ -18,17 +18,30 @@ type paletteAction struct {
 
 // Special action sentinel values (negative to avoid collision with View enum).
 const (
-	viewActionRefresh View = -1
-	viewActionQuit    View = -2
-	viewActionFilter  View = -3
-	viewActionExport  View = -4
+	viewActionRefresh    View = -1
+	viewActionQuit       View = -2
+	viewActionFilter     View = -3
+	viewActionExport     View = -4
+	viewActionKill       View = -5
+	viewActionLogs       View = -6
+	viewActionTeardown   View = -7
+	viewActionScaleUp    View = -8
+	viewActionScaleDown  View = -9
+	viewActionActionMenu View = -10
 )
 
 // listViews are views that support filtering and CSV export.
 var listViews = []View{ViewAgents, ViewDeploys, ViewContainers, ViewEvents}
 
 var allPaletteActions = []paletteAction{
-	// Page actions (only on list views)
+	// Contextual actions (only in specific views)
+	{name: "Kill Container", desc: "Stop selected container", section: "Actions", view: viewActionKill, availableIn: []View{ViewContainers}},
+	{name: "View Logs", desc: "Stream logs for selected container", section: "Actions", view: viewActionLogs, availableIn: []View{ViewContainers}},
+	{name: "Action Menu", desc: "Open action menu for selection", section: "Actions", view: viewActionActionMenu, availableIn: []View{ViewContainers, ViewDeploys}},
+	{name: "Teardown", desc: "Teardown selected deployment", section: "Actions", view: viewActionTeardown, availableIn: []View{ViewDeploys}},
+	{name: "Scale Up", desc: "Add one replica (+)", section: "Actions", view: viewActionScaleUp, availableIn: []View{ViewDeploymentDetail}},
+	{name: "Scale Down", desc: "Remove one replica (-)", section: "Actions", view: viewActionScaleDown, availableIn: []View{ViewDeploymentDetail}},
+	// List actions (only on list views)
 	{name: "Filter", desc: "Filter current list", section: "Actions", view: viewActionFilter, availableIn: listViews},
 	{name: "Export CSV", desc: "Export current list to CSV", section: "Actions", view: viewActionExport, availableIn: listViews},
 	// Navigation

@@ -55,8 +55,8 @@ func TestConvertFromProto(t *testing.T) {
 				CreatedAtUnix: now - 600,
 				UpdatedAtUnix: now - 60,
 				Tasks: []*banyanpb.TaskInfo{
-					{Type: "create_and_start", ContainerName: "app-web-0", ServiceName: "web", AgentId: "agent-1", Status: "completed", ContainerStatus: "running", Image: "nginx:latest", Ports: []string{"8080:80"}, ReplicaIndex: 0, CreatedAtUnix: now - 500},
-					{Type: "create_and_start", ContainerName: "app-db-0", ServiceName: "db", AgentId: "agent-1", Status: "completed", ContainerStatus: "running", Image: "postgres:15", Ports: []string{"5432:5432"}, ReplicaIndex: 0, CreatedAtUnix: now - 500},
+					{Id: "task-web-0", Type: "create_and_start", ContainerName: "app-web-0", ServiceName: "web", AgentId: "agent-1", Status: "completed", ContainerStatus: "running", Image: "nginx:latest", Ports: []string{"8080:80"}, ReplicaIndex: 0, CreatedAtUnix: now - 500},
+					{Id: "task-db-0", Type: "create_and_start", ContainerName: "app-db-0", ServiceName: "db", AgentId: "agent-1", Status: "completed", ContainerStatus: "running", Image: "postgres:15", Ports: []string{"5432:5432"}, ReplicaIndex: 0, CreatedAtUnix: now - 500},
 					{Type: "stop_and_remove", ContainerName: "old-web-0", ServiceName: "web", AgentId: "agent-1", Status: "completed"},
 				},
 			},
@@ -152,6 +152,9 @@ func TestConvertFromProto(t *testing.T) {
 	}
 	if d.Containers[0].Name != "app-web-0" {
 		t.Errorf("first container = %q, want app-web-0", d.Containers[0].Name)
+	}
+	if d.Containers[0].TaskID != "task-web-0" {
+		t.Errorf("first container TaskID = %q, want task-web-0", d.Containers[0].TaskID)
 	}
 	if d.Containers[0].AgentName != "agent-1" {
 		t.Errorf("container agent = %q, want agent-1", d.Containers[0].AgentName)

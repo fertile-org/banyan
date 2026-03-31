@@ -8,10 +8,16 @@ import (
 )
 
 func TestFilterPaletteActions_Empty(t *testing.T) {
-	// On a list view, all actions (including Filter/Export) are shown.
+	// On a list view, available actions for that view are shown.
 	actions := filterPaletteActions("", ViewAgents)
-	if len(actions) != len(allPaletteActions) {
-		t.Errorf("empty filter on list view: got %d actions, want %d", len(actions), len(allPaletteActions))
+	expected := 0
+	for i := range allPaletteActions {
+		if isActionAvailable(&allPaletteActions[i], ViewAgents) {
+			expected++
+		}
+	}
+	if len(actions) != expected {
+		t.Errorf("empty filter on Agents view: got %d actions, want %d", len(actions), expected)
 	}
 }
 
@@ -230,7 +236,15 @@ func TestPaletteTyping(t *testing.T) {
 func TestPaletteSelectAction(t *testing.T) {
 	m := New(nil, 5)
 	m.paletteOpen = true
-	m.paletteCursor = 1 // Agents
+
+	// Find the Agents action index (may vary by view)
+	actions := filterPaletteActions("", m.activeView)
+	for i, a := range actions {
+		if a.name == "Agents" {
+			m.paletteCursor = i
+			break
+		}
+	}
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	model := updated.(Model)

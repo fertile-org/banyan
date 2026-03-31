@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -29,6 +29,7 @@ proto:
 	protoc --proto_path=pkg/rpc/proto/banyan/v1 \
 		--go_out=pkg/rpc/banyanpb --go_opt=paths=source_relative \
 		--go-grpc_out=pkg/rpc/banyanpb --go-grpc_opt=paths=source_relative \
+		--connect-go_out=pkg/rpc/banyanpb --connect-go_opt=paths=source_relative \
 		pkg/rpc/proto/banyan/v1/*.proto
 
 # Lint and format code
@@ -122,3 +123,7 @@ test-integration-shell:
 test-integration-list:
 	@echo "Available integration tests:"
 	@find ./test/integration -name "run_*.go" -type f | sort
+
+# Record terminal demo (requires vhs: https://github.com/charmbracelet/vhs)
+demo:
+	sudo env VHS_NO_SANDBOX=true $(shell which vhs) demo.tape

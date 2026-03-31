@@ -72,6 +72,9 @@ func renderContainerList(data *DashboardData, width, cursor int, cpuHistory map[
 		if displayStatus == "" {
 			displayStatus = c.Status
 		}
+		if displayStatus == "not_found" {
+			displayStatus = "removed"
+		}
 
 		ports := strings.Join(c.Ports, ", ")
 		if ports == "" {

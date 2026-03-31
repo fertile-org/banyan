@@ -50,7 +50,8 @@ type Model struct { //nolint:govet // bubbletea model readability over fieldalig
 	// Action menu state
 	actionMenuOpen   bool
 	actionMenuCursor int
-	actionMenuTarget string // container or deployment name being acted on
+	actionMenuTarget string   // container or deployment name being acted on
+	actionMenuTags   []string // deployment tags (needed for Down RPC)
 	actionMenuItems  []actionMenuItem
 
 	// Confirmation dialog state
@@ -393,6 +394,7 @@ func (m Model) openActionMenu() (tea.Model, tea.Cmd) { //nolint:gocritic // bubb
 		m.actionMenuOpen = true
 		m.actionMenuCursor = 0
 		m.actionMenuTarget = groups[m.listCursor].Latest.Name
+		m.actionMenuTags = groups[m.listCursor].Latest.Tags
 		m.actionMenuItems = deploymentActions()
 	}
 	return m, nil
@@ -455,7 +457,7 @@ func (m Model) executeConfirmedAction() (tea.Model, tea.Cmd) { //nolint:gocritic
 		}
 		return m, stopContainerCmd(m.client, c.TaskID, c.AgentName)
 	case "teardown":
-		return m, teardownDeploymentCmd(m.client, target)
+		return m, teardownDeploymentCmd(m.client, target, m.actionMenuTags)
 	}
 	return m, nil
 }
@@ -471,6 +473,21 @@ func (m Model) findContainerByName(name string) *ContainerData { //nolint:gocrit
 		}
 	}
 	return nil
+}
+
+// killSelectedContainer opens a confirm dialog to kill the selected container.
+func (m Model) killSelectedContainer() (tea.Model, tea.Cmd) { //nolint:gocritic // bubbletea value-receiver pattern
+	fd := filteredData(m.data, m.activeView, m.filterText)
+	if fd == nil || m.listCursor >= len(fd.Containers) {
+		return m, nil
+	}
+	c := fd.Containers[m.listCursor]
+	m.actionMenuTarget = c.Name
+	m.confirmState = &confirmState{
+		message: fmt.Sprintf("Kill %s? [y/n]", c.Name),
+	}
+	m.confirmAction = "kill"
+	return m, nil
 }
 
 // openLogPane opens the log pane for the currently selected container.
@@ -507,6 +524,7 @@ func (m Model) startTeardownConfirm() (tea.Model, tea.Cmd) { //nolint:gocritic /
 	}
 	name := groups[m.listCursor].Latest.Name
 	m.actionMenuTarget = name
+	m.actionMenuTags = groups[m.listCursor].Latest.Tags
 	m.confirmState = &confirmState{
 		message:  fmt.Sprintf("Teardown deployment %s?", name),
 		typeName: name,
@@ -655,6 +673,33 @@ func (m Model) executePaletteAction(action paletteAction) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case viewActionKill:
+		if m.activeView == ViewContainers {
+			return m.killSelectedContainer()
+		}
+		return m, nil
+	case viewActionLogs:
+		if m.activeView == ViewContainers {
+			return m.openLogPane()
+		}
+		return m, nil
+	case viewActionTeardown:
+		if m.activeView == ViewDeploys {
+			return m.startTeardownConfirm()
+		}
+		return m, nil
+	case viewActionScaleUp:
+		if m.activeView == ViewDeploymentDetail {
+			return m.scaleUp()
+		}
+		return m, nil
+	case viewActionScaleDown:
+		if m.activeView == ViewDeploymentDetail {
+			return m.scaleDown()
+		}
+		return m, nil
+	case viewActionActionMenu:
+		return m.openActionMenu()
 	default:
 		// View switch — clear filter state
 		m.filterText = ""

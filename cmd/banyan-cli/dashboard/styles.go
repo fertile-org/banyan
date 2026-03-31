@@ -38,7 +38,7 @@ func statusDot(status string) string {
 		return lipgloss.NewStyle().Foreground(colorGreen).Render("●")
 	case "pending", "deploying":
 		return lipgloss.NewStyle().Foreground(colorYellow).Render("●")
-	case "failed", "error", "stale":
+	case "failed", "error", "stale", "removed", "not_found":
 		return lipgloss.NewStyle().Foreground(colorRed).Render("●")
 	default:
 		return lipgloss.NewStyle().Foreground(colorGray).Render("●")

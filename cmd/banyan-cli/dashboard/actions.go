@@ -51,13 +51,14 @@ func scaleDeploymentCmd(client banyanpb.EngineServiceClient, name, service strin
 }
 
 // teardownDeploymentCmd calls Down RPC.
-func teardownDeploymentCmd(client banyanpb.EngineServiceClient, name string) tea.Cmd {
+func teardownDeploymentCmd(client banyanpb.EngineServiceClient, name string, tags []string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		resp, err := client.Down(ctx, &banyanpb.DownRPCRequest{
 			Name: name,
+			Tags: tags,
 		})
 		if err != nil {
 			return actionResultMsg{success: false, message: fmt.Sprintf("Teardown failed: %v", err)}

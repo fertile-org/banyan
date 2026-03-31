@@ -113,7 +113,7 @@ func TestTeardownDeploymentCmd(t *testing.T) {
 		client := &mockEngineClient{
 			downResp: &banyanpb.DownRPCResponse{TaskCount: 2},
 		}
-		cmd := teardownDeploymentCmd(client, "myapp")
+		cmd := teardownDeploymentCmd(client, "myapp", nil)
 		msg := cmd()
 		result, ok := msg.(actionResultMsg)
 		if !ok {
@@ -131,7 +131,7 @@ func TestTeardownDeploymentCmd(t *testing.T) {
 		client := &mockEngineClient{
 			downErr: fmt.Errorf("deployment not found"),
 		}
-		cmd := teardownDeploymentCmd(client, "myapp")
+		cmd := teardownDeploymentCmd(client, "myapp", nil)
 		msg := cmd()
 		result, ok := msg.(actionResultMsg)
 		if !ok {

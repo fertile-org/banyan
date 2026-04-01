@@ -30,6 +30,12 @@ banyan-cli dashboard --web
 
 The CLI starts a local web server, opens your browser, and proxies API calls to the engine. The dashboard is embedded in the CLI binary — no npm, no Node.js runtime, no separate installation.
 
+<div class="not-content" style="margin: 1.5rem 0; text-align: center;">
+  <video autoplay loop muted playsinline style="max-width: 100%; border-radius: 8px; border: 1px solid var(--sl-color-gray-5); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);">
+    <source src="/dashboard/demo-dashboard-web.webm" type="video/webm" />
+  </video>
+</div>
+
 ### Pages
 
 | Page | What it shows |

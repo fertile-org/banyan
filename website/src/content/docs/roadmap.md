@@ -296,6 +296,13 @@ Container names like `my-app-api-0` are reused across deployments. The same app 
 
 **All operations must scope by deployment ID** (or use the task ID directly). Container name is only unique within a single deployment, never across deployments. The reconciliation engine must enforce this invariant everywhere.
 
+### Stale iptables / networking cleanup on restart
+
+After engine+agent restart, containers get new VPC IPs but old iptables DNAT rules still point to the previous IPs. This causes "No route to host" on exposed ports and breaks log streaming (agent API address points to stale WireGuard tunnel IP). The reconciliation engine must:
+- Flush and re-create iptables DNAT/proxy rules on agent startup using current container IPs
+- Re-register agent API address with the engine after WireGuard tunnel re-establishment
+- Reconcile cross-host load balancing backends with current container IPs
+
 ### What this replaces
 
 This milestone consolidates and replaces all current ad-hoc recovery logic:

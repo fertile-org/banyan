@@ -18,6 +18,8 @@ var (
 	dashboardRefreshInterval time.Duration
 	dashboardSnapshot        bool
 	dashboardSnapshotOutput  string
+	dashboardWeb             bool
+	dashboardWebPort         string
 )
 
 var dashboardCmd = &cobra.Command{
@@ -31,26 +33,31 @@ The dashboard auto-refreshes and displays:
   - Deployment status and container health
   - Recent cluster events
 
-Navigation:
+Modes:
+  (default)    Terminal UI dashboard (TUI)
+  --web        Web dashboard in your browser
+  --snapshot   Export self-contained HTML file
+
+Navigation (TUI):
   1-4    Switch views (Overview, Agents, Deploys, Containers)
   r      Force refresh
   q      Quit
 
-Snapshot mode:
-  --snapshot    Fetch data once and export a self-contained HTML file
-
 Examples:
   banyan-cli dashboard
+  banyan-cli dashboard --web
+  banyan-cli dashboard --web --port 8080
   banyan-cli dashboard --refresh 10s
-  banyan-cli dashboard --snapshot
-  banyan-cli dashboard --snapshot -o cluster.html`,
+  banyan-cli dashboard --snapshot`,
 	RunE: runDashboard,
 }
 
 func init() {
-	dashboardCmd.Flags().DurationVar(&dashboardRefreshInterval, "refresh", 5*time.Second, "Auto-refresh interval")
-	dashboardCmd.Flags().BoolVar(&dashboardSnapshot, "snapshot", false, "Export a self-contained HTML snapshot instead of opening the live dashboard")
-	dashboardCmd.Flags().StringVarP(&dashboardSnapshotOutput, "output", "o", "", "Output file for snapshot (default: banyan-snapshot-<timestamp>.html)")
+	dashboardCmd.Flags().DurationVar(&dashboardRefreshInterval, "refresh", 5*time.Second, "Auto-refresh interval (TUI mode)")
+	dashboardCmd.Flags().BoolVar(&dashboardSnapshot, "snapshot", false, "Export a self-contained HTML snapshot")
+	dashboardCmd.Flags().StringVarP(&dashboardSnapshotOutput, "output", "o", "", "Output file for snapshot")
+	dashboardCmd.Flags().BoolVar(&dashboardWeb, "web", false, "Start web dashboard in your browser")
+	dashboardCmd.Flags().StringVar(&dashboardWebPort, "port", "3000", "Web dashboard port (with --web)")
 	rootCmd.AddCommand(dashboardCmd)
 }
 
@@ -58,6 +65,11 @@ func runDashboard(cmd *cobra.Command, args []string) error {
 	engineAddr := types.GetCLIEngineEndpoint(configPath)
 	if engineAddr == "" {
 		return fmt.Errorf("engine endpoint not configured. Run 'banyan-cli init' to configure")
+	}
+
+	// Web dashboard mode — serves bundled React app locally
+	if dashboardWeb {
+		return runWebDashboard(dashboardWebPort, engineAddr)
 	}
 
 	client, err := NewAutoEngineClient(engineAddr)

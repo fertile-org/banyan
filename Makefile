@@ -84,8 +84,14 @@ else
 	cd $(MODULE) && go test ./...
 endif
 
-# Build all binaries
-build:
+# Build all binaries (web dashboard embedded in CLI)
+build: web-build
+	go build -o bin/banyan-engine ./cmd/banyan-engine
+	go build -o bin/banyan-agent ./cmd/banyan-agent
+	go build -o bin/banyan-cli ./cmd/banyan-cli
+
+# Build all binaries without web dashboard (faster, for backend dev)
+build-quick:
 	go build -o bin/banyan-engine ./cmd/banyan-engine
 	go build -o bin/banyan-agent ./cmd/banyan-agent
 	go build -o bin/banyan-cli ./cmd/banyan-cli
@@ -136,6 +142,9 @@ demo:
 web:
 	cd web && npm run dev
 
-# Build web dashboard for production
+# Build web dashboard for production and embed in CLI
 web-build:
 	cd web && npm run build
+	rm -rf cmd/banyan-cli/webdist/static
+	mkdir -p cmd/banyan-cli/webdist/static
+	cp -r web/dist/* cmd/banyan-cli/webdist/static/

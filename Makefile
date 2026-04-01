@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo web web-build
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo demo-tui demo-web web web-build
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -130,9 +130,17 @@ test-integration-list:
 	@echo "Available integration tests:"
 	@find ./test/integration -name "run_*.go" -type f | sort
 
+# Record both terminal and web demos
+demo: demo-tui demo-web
+
 # Record terminal demo (requires vhs: https://github.com/charmbracelet/vhs)
-demo:
+demo-tui:
 	sudo env VHS_NO_SANDBOX=true $(shell which vhs) demo.tape
+
+# Record web dashboard demo (requires running dashboard on :3000)
+# Install chromium first: cd web && npx playwright install chromium
+demo-web:
+	cd web && npm run demo
 
 # ============================================================================
 # Web Dashboard

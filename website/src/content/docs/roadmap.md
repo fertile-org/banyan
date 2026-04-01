@@ -200,16 +200,22 @@ See [Auto-Scaling](/guides/auto-scaling/) for the guide and [Manifest Reference 
 
 ## Milestone 10 — Web Monitoring Dashboard
 
-Web-based dashboard for cluster visualization and monitoring.
+Status: **Done**
 
-- Cluster overview with all nodes and services
-- Per-node resource usage graphs (CPU, memory, disk)
-- Per-service metrics (replicas, throughput, error rate)
-- Deployment history and status timeline
-- Real-time metrics and live updates
-- Container log viewer with filtering
+Browser-based dashboard for teams that prefer a web UI over the terminal. Runs locally via the CLI — no separate server to deploy.
 
-The terminal dashboard (`banyan-cli dashboard`) is already available — see [Milestone 4.6](#milestone-46--live-terminal-dashboard). This milestone adds a web-based UI for teams that prefer browser-based monitoring.
+- **`banyan-cli dashboard --web`**: Starts a local web server and opens the dashboard in your browser. The web UI is embedded in the CLI binary — no npm, no Node.js, no separate process
+- **Per-page APIs**: Each page fetches only the data it needs (ListAgents, ListContainers, ListDeployments, etc.) instead of one monolithic call. Lighter payloads, independent refresh rates, easier debugging
+- **Cluster overview**: Stat cards for engines, agents, deployments, containers, and tasks. Recent events table
+- **Agent, deployment, and container detail pages**: Click any row to drill into details. Cross-linked — click an agent name on a container row to jump to that agent
+- **Container log viewer**: Fetch recent logs (configurable tail: 100/500/1000 lines), auto-refresh every 3 seconds, log level coloring, scroll-to-latest indicator
+- **CPU and memory metrics**: CPU percentage with sparkline history, memory usage with progress bars, per-container and per-agent
+- **Command palette**: `Ctrl+K` to search across pages, agents, deployments, and containers. Keyboard navigation
+- **Dark and light themes**: Dark mode by default (matches terminal aesthetic), toggle with one click
+- **Design system**: Geist typography, Lucide icons, color tokens matching the TUI palette. Terminal-native aesthetic, not generic SaaS
+- **Systemd-ready**: Run as a service behind nginx/caddy for team-wide access
+
+The terminal dashboard (`banyan-cli dashboard`) remains available for users who prefer the terminal — see [Milestone 4.6](#milestone-46--live-terminal-dashboard).
 
 ---
 

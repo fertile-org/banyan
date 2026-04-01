@@ -27,6 +27,13 @@ jobs:
         with:
           go-version: "1.25"
 
+      - name: Download dependencies
+        env:
+          GOWORK: "off"
+        run: |
+          cd ${{ matrix.module }}
+          go mod download
+
       - name: Vet
         env:
           GOWORK: "off"
@@ -53,6 +60,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+
+      - name: Download dependencies
+        env:
+          GOWORK: "off"
+        run: |
+          cd ${{ matrix.module }}
+          go mod download
 
       - name: Test with coverage
         env:
@@ -100,6 +114,13 @@ jobs:
           cd web && npm ci && npm run build
           mkdir -p ../cmd/banyan-cli/webdist/static
           cp -r dist/* ../cmd/banyan-cli/webdist/static/
+
+      - name: Download dependencies
+        env:
+          GOWORK: "off"
+        run: |
+          cd ${{ matrix.module }}
+          go mod download
 
       - name: Build
         env:

@@ -9,7 +9,28 @@ permissions:
   contents: write
 
 jobs:
+  web-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build web dashboard
+        run: |
+          cd web
+          npm ci
+          npm run build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist/
+
   build:
+    needs: web-build
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -27,6 +48,13 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.24"
+
+      - name: Embed web dashboard in CLI
+        if: matrix.binary.name == 'banyan-cli'
+        uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: cmd/banyan-cli/webdist/static/
 
       - name: Build
         env:

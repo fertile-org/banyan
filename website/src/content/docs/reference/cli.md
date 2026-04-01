@@ -689,13 +689,32 @@ banyan-cli logs my-app-web-0 -f --tail 100
 
 ### dashboard
 
-Open a live terminal dashboard showing real-time cluster status.
+Monitor your cluster from the terminal or a web browser.
+
+**Web dashboard** (opens in your browser):
+
+```bash
+banyan-cli dashboard --web
+```
+
+```
+  Banyan Dashboard
+
+  Local:   http://localhost:3000
+  Engine:  http://10.200.0.1:9091
+
+  Press Ctrl+C to stop
+```
+
+The web dashboard is embedded in the CLI binary. It starts a local server, proxies API calls to the engine, and opens your browser. Pages include Overview, Agents, Deployments, Containers, Engine, Events, and Logs. Press `Ctrl+K` for the command palette.
+
+**Terminal dashboard** (TUI):
 
 ```bash
 banyan-cli dashboard
 ```
 
-The dashboard auto-refreshes and provides six views you can switch between with number keys:
+The TUI auto-refreshes and provides six views you can switch between with number keys:
 
 | View | Key | Shows |
 |------|-----|-------|
@@ -710,16 +729,29 @@ Navigate lists with arrow keys or `j`/`k`, press `Enter` to drill into agent or 
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--refresh` | `5s` | Auto-refresh interval |
+| `--web` | `false` | Start the web dashboard instead of the terminal TUI |
+| `--port` | `3000` | Web dashboard port (used with `--web`) |
+| `--refresh` | `5s` | Auto-refresh interval (TUI mode) |
+| `--snapshot` | `false` | Export a self-contained HTML snapshot |
+| `-o`, `--output` | | Output file for snapshot |
 
 ![Dashboard overview screen](/dashboard/dashboard-overview.png)
 
 Examples:
 
 ```bash
-# Open the dashboard with default 5s refresh
+# Web dashboard in your browser
+banyan-cli dashboard --web
+
+# Web dashboard on a custom port
+banyan-cli dashboard --web --port 8080
+
+# Terminal TUI with default 5s refresh
 banyan-cli dashboard
 
-# Use a slower refresh interval
+# Terminal TUI with slower refresh
 banyan-cli dashboard --refresh 30s
+
+# Export a one-time HTML snapshot
+banyan-cli dashboard --snapshot
 ```

@@ -200,16 +200,22 @@ See [Auto-Scaling](/guides/auto-scaling/) for the guide and [Manifest Reference 
 
 ## Milestone 10 — Web Monitoring Dashboard
 
-Web-based dashboard for cluster visualization and monitoring.
+Status: **Done**
 
-- Cluster overview with all nodes and services
-- Per-node resource usage graphs (CPU, memory, disk)
-- Per-service metrics (replicas, throughput, error rate)
-- Deployment history and status timeline
-- Real-time metrics and live updates
-- Container log viewer with filtering
+Browser-based dashboard for teams that prefer a web UI over the terminal. Runs locally via the CLI — no separate server to deploy.
 
-The terminal dashboard (`banyan-cli dashboard`) is already available — see [Milestone 4.6](#milestone-46--live-terminal-dashboard). This milestone adds a web-based UI for teams that prefer browser-based monitoring.
+- **`banyan-cli dashboard --web`**: Starts a local web server and opens the dashboard in your browser. The web UI is embedded in the CLI binary — no npm, no Node.js, no separate process
+- **Per-page APIs**: Each page fetches only the data it needs (ListAgents, ListContainers, ListDeployments, etc.) instead of one monolithic call. Lighter payloads, independent refresh rates, easier debugging
+- **Cluster overview**: Stat cards for engines, agents, deployments, containers, and tasks. Recent events table
+- **Agent, deployment, and container detail pages**: Click any row to drill into details. Cross-linked — click an agent name on a container row to jump to that agent
+- **Container log viewer**: Fetch recent logs (configurable tail: 100/500/1000 lines), auto-refresh every 3 seconds, log level coloring, scroll-to-latest indicator
+- **CPU and memory metrics**: CPU percentage with sparkline history, memory usage with progress bars, per-container and per-agent
+- **Command palette**: `Ctrl+K` to search across pages, agents, deployments, and containers. Keyboard navigation
+- **Dark and light themes**: Dark mode by default (matches terminal aesthetic), toggle with one click
+- **Design system**: Geist typography, Lucide icons, color tokens matching the TUI palette. Terminal-native aesthetic, not generic SaaS
+- **Systemd-ready**: Run as a service behind nginx/caddy for team-wide access
+
+The terminal dashboard (`banyan-cli dashboard`) remains available for users who prefer the terminal — see [Milestone 4.6](#milestone-46--live-terminal-dashboard).
 
 ---
 
@@ -230,28 +236,7 @@ See [Secrets](/guides/secrets/) for the guide and [Manifest Reference — Secret
 
 ---
 
-## Milestone 12 — Advanced Security
-
-Authorization and certificate lifecycle management.
-
-- Attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
-- Certificate rotation support
-
----
-
-## Milestone 13 — Advanced Networking
-
-Service discovery, traffic policies, and encrypted communication across the cluster.
-
-- **Health-check-based routing**: Only route to healthy containers — health status is already tracked via `healthcheck:` in the manifest; next step is filtering backends by health status in HeartbeatResponse
-- **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
-- **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
-- **VPC peering**: Allow explicit cross-deployment communication — deployments are isolated by default (per-deployment iptables chains); VPC peering lets users define exceptions so specific services in one deployment can reach services in another (e.g., a shared database deployment)
-- **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
-
----
-
-## Milestone 14 — Self-Healing Deployments
+## Milestone 12 — Self-Healing Deployments
 
 Redesign the deployment lifecycle so Banyan keeps user workloads running through any failure — container crashes, agent deaths, engine restarts, or full cluster outages. Replace the current case-by-case patches with a systematic desired-state reconciliation engine.
 
@@ -321,6 +306,27 @@ This milestone consolidates and replaces all current ad-hoc recovery logic:
 
 ---
 
+## Milestone 13 — Advanced Security
+
+Authorization and certificate lifecycle management.
+
+- Attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
+- Certificate rotation support
+
+---
+
+## Milestone 14 — Advanced Networking
+
+Service discovery, traffic policies, and encrypted communication across the cluster.
+
+- **Health-check-based routing**: Only route to healthy containers — health status is already tracked via `healthcheck:` in the manifest; next step is filtering backends by health status in HeartbeatResponse
+- **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
+- **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
+- **VPC peering**: Allow explicit cross-deployment communication — deployments are isolated by default (per-deployment iptables chains); VPC peering lets users define exceptions so specific services in one deployment can reach services in another (e.g., a shared database deployment)
+- **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
+
+---
+
 ## Milestone 15 — Rootless CLI
 
 Remove the sudo requirement from `banyan-cli`. Engine and agent need root (they manage containers, networking, and system services) but the CLI is a user tool — it should work without elevated privileges.
@@ -331,3 +337,13 @@ Remove the sudo requirement from `banyan-cli`. Engine and agent need root (they 
 - **Migration path**: `banyan-cli init` detects existing `/etc/banyan/` config and offers to migrate CLI section to `~/.config/banyan/`. Existing root-based setups keep working.
 - **Key storage**: CLI private key moves to `~/.config/banyan/keys/cli.key` with `0600` permissions (user-owned, not root-owned).
 - **`banyan-cli login`**: No longer needs sudo — sets up userspace WireGuard tunnel in the background or per-command.
+
+---
+
+## Milestone 16 — Dashboard: Manifest Editor & Container Exec
+
+Extend the web dashboard from a monitoring tool into a deployment interface.
+
+- **Compose manifest editor**: Edit docker-compose.yaml directly in the web dashboard with syntax highlighting, validation, diff preview, and one-click deploy. Turns the dashboard from an operations tool into a deployment interface — the Vercel/Netlify moment for container orchestration
+- **Terminal-in-browser**: WebSocket terminal into any running container directly from the web dashboard. Click a container, click "Shell", get an interactive terminal. Requires a new `ExecContainer` RPC, agent exec capability (`nerdctl exec`), WebSocket proxy (xterm.js), and a security model (RBAC needed before allowing exec permissions)
+- **TUI/Web feature parity policy**: Define whether the TUI dashboard is kept in feature-sync with the web, allowed to diverge, or eventually deprecated. Depends on real user feedback after both dashboards ship

@@ -43,11 +43,30 @@ build_binary() {
     info "${name} installed to ${INSTALL_DIR}/${name} (built from source)"
 }
 
+build_web_dashboard() {
+    if ! command -v node &>/dev/null || ! command -v npm &>/dev/null; then
+        info "Node.js not found — skipping web dashboard build (CLI will work without --web)"
+        return
+    fi
+
+    info "Building web dashboard..."
+    (cd "${SCRIPT_DIR}/web" && npm ci --silent && npm run build --silent) || {
+        info "Web dashboard build failed — skipping (CLI will work without --web)"
+        return
+    }
+
+    rm -rf "${SCRIPT_DIR}/cmd/banyan-cli/webdist/static"
+    mkdir -p "${SCRIPT_DIR}/cmd/banyan-cli/webdist/static"
+    cp -r "${SCRIPT_DIR}/web/dist/"* "${SCRIPT_DIR}/cmd/banyan-cli/webdist/static/"
+    info "Web dashboard embedded in CLI"
+}
+
 install_banyan() {
     if ! command -v go &>/dev/null; then
         fatal "Go is not installed. Install Go 1.24+ first: https://go.dev/dl/"
     fi
 
+    build_web_dashboard
     build_binary "banyan-cli"
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then

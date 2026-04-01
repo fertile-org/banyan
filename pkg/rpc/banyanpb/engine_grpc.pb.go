@@ -33,6 +33,13 @@ const (
 	EngineService_Scale_FullMethodName                 = "/banyan.v1.EngineService/Scale"
 	EngineService_StopTask_FullMethodName              = "/banyan.v1.EngineService/StopTask"
 	EngineService_GetDashboardData_FullMethodName      = "/banyan.v1.EngineService/GetDashboardData"
+	EngineService_GetClusterOverview_FullMethodName    = "/banyan.v1.EngineService/GetClusterOverview"
+	EngineService_ListAgents_FullMethodName            = "/banyan.v1.EngineService/ListAgents"
+	EngineService_ListDeployments_FullMethodName       = "/banyan.v1.EngineService/ListDeployments"
+	EngineService_GetDeploymentDetail_FullMethodName   = "/banyan.v1.EngineService/GetDeploymentDetail"
+	EngineService_ListContainers_FullMethodName        = "/banyan.v1.EngineService/ListContainers"
+	EngineService_ListEvents_FullMethodName            = "/banyan.v1.EngineService/ListEvents"
+	EngineService_GetRecentLogs_FullMethodName         = "/banyan.v1.EngineService/GetRecentLogs"
 	EngineService_CreateSecret_FullMethodName          = "/banyan.v1.EngineService/CreateSecret"
 	EngineService_ListSecrets_FullMethodName           = "/banyan.v1.EngineService/ListSecrets"
 	EngineService_GetSecret_FullMethodName             = "/banyan.v1.EngineService/GetSecret"
@@ -61,8 +68,16 @@ type EngineServiceClient interface {
 	Scale(ctx context.Context, in *ScaleRequest, opts ...grpc.CallOption) (*ScaleResponse, error)
 	// Operational RPCs (dashboard actions)
 	StopTask(ctx context.Context, in *StopTaskRequest, opts ...grpc.CallOption) (*StopTaskResponse, error)
-	// Dashboard RPCs
+	// Dashboard RPCs (monolithic — used by CLI TUI)
 	GetDashboardData(ctx context.Context, in *GetDashboardDataRequest, opts ...grpc.CallOption) (*GetDashboardDataResponse, error)
+	// Web dashboard RPCs (per-page, lighter payloads)
+	GetClusterOverview(ctx context.Context, in *GetClusterOverviewRequest, opts ...grpc.CallOption) (*GetClusterOverviewResponse, error)
+	ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error)
+	ListDeployments(ctx context.Context, in *ListDeploymentsRequest, opts ...grpc.CallOption) (*ListDeploymentsResponse, error)
+	GetDeploymentDetail(ctx context.Context, in *GetDeploymentDetailRequest, opts ...grpc.CallOption) (*GetDeploymentDetailResponse, error)
+	ListContainers(ctx context.Context, in *ListContainersRequest, opts ...grpc.CallOption) (*ListContainersResponse, error)
+	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
+	GetRecentLogs(ctx context.Context, in *GetRecentLogsRequest, opts ...grpc.CallOption) (*GetRecentLogsResponse, error)
 	// Secret RPCs
 	CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error)
 	ListSecrets(ctx context.Context, in *ListSecretsRequest, opts ...grpc.CallOption) (*ListSecretsResponse, error)
@@ -227,6 +242,76 @@ func (c *engineServiceClient) GetDashboardData(ctx context.Context, in *GetDashb
 	return out, nil
 }
 
+func (c *engineServiceClient) GetClusterOverview(ctx context.Context, in *GetClusterOverviewRequest, opts ...grpc.CallOption) (*GetClusterOverviewResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetClusterOverviewResponse)
+	err := c.cc.Invoke(ctx, EngineService_GetClusterOverview_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ListAgents(ctx context.Context, in *ListAgentsRequest, opts ...grpc.CallOption) (*ListAgentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentsResponse)
+	err := c.cc.Invoke(ctx, EngineService_ListAgents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ListDeployments(ctx context.Context, in *ListDeploymentsRequest, opts ...grpc.CallOption) (*ListDeploymentsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListDeploymentsResponse)
+	err := c.cc.Invoke(ctx, EngineService_ListDeployments_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) GetDeploymentDetail(ctx context.Context, in *GetDeploymentDetailRequest, opts ...grpc.CallOption) (*GetDeploymentDetailResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetDeploymentDetailResponse)
+	err := c.cc.Invoke(ctx, EngineService_GetDeploymentDetail_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ListContainers(ctx context.Context, in *ListContainersRequest, opts ...grpc.CallOption) (*ListContainersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListContainersResponse)
+	err := c.cc.Invoke(ctx, EngineService_ListContainers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListEventsResponse)
+	err := c.cc.Invoke(ctx, EngineService_ListEvents_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) GetRecentLogs(ctx context.Context, in *GetRecentLogsRequest, opts ...grpc.CallOption) (*GetRecentLogsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRecentLogsResponse)
+	err := c.cc.Invoke(ctx, EngineService_GetRecentLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *engineServiceClient) CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateSecretResponse)
@@ -289,8 +374,16 @@ type EngineServiceServer interface {
 	Scale(context.Context, *ScaleRequest) (*ScaleResponse, error)
 	// Operational RPCs (dashboard actions)
 	StopTask(context.Context, *StopTaskRequest) (*StopTaskResponse, error)
-	// Dashboard RPCs
+	// Dashboard RPCs (monolithic — used by CLI TUI)
 	GetDashboardData(context.Context, *GetDashboardDataRequest) (*GetDashboardDataResponse, error)
+	// Web dashboard RPCs (per-page, lighter payloads)
+	GetClusterOverview(context.Context, *GetClusterOverviewRequest) (*GetClusterOverviewResponse, error)
+	ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error)
+	ListDeployments(context.Context, *ListDeploymentsRequest) (*ListDeploymentsResponse, error)
+	GetDeploymentDetail(context.Context, *GetDeploymentDetailRequest) (*GetDeploymentDetailResponse, error)
+	ListContainers(context.Context, *ListContainersRequest) (*ListContainersResponse, error)
+	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)
+	GetRecentLogs(context.Context, *GetRecentLogsRequest) (*GetRecentLogsResponse, error)
 	// Secret RPCs
 	CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error)
 	ListSecrets(context.Context, *ListSecretsRequest) (*ListSecretsResponse, error)
@@ -347,6 +440,27 @@ func (UnimplementedEngineServiceServer) StopTask(context.Context, *StopTaskReque
 }
 func (UnimplementedEngineServiceServer) GetDashboardData(context.Context, *GetDashboardDataRequest) (*GetDashboardDataResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetDashboardData not implemented")
+}
+func (UnimplementedEngineServiceServer) GetClusterOverview(context.Context, *GetClusterOverviewRequest) (*GetClusterOverviewResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetClusterOverview not implemented")
+}
+func (UnimplementedEngineServiceServer) ListAgents(context.Context, *ListAgentsRequest) (*ListAgentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAgents not implemented")
+}
+func (UnimplementedEngineServiceServer) ListDeployments(context.Context, *ListDeploymentsRequest) (*ListDeploymentsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListDeployments not implemented")
+}
+func (UnimplementedEngineServiceServer) GetDeploymentDetail(context.Context, *GetDeploymentDetailRequest) (*GetDeploymentDetailResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetDeploymentDetail not implemented")
+}
+func (UnimplementedEngineServiceServer) ListContainers(context.Context, *ListContainersRequest) (*ListContainersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListContainers not implemented")
+}
+func (UnimplementedEngineServiceServer) ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListEvents not implemented")
+}
+func (UnimplementedEngineServiceServer) GetRecentLogs(context.Context, *GetRecentLogsRequest) (*GetRecentLogsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRecentLogs not implemented")
 }
 func (UnimplementedEngineServiceServer) CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateSecret not implemented")
@@ -626,6 +740,132 @@ func _EngineService_GetDashboardData_Handler(srv interface{}, ctx context.Contex
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineService_GetClusterOverview_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetClusterOverviewRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).GetClusterOverview(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_GetClusterOverview_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).GetClusterOverview(ctx, req.(*GetClusterOverviewRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ListAgents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ListAgents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ListAgents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ListAgents(ctx, req.(*ListAgentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ListDeployments_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListDeploymentsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ListDeployments(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ListDeployments_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ListDeployments(ctx, req.(*ListDeploymentsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_GetDeploymentDetail_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDeploymentDetailRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).GetDeploymentDetail(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_GetDeploymentDetail_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).GetDeploymentDetail(ctx, req.(*GetDeploymentDetailRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ListContainers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListContainersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ListContainers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ListContainers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ListContainers(ctx, req.(*ListContainersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ListEvents_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListEventsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ListEvents(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ListEvents_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ListEvents(ctx, req.(*ListEventsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_GetRecentLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRecentLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).GetRecentLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_GetRecentLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).GetRecentLogs(ctx, req.(*GetRecentLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _EngineService_CreateSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateSecretRequest)
 	if err := dec(in); err != nil {
@@ -756,6 +996,34 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetDashboardData",
 			Handler:    _EngineService_GetDashboardData_Handler,
+		},
+		{
+			MethodName: "GetClusterOverview",
+			Handler:    _EngineService_GetClusterOverview_Handler,
+		},
+		{
+			MethodName: "ListAgents",
+			Handler:    _EngineService_ListAgents_Handler,
+		},
+		{
+			MethodName: "ListDeployments",
+			Handler:    _EngineService_ListDeployments_Handler,
+		},
+		{
+			MethodName: "GetDeploymentDetail",
+			Handler:    _EngineService_GetDeploymentDetail_Handler,
+		},
+		{
+			MethodName: "ListContainers",
+			Handler:    _EngineService_ListContainers_Handler,
+		},
+		{
+			MethodName: "ListEvents",
+			Handler:    _EngineService_ListEvents_Handler,
+		},
+		{
+			MethodName: "GetRecentLogs",
+			Handler:    _EngineService_GetRecentLogs_Handler,
 		},
 		{
 			MethodName: "CreateSecret",

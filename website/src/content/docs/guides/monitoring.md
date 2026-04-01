@@ -1,15 +1,92 @@
 ---
 title: Monitoring
-description: Monitor your cluster with the built-in terminal dashboard and Prometheus metrics.
+description: Monitor your cluster with the built-in dashboards and Prometheus metrics.
 sidebar:
   order: 4
 ---
 
-Monitor your entire Banyan cluster — engine health, agents, deployments, and containers — from the terminal or with your existing Prometheus setup.
+Monitor your entire Banyan cluster — engine health, agents, deployments, and containers — from a web browser, the terminal, or your existing Prometheus setup.
 
 :::note
-You need a working `banyan-cli` connection to the engine before using the dashboard. If you haven't set this up yet, follow the [Quickstart](/getting-started/quickstart/) or [Secure Your Cluster](/guides/authentication/) guide first.
+You need a working `banyan-cli` connection to the engine before using either dashboard. If you haven't set this up yet, follow the [Quickstart](/getting-started/quickstart/) or [Secure Your Cluster](/guides/authentication/) guide first.
 :::
+
+## Web dashboard
+
+Open the dashboard in your browser:
+
+```bash
+banyan-cli dashboard --web
+```
+
+```
+  Banyan Dashboard
+
+  Local:   http://localhost:3000
+  Engine:  http://10.200.0.1:9091
+
+  Press Ctrl+C to stop
+```
+
+The CLI starts a local web server, opens your browser, and proxies API calls to the engine. The dashboard is embedded in the CLI binary — no npm, no Node.js runtime, no separate installation.
+
+<div class="not-content" style="margin: 1.5rem 0; text-align: center;">
+  <video autoplay loop muted playsinline style="max-width: 100%; border-radius: 8px; border: 1px solid var(--sl-color-gray-5); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);">
+    <source src="/dashboard/demo-dashboard-web.webm" type="video/webm" />
+  </video>
+</div>
+
+### Pages
+
+| Page | What it shows |
+|------|---------------|
+| Overview | Stat cards (engines, agents, deployments, containers, tasks), containers table, recent events |
+| Agents | All agents with CPU, memory, disk, subnet, tags. Click to see agent detail |
+| Deployments | All deployments with health, services, tags. Click to see services and containers |
+| Containers | Flat container list with status, CPU, memory, sparklines. Filter by name, service, or agent |
+| Engine | Engine status, uptime, CPU/memory/disk with progress bars |
+| Events | Full event log with severity badges and timestamps |
+| Logs | Container log viewer — select a container, fetch recent lines, auto-refresh |
+
+### Navigation
+
+Click any row to drill into its detail page. Agent names, deployment names, and container names are cross-linked — click an agent name on a container row to jump to that agent's detail page.
+
+Press `Ctrl+K` (or `Cmd+K` on Mac) to open the command palette. Type to search across pages, agents, deployments, and containers. Arrow keys to navigate, Enter to select.
+
+### Custom port
+
+```bash
+banyan-cli dashboard --web --port 8080
+```
+
+### Running for your team
+
+To make the dashboard available to your team, run it as a systemd service behind a reverse proxy:
+
+```ini
+# /etc/systemd/system/banyan-dashboard.service
+[Unit]
+Description=Banyan Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/banyan-cli dashboard --web --port 3000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now banyan-dashboard
+```
+
+Then configure nginx or caddy to reverse proxy to `localhost:3000`.
+
+---
 
 ## Terminal dashboard
 
@@ -209,4 +286,3 @@ engine:
 
 - [CLI Reference — dashboard](/reference/cli/#dashboard) for all flags and keyboard shortcuts
 - [Redeployment](/guides/redeployment/) to update running apps with zero downtime
-- [Roadmap](/roadmap/) for upcoming features like per-container metrics and resource-aware scheduling

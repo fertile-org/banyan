@@ -5,16 +5,42 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"time"
 
 	"connectrpc.com/connect"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/http2/h2c"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb/banyanpbconnect"
 )
+
+// dashboardJSONCodec is a connect JSON codec that emits zero/default values.
+// Standard protojson omits zero values (e.g., cpuPercent: 0.0), which makes the
+// web dashboard think data is missing. This codec ensures all fields are present.
+type dashboardJSONCodec struct{}
+
+func (c *dashboardJSONCodec) Name() string { return "json" }
+
+func (c *dashboardJSONCodec) Marshal(v any) ([]byte, error) {
+	msg, ok := v.(proto.Message)
+	if !ok {
+		return json.Marshal(v)
+	}
+	return protojson.MarshalOptions{EmitUnpopulated: true}.Marshal(msg)
+}
+
+func (c *dashboardJSONCodec) Unmarshal(data []byte, v any) error {
+	msg, ok := v.(proto.Message)
+	if !ok {
+		return json.Unmarshal(data, v)
+	}
+	return protojson.UnmarshalOptions{DiscardUnknown: true}.Unmarshal(data, msg)
+}
 
 // connectAdapter wraps engineGRPCServer to implement the connect-go EngineServiceHandler interface.
 // This provides an HTTP/JSON API for the web dashboard while keeping the existing gRPC server
@@ -169,6 +195,64 @@ func (a *connectAdapter) GetDashboardData(ctx context.Context, req *connect.Requ
 	return connect.NewResponse(resp), nil
 }
 
+// --- Web dashboard page-level RPCs ---
+
+func (a *connectAdapter) GetClusterOverview(ctx context.Context, req *connect.Request[banyanpb.GetClusterOverviewRequest]) (*connect.Response[banyanpb.GetClusterOverviewResponse], error) {
+	resp, err := a.srv.GetClusterOverview(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (a *connectAdapter) ListAgents(ctx context.Context, req *connect.Request[banyanpb.ListAgentsRequest]) (*connect.Response[banyanpb.ListAgentsResponse], error) {
+	resp, err := a.srv.ListAgents(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (a *connectAdapter) ListDeployments(ctx context.Context, req *connect.Request[banyanpb.ListDeploymentsRequest]) (*connect.Response[banyanpb.ListDeploymentsResponse], error) {
+	resp, err := a.srv.ListDeployments(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (a *connectAdapter) GetDeploymentDetail(ctx context.Context, req *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error) {
+	resp, err := a.srv.GetDeploymentDetail(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (a *connectAdapter) ListContainers(ctx context.Context, req *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error) {
+	resp, err := a.srv.ListContainers(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (a *connectAdapter) ListEvents(ctx context.Context, req *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error) {
+	resp, err := a.srv.ListEvents(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
+func (a *connectAdapter) GetRecentLogs(ctx context.Context, req *connect.Request[banyanpb.GetRecentLogsRequest]) (*connect.Response[banyanpb.GetRecentLogsResponse], error) {
+	resp, err := a.srv.GetRecentLogs(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // --- Secret RPCs ---
 
 func (a *connectAdapter) CreateSecret(ctx context.Context, req *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error) {
@@ -223,7 +307,9 @@ func corsMiddleware(next http.Handler) http.Handler {
 func startConnectAPI(ctx context.Context, srv *engineGRPCServer, port string) error {
 	adapter := &connectAdapter{srv: srv}
 	mux := http.NewServeMux()
-	path, handler := banyanpbconnect.NewEngineServiceHandler(adapter)
+	path, handler := banyanpbconnect.NewEngineServiceHandler(adapter,
+		connect.WithCodec(&dashboardJSONCodec{}),
+	)
 	mux.Handle(path, corsMiddleware(handler))
 
 	httpServer := &http.Server{

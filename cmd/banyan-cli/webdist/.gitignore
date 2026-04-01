@@ -1,0 +1,3 @@
+# Build artifact — populated by `make web-build`
+static/
+!static/.gitkeep

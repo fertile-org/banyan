@@ -47,9 +47,9 @@ import { Card, CardGrid, Aside } from "@astrojs/starlight/components";
 
 <div class="not-content" style="margin: 2rem 0; text-align: center;">
   <video autoplay loop muted playsinline style="max-width: 100%; border-radius: 8px; border: 1px solid var(--sl-color-gray-5); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);">
-    <source src="/dashboard/demo-dashboard.mp4" type="video/mp4" />
+    <source src="/dashboard/demo-dashboard-web.webm" type="video/webm" />
   </video>
-  <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--sl-color-gray-3);"><code>banyan-cli dashboard</code> — monitor your entire cluster from the terminal</p>
+  <p style="margin-top: 0.75rem; font-size: 0.9rem; color: var(--sl-color-gray-3);"><code>banyan-cli dashboard --web</code> — monitor your cluster from the browser</p>
 </div>
 
 ## From one server to many
@@ -108,8 +108,8 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
   <Card title="Containers talk across servers" icon="seti:license">
     Services on different machines communicate as if they were on the same network. All traffic is encrypted with WireGuard. Banyan sets up the overlay network and DNS automatically.
   </Card>
-  <Card title="Live terminal dashboard" icon="seti:cake_php">
-    `banyan-cli dashboard` opens a real-time TUI — engine health, agent resources, deployments, container status, and cluster events, all updating live. Navigate views with keyboard shortcuts, drill into details, and use the built-in command palette. No Grafana setup, no browser — monitoring is one command away.
+  <Card title="Built-in monitoring" icon="seti:cake_php">
+    `banyan-cli dashboard --web` opens a live web dashboard in your browser — cluster overview, agent metrics, container status, log viewer, and command palette. Prefer the terminal? `banyan-cli dashboard` gives you the same data as a TUI. Both are built into the CLI. No Grafana setup, no separate server — monitoring is one command away.
   </Card>
   <Card title="Auto-scaling built in" icon="approve-check">
     Define `target_cpu` in your manifest and Banyan scales replicas automatically. Scale up under load, scale down when idle. Graceful drain prevents dropped requests. Or scale manually with `banyan-cli scale my-app api=5`.

@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo demo-tui demo-web web web-build
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -84,8 +84,14 @@ else
 	cd $(MODULE) && go test ./...
 endif
 
-# Build all binaries
-build:
+# Build all binaries (web dashboard embedded in CLI)
+build: web-build
+	go build -o bin/banyan-engine ./cmd/banyan-engine
+	go build -o bin/banyan-agent ./cmd/banyan-agent
+	go build -o bin/banyan-cli ./cmd/banyan-cli
+
+# Build all binaries without web dashboard (faster, for backend dev)
+build-quick:
 	go build -o bin/banyan-engine ./cmd/banyan-engine
 	go build -o bin/banyan-agent ./cmd/banyan-agent
 	go build -o bin/banyan-cli ./cmd/banyan-cli
@@ -124,6 +130,29 @@ test-integration-list:
 	@echo "Available integration tests:"
 	@find ./test/integration -name "run_*.go" -type f | sort
 
+# Record both terminal and web demos
+demo: demo-tui demo-web
+
 # Record terminal demo (requires vhs: https://github.com/charmbracelet/vhs)
-demo:
+demo-tui:
 	sudo env VHS_NO_SANDBOX=true $(shell which vhs) demo.tape
+
+# Record web dashboard demo (requires running dashboard on :3000)
+# Install chromium first: cd web && npx playwright install chromium
+demo-web:
+	cd web && npm run demo
+
+# ============================================================================
+# Web Dashboard
+# ============================================================================
+
+# Start web dashboard dev server (port 3000, proxies API to :9091)
+web:
+	cd web && npm run dev
+
+# Build web dashboard for production and embed in CLI
+web-build:
+	cd web && npm run build
+	rm -rf cmd/banyan-cli/webdist/static
+	mkdir -p cmd/banyan-cli/webdist/static
+	cp -r web/dist/* cmd/banyan-cli/webdist/static/

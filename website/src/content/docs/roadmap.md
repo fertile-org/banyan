@@ -337,3 +337,13 @@ Remove the sudo requirement from `banyan-cli`. Engine and agent need root (they 
 - **Migration path**: `banyan-cli init` detects existing `/etc/banyan/` config and offers to migrate CLI section to `~/.config/banyan/`. Existing root-based setups keep working.
 - **Key storage**: CLI private key moves to `~/.config/banyan/keys/cli.key` with `0600` permissions (user-owned, not root-owned).
 - **`banyan-cli login`**: No longer needs sudo — sets up userspace WireGuard tunnel in the background or per-command.
+
+---
+
+## Milestone 16 — Dashboard: Manifest Editor & Container Exec
+
+Extend the web dashboard from a monitoring tool into a deployment interface.
+
+- **Compose manifest editor**: Edit docker-compose.yaml directly in the web dashboard with syntax highlighting, validation, diff preview, and one-click deploy. Turns the dashboard from an operations tool into a deployment interface — the Vercel/Netlify moment for container orchestration
+- **Terminal-in-browser**: WebSocket terminal into any running container directly from the web dashboard. Click a container, click "Shell", get an interactive terminal. Requires a new `ExecContainer` RPC, agent exec capability (`nerdctl exec`), WebSocket proxy (xterm.js), and a security model (RBAC needed before allowing exec permissions)
+- **TUI/Web feature parity policy**: Define whether the TUI dashboard is kept in feature-sync with the web, allowed to diverge, or eventually deprecated. Depends on real user feedback after both dashboards ship

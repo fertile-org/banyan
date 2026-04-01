@@ -5,7 +5,9 @@ package engine
 
 import (
 	"context"
+	"io"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
@@ -73,6 +75,48 @@ func (s *engineGRPCServer) ListEvents(_ context.Context, req *banyanpb.ListEvent
 	}
 	return &banyanpb.ListEventsResponse{
 		Events: s.collectRecentEvents(limit),
+	}, nil
+}
+
+// GetRecentLogs returns the last N lines of a container's logs as a unary response.
+// Unlike GetLogs (streaming), this returns immediately with buffered output.
+func (s *engineGRPCServer) GetRecentLogs(ctx context.Context, req *banyanpb.GetRecentLogsRequest) (*banyanpb.GetRecentLogsResponse, error) {
+	tail := req.Tail
+	if tail <= 0 {
+		tail = 500
+	}
+
+	task, node, err := s.findContainerAgent(ctx, req.ContainerName)
+	if err != nil {
+		return nil, err
+	}
+	if node.APIAddress == "" {
+		return &banyanpb.GetRecentLogsResponse{ContainerName: req.ContainerName}, nil
+	}
+
+	reader, err := streamAgentLogs(ctx, node.APIAddress, task.ContainerName, false, tail)
+	if err != nil {
+		return nil, err
+	}
+	defer reader.Close()
+
+	data, err := io.ReadAll(reader)
+	if err != nil && len(data) == 0 {
+		return nil, err
+	}
+
+	// Split into lines, remove trailing empty line from final newline
+	raw := strings.Split(string(data), "\n")
+	lines := make([]string, 0, len(raw))
+	for _, line := range raw {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+
+	return &banyanpb.GetRecentLogsResponse{
+		Lines:         lines,
+		ContainerName: req.ContainerName,
 	}, nil
 }
 

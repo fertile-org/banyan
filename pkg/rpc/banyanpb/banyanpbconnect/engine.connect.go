@@ -82,6 +82,9 @@ const (
 	// EngineServiceListEventsProcedure is the fully-qualified name of the EngineService's ListEvents
 	// RPC.
 	EngineServiceListEventsProcedure = "/banyan.v1.EngineService/ListEvents"
+	// EngineServiceGetRecentLogsProcedure is the fully-qualified name of the EngineService's
+	// GetRecentLogs RPC.
+	EngineServiceGetRecentLogsProcedure = "/banyan.v1.EngineService/GetRecentLogs"
 	// EngineServiceCreateSecretProcedure is the fully-qualified name of the EngineService's
 	// CreateSecret RPC.
 	EngineServiceCreateSecretProcedure = "/banyan.v1.EngineService/CreateSecret"
@@ -122,6 +125,7 @@ type EngineServiceClient interface {
 	GetDeploymentDetail(context.Context, *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error)
 	ListContainers(context.Context, *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error)
 	ListEvents(context.Context, *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error)
+	GetRecentLogs(context.Context, *connect.Request[banyanpb.GetRecentLogsRequest]) (*connect.Response[banyanpb.GetRecentLogsResponse], error)
 	// Secret RPCs
 	CreateSecret(context.Context, *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error)
 	ListSecrets(context.Context, *connect.Request[banyanpb.ListSecretsRequest]) (*connect.Response[banyanpb.ListSecretsResponse], error)
@@ -260,6 +264,12 @@ func NewEngineServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(engineServiceMethods.ByName("ListEvents")),
 			connect.WithClientOptions(opts...),
 		),
+		getRecentLogs: connect.NewClient[banyanpb.GetRecentLogsRequest, banyanpb.GetRecentLogsResponse](
+			httpClient,
+			baseURL+EngineServiceGetRecentLogsProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("GetRecentLogs")),
+			connect.WithClientOptions(opts...),
+		),
 		createSecret: connect.NewClient[banyanpb.CreateSecretRequest, banyanpb.CreateSecretResponse](
 			httpClient,
 			baseURL+EngineServiceCreateSecretProcedure,
@@ -309,6 +319,7 @@ type engineServiceClient struct {
 	getDeploymentDetail   *connect.Client[banyanpb.GetDeploymentDetailRequest, banyanpb.GetDeploymentDetailResponse]
 	listContainers        *connect.Client[banyanpb.ListContainersRequest, banyanpb.ListContainersResponse]
 	listEvents            *connect.Client[banyanpb.ListEventsRequest, banyanpb.ListEventsResponse]
+	getRecentLogs         *connect.Client[banyanpb.GetRecentLogsRequest, banyanpb.GetRecentLogsResponse]
 	createSecret          *connect.Client[banyanpb.CreateSecretRequest, banyanpb.CreateSecretResponse]
 	listSecrets           *connect.Client[banyanpb.ListSecretsRequest, banyanpb.ListSecretsResponse]
 	getSecret             *connect.Client[banyanpb.GetSecretRequest, banyanpb.GetSecretResponse]
@@ -415,6 +426,11 @@ func (c *engineServiceClient) ListEvents(ctx context.Context, req *connect.Reque
 	return c.listEvents.CallUnary(ctx, req)
 }
 
+// GetRecentLogs calls banyan.v1.EngineService.GetRecentLogs.
+func (c *engineServiceClient) GetRecentLogs(ctx context.Context, req *connect.Request[banyanpb.GetRecentLogsRequest]) (*connect.Response[banyanpb.GetRecentLogsResponse], error) {
+	return c.getRecentLogs.CallUnary(ctx, req)
+}
+
 // CreateSecret calls banyan.v1.EngineService.CreateSecret.
 func (c *engineServiceClient) CreateSecret(ctx context.Context, req *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error) {
 	return c.createSecret.CallUnary(ctx, req)
@@ -462,6 +478,7 @@ type EngineServiceHandler interface {
 	GetDeploymentDetail(context.Context, *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error)
 	ListContainers(context.Context, *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error)
 	ListEvents(context.Context, *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error)
+	GetRecentLogs(context.Context, *connect.Request[banyanpb.GetRecentLogsRequest]) (*connect.Response[banyanpb.GetRecentLogsResponse], error)
 	// Secret RPCs
 	CreateSecret(context.Context, *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error)
 	ListSecrets(context.Context, *connect.Request[banyanpb.ListSecretsRequest]) (*connect.Response[banyanpb.ListSecretsResponse], error)
@@ -596,6 +613,12 @@ func NewEngineServiceHandler(svc EngineServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(engineServiceMethods.ByName("ListEvents")),
 		connect.WithHandlerOptions(opts...),
 	)
+	engineServiceGetRecentLogsHandler := connect.NewUnaryHandler(
+		EngineServiceGetRecentLogsProcedure,
+		svc.GetRecentLogs,
+		connect.WithSchema(engineServiceMethods.ByName("GetRecentLogs")),
+		connect.WithHandlerOptions(opts...),
+	)
 	engineServiceCreateSecretHandler := connect.NewUnaryHandler(
 		EngineServiceCreateSecretProcedure,
 		svc.CreateSecret,
@@ -662,6 +685,8 @@ func NewEngineServiceHandler(svc EngineServiceHandler, opts ...connect.HandlerOp
 			engineServiceListContainersHandler.ServeHTTP(w, r)
 		case EngineServiceListEventsProcedure:
 			engineServiceListEventsHandler.ServeHTTP(w, r)
+		case EngineServiceGetRecentLogsProcedure:
+			engineServiceGetRecentLogsHandler.ServeHTTP(w, r)
 		case EngineServiceCreateSecretProcedure:
 			engineServiceCreateSecretHandler.ServeHTTP(w, r)
 		case EngineServiceListSecretsProcedure:
@@ -757,6 +782,10 @@ func (UnimplementedEngineServiceHandler) ListContainers(context.Context, *connec
 
 func (UnimplementedEngineServiceHandler) ListEvents(context.Context, *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.ListEvents is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) GetRecentLogs(context.Context, *connect.Request[banyanpb.GetRecentLogsRequest]) (*connect.Response[banyanpb.GetRecentLogsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.GetRecentLogs is not implemented"))
 }
 
 func (UnimplementedEngineServiceHandler) CreateSecret(context.Context, *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error) {

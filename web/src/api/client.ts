@@ -95,6 +95,10 @@ export function listEvents(limit?: number): Promise<{ events?: ClusterEvent[] }>
   return rpc("ListEvents", { limit: limit ?? 0 });
 }
 
+export function getRecentLogs(containerName: string, tail: number = 500): Promise<{ lines?: string[]; containerName?: string }> {
+  return rpc("GetRecentLogs", { containerName, tail });
+}
+
 // --- Action APIs ---
 
 export function stopTask(req: StopTaskRequest): Promise<StopTaskResponse> {

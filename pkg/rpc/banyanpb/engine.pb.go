@@ -4983,6 +4983,110 @@ func (x *ListEventsResponse) GetEvents() []*ClusterEvent {
 	return nil
 }
 
+type GetRecentLogsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ContainerName string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
+	Tail          int32                  `protobuf:"varint,2,opt,name=tail,proto3" json:"tail,omitempty"` // number of lines (0 = default 500)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRecentLogsRequest) Reset() {
+	*x = GetRecentLogsRequest{}
+	mi := &file_engine_proto_msgTypes[78]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRecentLogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRecentLogsRequest) ProtoMessage() {}
+
+func (x *GetRecentLogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[78]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRecentLogsRequest.ProtoReflect.Descriptor instead.
+func (*GetRecentLogsRequest) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{78}
+}
+
+func (x *GetRecentLogsRequest) GetContainerName() string {
+	if x != nil {
+		return x.ContainerName
+	}
+	return ""
+}
+
+func (x *GetRecentLogsRequest) GetTail() int32 {
+	if x != nil {
+		return x.Tail
+	}
+	return 0
+}
+
+type GetRecentLogsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Lines         []string               `protobuf:"bytes,1,rep,name=lines,proto3" json:"lines,omitempty"`
+	ContainerName string                 `protobuf:"bytes,2,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetRecentLogsResponse) Reset() {
+	*x = GetRecentLogsResponse{}
+	mi := &file_engine_proto_msgTypes[79]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetRecentLogsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetRecentLogsResponse) ProtoMessage() {}
+
+func (x *GetRecentLogsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_engine_proto_msgTypes[79]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetRecentLogsResponse.ProtoReflect.Descriptor instead.
+func (*GetRecentLogsResponse) Descriptor() ([]byte, []int) {
+	return file_engine_proto_rawDescGZIP(), []int{79}
+}
+
+func (x *GetRecentLogsResponse) GetLines() []string {
+	if x != nil {
+		return x.Lines
+	}
+	return nil
+}
+
+func (x *GetRecentLogsResponse) GetContainerName() string {
+	if x != nil {
+		return x.ContainerName
+	}
+	return ""
+}
+
 var File_engine_proto protoreflect.FileDescriptor
 
 const file_engine_proto_rawDesc = "" +
@@ -5410,7 +5514,13 @@ const file_engine_proto_rawDesc = "" +
 	"\x11ListEventsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\"E\n" +
 	"\x12ListEventsResponse\x12/\n" +
-	"\x06events\x18\x01 \x03(\v2\x17.banyan.v1.ClusterEventR\x06events2\xe4\x0e\n" +
+	"\x06events\x18\x01 \x03(\v2\x17.banyan.v1.ClusterEventR\x06events\"Q\n" +
+	"\x14GetRecentLogsRequest\x12%\n" +
+	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x12\n" +
+	"\x04tail\x18\x02 \x01(\x05R\x04tail\"T\n" +
+	"\x15GetRecentLogsResponse\x12\x14\n" +
+	"\x05lines\x18\x01 \x03(\tR\x05lines\x12%\n" +
+	"\x0econtainer_name\x18\x02 \x01(\tR\rcontainerName2\xb8\x0f\n" +
 	"\rEngineService\x12C\n" +
 	"\bRegister\x12\x1a.banyan.v1.RegisterRequest\x1a\x1b.banyan.v1.RegisterResponse\x12F\n" +
 	"\tHeartbeat\x12\x1b.banyan.v1.HeartbeatRequest\x1a\x1c.banyan.v1.HeartbeatResponse\x12F\n" +
@@ -5433,7 +5543,8 @@ const file_engine_proto_rawDesc = "" +
 	"\x13GetDeploymentDetail\x12%.banyan.v1.GetDeploymentDetailRequest\x1a&.banyan.v1.GetDeploymentDetailResponse\x12U\n" +
 	"\x0eListContainers\x12 .banyan.v1.ListContainersRequest\x1a!.banyan.v1.ListContainersResponse\x12I\n" +
 	"\n" +
-	"ListEvents\x12\x1c.banyan.v1.ListEventsRequest\x1a\x1d.banyan.v1.ListEventsResponse\x12O\n" +
+	"ListEvents\x12\x1c.banyan.v1.ListEventsRequest\x1a\x1d.banyan.v1.ListEventsResponse\x12R\n" +
+	"\rGetRecentLogs\x12\x1f.banyan.v1.GetRecentLogsRequest\x1a .banyan.v1.GetRecentLogsResponse\x12O\n" +
 	"\fCreateSecret\x12\x1e.banyan.v1.CreateSecretRequest\x1a\x1f.banyan.v1.CreateSecretResponse\x12L\n" +
 	"\vListSecrets\x12\x1d.banyan.v1.ListSecretsRequest\x1a\x1e.banyan.v1.ListSecretsResponse\x12F\n" +
 	"\tGetSecret\x12\x1b.banyan.v1.GetSecretRequest\x1a\x1c.banyan.v1.GetSecretResponse\x12O\n" +
@@ -5451,7 +5562,7 @@ func file_engine_proto_rawDescGZIP() []byte {
 	return file_engine_proto_rawDescData
 }
 
-var file_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 89)
+var file_engine_proto_msgTypes = make([]protoimpl.MessageInfo, 91)
 var file_engine_proto_goTypes = []any{
 	(*ScaleRequest)(nil),                  // 0: banyan.v1.ScaleRequest
 	(*ScaleResponse)(nil),                 // 1: banyan.v1.ScaleResponse
@@ -5531,22 +5642,24 @@ var file_engine_proto_goTypes = []any{
 	(*ContainerInfo)(nil),                 // 75: banyan.v1.ContainerInfo
 	(*ListEventsRequest)(nil),             // 76: banyan.v1.ListEventsRequest
 	(*ListEventsResponse)(nil),            // 77: banyan.v1.ListEventsResponse
-	nil,                                   // 78: banyan.v1.ScaleRequest.ReplicasEntry
-	nil,                                   // 79: banyan.v1.ScaleResponse.PreviousEntry
-	nil,                                   // 80: banyan.v1.ScaleResponse.CurrentEntry
-	nil,                                   // 81: banyan.v1.TaskRecord.ResolvedSecretsEntry
-	nil,                                   // 82: banyan.v1.Manifest.ServicesEntry
-	nil,                                   // 83: banyan.v1.Manifest.VolumesEntry
-	nil,                                   // 84: banyan.v1.ManifestService.DependsOnEntry
-	nil,                                   // 85: banyan.v1.VolumeConfig.DriverOptsEntry
-	nil,                                   // 86: banyan.v1.DeploymentInfo.ServicesEntry
-	nil,                                   // 87: banyan.v1.ServiceInfo.DependsOnEntry
-	nil,                                   // 88: banyan.v1.ClusterSummary.TasksByStatusEntry
+	(*GetRecentLogsRequest)(nil),          // 78: banyan.v1.GetRecentLogsRequest
+	(*GetRecentLogsResponse)(nil),         // 79: banyan.v1.GetRecentLogsResponse
+	nil,                                   // 80: banyan.v1.ScaleRequest.ReplicasEntry
+	nil,                                   // 81: banyan.v1.ScaleResponse.PreviousEntry
+	nil,                                   // 82: banyan.v1.ScaleResponse.CurrentEntry
+	nil,                                   // 83: banyan.v1.TaskRecord.ResolvedSecretsEntry
+	nil,                                   // 84: banyan.v1.Manifest.ServicesEntry
+	nil,                                   // 85: banyan.v1.Manifest.VolumesEntry
+	nil,                                   // 86: banyan.v1.ManifestService.DependsOnEntry
+	nil,                                   // 87: banyan.v1.VolumeConfig.DriverOptsEntry
+	nil,                                   // 88: banyan.v1.DeploymentInfo.ServicesEntry
+	nil,                                   // 89: banyan.v1.ServiceInfo.DependsOnEntry
+	nil,                                   // 90: banyan.v1.ClusterSummary.TasksByStatusEntry
 }
 var file_engine_proto_depIdxs = []int32{
-	78, // 0: banyan.v1.ScaleRequest.replicas:type_name -> banyan.v1.ScaleRequest.ReplicasEntry
-	79, // 1: banyan.v1.ScaleResponse.previous:type_name -> banyan.v1.ScaleResponse.PreviousEntry
-	80, // 2: banyan.v1.ScaleResponse.current:type_name -> banyan.v1.ScaleResponse.CurrentEntry
+	80, // 0: banyan.v1.ScaleRequest.replicas:type_name -> banyan.v1.ScaleRequest.ReplicasEntry
+	81, // 1: banyan.v1.ScaleResponse.previous:type_name -> banyan.v1.ScaleResponse.PreviousEntry
+	82, // 2: banyan.v1.ScaleResponse.current:type_name -> banyan.v1.ScaleResponse.CurrentEntry
 	5,  // 3: banyan.v1.RegisterResponse.active_containers:type_name -> banyan.v1.ActiveContainer
 	2,  // 4: banyan.v1.HeartbeatRequest.system_metrics:type_name -> banyan.v1.SystemMetrics
 	8,  // 5: banyan.v1.HeartbeatResponse.vpc_peers:type_name -> banyan.v1.VPCPeer
@@ -5556,17 +5669,17 @@ var file_engine_proto_depIdxs = []int32{
 	15, // 9: banyan.v1.ReportContainerHealthRequest.containers:type_name -> banyan.v1.ContainerStatus
 	27, // 10: banyan.v1.TaskRecord.healthcheck:type_name -> banyan.v1.ManifestHealthcheck
 	23, // 11: banyan.v1.TaskRecord.volumes:type_name -> banyan.v1.VolumeMount
-	81, // 12: banyan.v1.TaskRecord.resolved_secrets:type_name -> banyan.v1.TaskRecord.ResolvedSecretsEntry
+	83, // 12: banyan.v1.TaskRecord.resolved_secrets:type_name -> banyan.v1.TaskRecord.ResolvedSecretsEntry
 	21, // 13: banyan.v1.DeployRPCRequest.manifest:type_name -> banyan.v1.Manifest
-	82, // 14: banyan.v1.Manifest.services:type_name -> banyan.v1.Manifest.ServicesEntry
-	83, // 15: banyan.v1.Manifest.volumes:type_name -> banyan.v1.Manifest.VolumesEntry
+	84, // 14: banyan.v1.Manifest.services:type_name -> banyan.v1.Manifest.ServicesEntry
+	85, // 15: banyan.v1.Manifest.volumes:type_name -> banyan.v1.Manifest.VolumesEntry
 	28, // 16: banyan.v1.ManifestService.build:type_name -> banyan.v1.ManifestBuild
 	29, // 17: banyan.v1.ManifestService.deploy:type_name -> banyan.v1.ManifestDeploy
-	84, // 18: banyan.v1.ManifestService.depends_on:type_name -> banyan.v1.ManifestService.DependsOnEntry
+	86, // 18: banyan.v1.ManifestService.depends_on:type_name -> banyan.v1.ManifestService.DependsOnEntry
 	27, // 19: banyan.v1.ManifestService.healthcheck:type_name -> banyan.v1.ManifestHealthcheck
 	23, // 20: banyan.v1.ManifestService.volumes:type_name -> banyan.v1.VolumeMount
 	24, // 21: banyan.v1.VolumeMount.tmpfs:type_name -> banyan.v1.TmpfsOpt
-	85, // 22: banyan.v1.VolumeConfig.driver_opts:type_name -> banyan.v1.VolumeConfig.DriverOptsEntry
+	87, // 22: banyan.v1.VolumeConfig.driver_opts:type_name -> banyan.v1.VolumeConfig.DriverOptsEntry
 	33, // 23: banyan.v1.ManifestDeploy.placement:type_name -> banyan.v1.ManifestPlacement
 	31, // 24: banyan.v1.ManifestDeploy.resources:type_name -> banyan.v1.ManifestResources
 	30, // 25: banyan.v1.ManifestDeploy.autoscale:type_name -> banyan.v1.ManifestAutoscale
@@ -5574,9 +5687,9 @@ var file_engine_proto_depIdxs = []int32{
 	32, // 27: banyan.v1.ManifestResources.reservations:type_name -> banyan.v1.ResourceSpec
 	38, // 28: banyan.v1.GetStatusResponse.agents:type_name -> banyan.v1.AgentInfo
 	39, // 29: banyan.v1.GetStatusResponse.deployments:type_name -> banyan.v1.DeploymentInfo
-	86, // 30: banyan.v1.DeploymentInfo.services:type_name -> banyan.v1.DeploymentInfo.ServicesEntry
+	88, // 30: banyan.v1.DeploymentInfo.services:type_name -> banyan.v1.DeploymentInfo.ServicesEntry
 	41, // 31: banyan.v1.DeploymentInfo.tasks:type_name -> banyan.v1.TaskInfo
-	87, // 32: banyan.v1.ServiceInfo.depends_on:type_name -> banyan.v1.ServiceInfo.DependsOnEntry
+	89, // 32: banyan.v1.ServiceInfo.depends_on:type_name -> banyan.v1.ServiceInfo.DependsOnEntry
 	50, // 33: banyan.v1.GetDashboardDataResponse.engine:type_name -> banyan.v1.EngineStatus
 	51, // 34: banyan.v1.GetDashboardDataResponse.agents:type_name -> banyan.v1.AgentDetail
 	39, // 35: banyan.v1.GetDashboardDataResponse.deployments:type_name -> banyan.v1.DeploymentInfo
@@ -5584,7 +5697,7 @@ var file_engine_proto_depIdxs = []int32{
 	53, // 37: banyan.v1.GetDashboardDataResponse.recent_events:type_name -> banyan.v1.ClusterEvent
 	2,  // 38: banyan.v1.EngineStatus.system_metrics:type_name -> banyan.v1.SystemMetrics
 	2,  // 39: banyan.v1.AgentDetail.system_metrics:type_name -> banyan.v1.SystemMetrics
-	88, // 40: banyan.v1.ClusterSummary.tasks_by_status:type_name -> banyan.v1.ClusterSummary.TasksByStatusEntry
+	90, // 40: banyan.v1.ClusterSummary.tasks_by_status:type_name -> banyan.v1.ClusterSummary.TasksByStatusEntry
 	58, // 41: banyan.v1.ListSecretsResponse.secrets:type_name -> banyan.v1.SecretInfo
 	50, // 42: banyan.v1.GetClusterOverviewResponse.engine:type_name -> banyan.v1.EngineStatus
 	52, // 43: banyan.v1.GetClusterOverviewResponse.summary:type_name -> banyan.v1.ClusterSummary
@@ -5619,36 +5732,38 @@ var file_engine_proto_depIdxs = []int32{
 	71, // 72: banyan.v1.EngineService.GetDeploymentDetail:input_type -> banyan.v1.GetDeploymentDetailRequest
 	73, // 73: banyan.v1.EngineService.ListContainers:input_type -> banyan.v1.ListContainersRequest
 	76, // 74: banyan.v1.EngineService.ListEvents:input_type -> banyan.v1.ListEventsRequest
-	54, // 75: banyan.v1.EngineService.CreateSecret:input_type -> banyan.v1.CreateSecretRequest
-	56, // 76: banyan.v1.EngineService.ListSecrets:input_type -> banyan.v1.ListSecretsRequest
-	59, // 77: banyan.v1.EngineService.GetSecret:input_type -> banyan.v1.GetSecretRequest
-	61, // 78: banyan.v1.EngineService.DeleteSecret:input_type -> banyan.v1.DeleteSecretRequest
-	4,  // 79: banyan.v1.EngineService.Register:output_type -> banyan.v1.RegisterResponse
-	7,  // 80: banyan.v1.EngineService.Heartbeat:output_type -> banyan.v1.HeartbeatResponse
-	10, // 81: banyan.v1.EngineService.PollTasks:output_type -> banyan.v1.PollTasksResponse
-	13, // 82: banyan.v1.EngineService.ReportTaskResult:output_type -> banyan.v1.ReportTaskResultResponse
-	17, // 83: banyan.v1.EngineService.ReportContainerHealth:output_type -> banyan.v1.ReportContainerHealthResponse
-	20, // 84: banyan.v1.EngineService.Deploy:output_type -> banyan.v1.DeployRPCResponse
-	35, // 85: banyan.v1.EngineService.Down:output_type -> banyan.v1.DownRPCResponse
-	37, // 86: banyan.v1.EngineService.GetStatus:output_type -> banyan.v1.GetStatusResponse
-	43, // 87: banyan.v1.EngineService.GetLogs:output_type -> banyan.v1.GetLogsResponse
-	45, // 88: banyan.v1.EngineService.GetInfo:output_type -> banyan.v1.GetInfoResponse
-	47, // 89: banyan.v1.EngineService.Health:output_type -> banyan.v1.HealthResponse
-	1,  // 90: banyan.v1.EngineService.Scale:output_type -> banyan.v1.ScaleResponse
-	64, // 91: banyan.v1.EngineService.StopTask:output_type -> banyan.v1.StopTaskResponse
-	49, // 92: banyan.v1.EngineService.GetDashboardData:output_type -> banyan.v1.GetDashboardDataResponse
-	66, // 93: banyan.v1.EngineService.GetClusterOverview:output_type -> banyan.v1.GetClusterOverviewResponse
-	68, // 94: banyan.v1.EngineService.ListAgents:output_type -> banyan.v1.ListAgentsResponse
-	70, // 95: banyan.v1.EngineService.ListDeployments:output_type -> banyan.v1.ListDeploymentsResponse
-	72, // 96: banyan.v1.EngineService.GetDeploymentDetail:output_type -> banyan.v1.GetDeploymentDetailResponse
-	74, // 97: banyan.v1.EngineService.ListContainers:output_type -> banyan.v1.ListContainersResponse
-	77, // 98: banyan.v1.EngineService.ListEvents:output_type -> banyan.v1.ListEventsResponse
-	55, // 99: banyan.v1.EngineService.CreateSecret:output_type -> banyan.v1.CreateSecretResponse
-	57, // 100: banyan.v1.EngineService.ListSecrets:output_type -> banyan.v1.ListSecretsResponse
-	60, // 101: banyan.v1.EngineService.GetSecret:output_type -> banyan.v1.GetSecretResponse
-	62, // 102: banyan.v1.EngineService.DeleteSecret:output_type -> banyan.v1.DeleteSecretResponse
-	79, // [79:103] is the sub-list for method output_type
-	55, // [55:79] is the sub-list for method input_type
+	78, // 75: banyan.v1.EngineService.GetRecentLogs:input_type -> banyan.v1.GetRecentLogsRequest
+	54, // 76: banyan.v1.EngineService.CreateSecret:input_type -> banyan.v1.CreateSecretRequest
+	56, // 77: banyan.v1.EngineService.ListSecrets:input_type -> banyan.v1.ListSecretsRequest
+	59, // 78: banyan.v1.EngineService.GetSecret:input_type -> banyan.v1.GetSecretRequest
+	61, // 79: banyan.v1.EngineService.DeleteSecret:input_type -> banyan.v1.DeleteSecretRequest
+	4,  // 80: banyan.v1.EngineService.Register:output_type -> banyan.v1.RegisterResponse
+	7,  // 81: banyan.v1.EngineService.Heartbeat:output_type -> banyan.v1.HeartbeatResponse
+	10, // 82: banyan.v1.EngineService.PollTasks:output_type -> banyan.v1.PollTasksResponse
+	13, // 83: banyan.v1.EngineService.ReportTaskResult:output_type -> banyan.v1.ReportTaskResultResponse
+	17, // 84: banyan.v1.EngineService.ReportContainerHealth:output_type -> banyan.v1.ReportContainerHealthResponse
+	20, // 85: banyan.v1.EngineService.Deploy:output_type -> banyan.v1.DeployRPCResponse
+	35, // 86: banyan.v1.EngineService.Down:output_type -> banyan.v1.DownRPCResponse
+	37, // 87: banyan.v1.EngineService.GetStatus:output_type -> banyan.v1.GetStatusResponse
+	43, // 88: banyan.v1.EngineService.GetLogs:output_type -> banyan.v1.GetLogsResponse
+	45, // 89: banyan.v1.EngineService.GetInfo:output_type -> banyan.v1.GetInfoResponse
+	47, // 90: banyan.v1.EngineService.Health:output_type -> banyan.v1.HealthResponse
+	1,  // 91: banyan.v1.EngineService.Scale:output_type -> banyan.v1.ScaleResponse
+	64, // 92: banyan.v1.EngineService.StopTask:output_type -> banyan.v1.StopTaskResponse
+	49, // 93: banyan.v1.EngineService.GetDashboardData:output_type -> banyan.v1.GetDashboardDataResponse
+	66, // 94: banyan.v1.EngineService.GetClusterOverview:output_type -> banyan.v1.GetClusterOverviewResponse
+	68, // 95: banyan.v1.EngineService.ListAgents:output_type -> banyan.v1.ListAgentsResponse
+	70, // 96: banyan.v1.EngineService.ListDeployments:output_type -> banyan.v1.ListDeploymentsResponse
+	72, // 97: banyan.v1.EngineService.GetDeploymentDetail:output_type -> banyan.v1.GetDeploymentDetailResponse
+	74, // 98: banyan.v1.EngineService.ListContainers:output_type -> banyan.v1.ListContainersResponse
+	77, // 99: banyan.v1.EngineService.ListEvents:output_type -> banyan.v1.ListEventsResponse
+	79, // 100: banyan.v1.EngineService.GetRecentLogs:output_type -> banyan.v1.GetRecentLogsResponse
+	55, // 101: banyan.v1.EngineService.CreateSecret:output_type -> banyan.v1.CreateSecretResponse
+	57, // 102: banyan.v1.EngineService.ListSecrets:output_type -> banyan.v1.ListSecretsResponse
+	60, // 103: banyan.v1.EngineService.GetSecret:output_type -> banyan.v1.GetSecretResponse
+	62, // 104: banyan.v1.EngineService.DeleteSecret:output_type -> banyan.v1.DeleteSecretResponse
+	80, // [80:105] is the sub-list for method output_type
+	55, // [55:80] is the sub-list for method input_type
 	55, // [55:55] is the sub-list for extension type_name
 	55, // [55:55] is the sub-list for extension extendee
 	0,  // [0:55] is the sub-list for field type_name
@@ -5665,7 +5780,7 @@ func file_engine_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_engine_proto_rawDesc), len(file_engine_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   89,
+			NumMessages:   91,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

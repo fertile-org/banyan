@@ -39,6 +39,7 @@ const (
 	EngineService_GetDeploymentDetail_FullMethodName   = "/banyan.v1.EngineService/GetDeploymentDetail"
 	EngineService_ListContainers_FullMethodName        = "/banyan.v1.EngineService/ListContainers"
 	EngineService_ListEvents_FullMethodName            = "/banyan.v1.EngineService/ListEvents"
+	EngineService_GetRecentLogs_FullMethodName         = "/banyan.v1.EngineService/GetRecentLogs"
 	EngineService_CreateSecret_FullMethodName          = "/banyan.v1.EngineService/CreateSecret"
 	EngineService_ListSecrets_FullMethodName           = "/banyan.v1.EngineService/ListSecrets"
 	EngineService_GetSecret_FullMethodName             = "/banyan.v1.EngineService/GetSecret"
@@ -76,6 +77,7 @@ type EngineServiceClient interface {
 	GetDeploymentDetail(ctx context.Context, in *GetDeploymentDetailRequest, opts ...grpc.CallOption) (*GetDeploymentDetailResponse, error)
 	ListContainers(ctx context.Context, in *ListContainersRequest, opts ...grpc.CallOption) (*ListContainersResponse, error)
 	ListEvents(ctx context.Context, in *ListEventsRequest, opts ...grpc.CallOption) (*ListEventsResponse, error)
+	GetRecentLogs(ctx context.Context, in *GetRecentLogsRequest, opts ...grpc.CallOption) (*GetRecentLogsResponse, error)
 	// Secret RPCs
 	CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error)
 	ListSecrets(ctx context.Context, in *ListSecretsRequest, opts ...grpc.CallOption) (*ListSecretsResponse, error)
@@ -300,6 +302,16 @@ func (c *engineServiceClient) ListEvents(ctx context.Context, in *ListEventsRequ
 	return out, nil
 }
 
+func (c *engineServiceClient) GetRecentLogs(ctx context.Context, in *GetRecentLogsRequest, opts ...grpc.CallOption) (*GetRecentLogsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRecentLogsResponse)
+	err := c.cc.Invoke(ctx, EngineService_GetRecentLogs_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *engineServiceClient) CreateSecret(ctx context.Context, in *CreateSecretRequest, opts ...grpc.CallOption) (*CreateSecretResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateSecretResponse)
@@ -371,6 +383,7 @@ type EngineServiceServer interface {
 	GetDeploymentDetail(context.Context, *GetDeploymentDetailRequest) (*GetDeploymentDetailResponse, error)
 	ListContainers(context.Context, *ListContainersRequest) (*ListContainersResponse, error)
 	ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error)
+	GetRecentLogs(context.Context, *GetRecentLogsRequest) (*GetRecentLogsResponse, error)
 	// Secret RPCs
 	CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error)
 	ListSecrets(context.Context, *ListSecretsRequest) (*ListSecretsResponse, error)
@@ -445,6 +458,9 @@ func (UnimplementedEngineServiceServer) ListContainers(context.Context, *ListCon
 }
 func (UnimplementedEngineServiceServer) ListEvents(context.Context, *ListEventsRequest) (*ListEventsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListEvents not implemented")
+}
+func (UnimplementedEngineServiceServer) GetRecentLogs(context.Context, *GetRecentLogsRequest) (*GetRecentLogsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetRecentLogs not implemented")
 }
 func (UnimplementedEngineServiceServer) CreateSecret(context.Context, *CreateSecretRequest) (*CreateSecretResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method CreateSecret not implemented")
@@ -832,6 +848,24 @@ func _EngineService_ListEvents_Handler(srv interface{}, ctx context.Context, dec
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineService_GetRecentLogs_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRecentLogsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).GetRecentLogs(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_GetRecentLogs_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).GetRecentLogs(ctx, req.(*GetRecentLogsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _EngineService_CreateSecret_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateSecretRequest)
 	if err := dec(in); err != nil {
@@ -986,6 +1020,10 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListEvents",
 			Handler:    _EngineService_ListEvents_Handler,
+		},
+		{
+			MethodName: "GetRecentLogs",
+			Handler:    _EngineService_GetRecentLogs_Handler,
 		},
 		{
 			MethodName: "CreateSecret",

@@ -245,6 +245,14 @@ func (a *connectAdapter) ListEvents(ctx context.Context, req *connect.Request[ba
 	return connect.NewResponse(resp), nil
 }
 
+func (a *connectAdapter) GetRecentLogs(ctx context.Context, req *connect.Request[banyanpb.GetRecentLogsRequest]) (*connect.Response[banyanpb.GetRecentLogsResponse], error) {
+	resp, err := a.srv.GetRecentLogs(ctx, req.Msg)
+	if err != nil {
+		return nil, err
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // --- Secret RPCs ---
 
 func (a *connectAdapter) CreateSecret(ctx context.Context, req *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error) {

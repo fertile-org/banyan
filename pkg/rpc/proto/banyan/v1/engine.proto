@@ -33,6 +33,7 @@ service EngineService {
   rpc GetDeploymentDetail(GetDeploymentDetailRequest) returns (GetDeploymentDetailResponse);
   rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
   rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
+  rpc GetRecentLogs(GetRecentLogsRequest) returns (GetRecentLogsResponse);
 
   // Secret RPCs
   rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
@@ -535,4 +536,13 @@ message ListEventsRequest {
 }
 message ListEventsResponse {
   repeated ClusterEvent events = 1;
+}
+
+message GetRecentLogsRequest {
+  string container_name = 1;
+  int32 tail = 2;       // number of lines (0 = default 500)
+}
+message GetRecentLogsResponse {
+  repeated string lines = 1;
+  string container_name = 2;
 }

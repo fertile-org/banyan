@@ -270,6 +270,12 @@ body {
   background: var(--surface-hover);
 }
 
+.icon-btn.active-toggle {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-dim);
+}
+
 /* ============================================================
    Stat Cards
    ============================================================ */

@@ -23,8 +23,16 @@ service EngineService {
   // Operational RPCs (dashboard actions)
   rpc StopTask(StopTaskRequest) returns (StopTaskResponse);
 
-  // Dashboard RPCs
+  // Dashboard RPCs (monolithic — used by CLI TUI)
   rpc GetDashboardData(GetDashboardDataRequest) returns (GetDashboardDataResponse);
+
+  // Web dashboard RPCs (per-page, lighter payloads)
+  rpc GetClusterOverview(GetClusterOverviewRequest) returns (GetClusterOverviewResponse);
+  rpc ListAgents(ListAgentsRequest) returns (ListAgentsResponse);
+  rpc ListDeployments(ListDeploymentsRequest) returns (ListDeploymentsResponse);
+  rpc GetDeploymentDetail(GetDeploymentDetailRequest) returns (GetDeploymentDetailResponse);
+  rpc ListContainers(ListContainersRequest) returns (ListContainersResponse);
+  rpc ListEvents(ListEventsRequest) returns (ListEventsResponse);
 
   // Secret RPCs
   rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
@@ -467,4 +475,64 @@ message StopTaskRequest {
 message StopTaskResponse {
   string stop_task_id = 1; // ID of the created stop_and_remove task
   string status = 2;       // "stopping"
+}
+
+// --- Web dashboard page-level RPCs ---
+
+message GetClusterOverviewRequest {}
+message GetClusterOverviewResponse {
+  EngineStatus engine = 1;
+  ClusterSummary summary = 2;
+  repeated ClusterEvent recent_events = 3;
+}
+
+message ListAgentsRequest {}
+message ListAgentsResponse {
+  repeated AgentDetail agents = 1;
+}
+
+message ListDeploymentsRequest {}
+message ListDeploymentsResponse {
+  repeated DeploymentInfo deployments = 1;  // tasks omitted for list view
+}
+
+message GetDeploymentDetailRequest {
+  string id = 1;
+}
+message GetDeploymentDetailResponse {
+  DeploymentInfo deployment = 1;  // includes full task list
+}
+
+message ListContainersRequest {}
+message ListContainersResponse {
+  repeated ContainerInfo containers = 1;
+}
+
+// ContainerInfo is a flat container view for the web dashboard.
+// Derived from create_and_start tasks in the latest deployment per name.
+message ContainerInfo {
+  string task_id = 1;
+  string container_name = 2;
+  string service_name = 3;
+  int32 replica_index = 4;
+  string agent_id = 5;
+  string deployment_name = 6;
+  string deployment_id = 7;
+  string image = 8;
+  string container_status = 9;
+  string health_status = 10;
+  repeated string ports = 11;
+  double cpu_percent = 12;
+  uint64 memory_used_bytes = 13;
+  uint64 memory_limit_bytes = 14;
+  int64 created_at_unix = 15;
+  int64 updated_at_unix = 16;
+  string error = 17;
+}
+
+message ListEventsRequest {
+  int32 limit = 1;  // 0 = default (50)
+}
+message ListEventsResponse {
+  repeated ClusterEvent events = 1;
 }

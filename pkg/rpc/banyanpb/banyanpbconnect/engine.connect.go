@@ -64,6 +64,24 @@ const (
 	// EngineServiceGetDashboardDataProcedure is the fully-qualified name of the EngineService's
 	// GetDashboardData RPC.
 	EngineServiceGetDashboardDataProcedure = "/banyan.v1.EngineService/GetDashboardData"
+	// EngineServiceGetClusterOverviewProcedure is the fully-qualified name of the EngineService's
+	// GetClusterOverview RPC.
+	EngineServiceGetClusterOverviewProcedure = "/banyan.v1.EngineService/GetClusterOverview"
+	// EngineServiceListAgentsProcedure is the fully-qualified name of the EngineService's ListAgents
+	// RPC.
+	EngineServiceListAgentsProcedure = "/banyan.v1.EngineService/ListAgents"
+	// EngineServiceListDeploymentsProcedure is the fully-qualified name of the EngineService's
+	// ListDeployments RPC.
+	EngineServiceListDeploymentsProcedure = "/banyan.v1.EngineService/ListDeployments"
+	// EngineServiceGetDeploymentDetailProcedure is the fully-qualified name of the EngineService's
+	// GetDeploymentDetail RPC.
+	EngineServiceGetDeploymentDetailProcedure = "/banyan.v1.EngineService/GetDeploymentDetail"
+	// EngineServiceListContainersProcedure is the fully-qualified name of the EngineService's
+	// ListContainers RPC.
+	EngineServiceListContainersProcedure = "/banyan.v1.EngineService/ListContainers"
+	// EngineServiceListEventsProcedure is the fully-qualified name of the EngineService's ListEvents
+	// RPC.
+	EngineServiceListEventsProcedure = "/banyan.v1.EngineService/ListEvents"
 	// EngineServiceCreateSecretProcedure is the fully-qualified name of the EngineService's
 	// CreateSecret RPC.
 	EngineServiceCreateSecretProcedure = "/banyan.v1.EngineService/CreateSecret"
@@ -95,8 +113,15 @@ type EngineServiceClient interface {
 	Scale(context.Context, *connect.Request[banyanpb.ScaleRequest]) (*connect.Response[banyanpb.ScaleResponse], error)
 	// Operational RPCs (dashboard actions)
 	StopTask(context.Context, *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error)
-	// Dashboard RPCs
+	// Dashboard RPCs (monolithic — used by CLI TUI)
 	GetDashboardData(context.Context, *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error)
+	// Web dashboard RPCs (per-page, lighter payloads)
+	GetClusterOverview(context.Context, *connect.Request[banyanpb.GetClusterOverviewRequest]) (*connect.Response[banyanpb.GetClusterOverviewResponse], error)
+	ListAgents(context.Context, *connect.Request[banyanpb.ListAgentsRequest]) (*connect.Response[banyanpb.ListAgentsResponse], error)
+	ListDeployments(context.Context, *connect.Request[banyanpb.ListDeploymentsRequest]) (*connect.Response[banyanpb.ListDeploymentsResponse], error)
+	GetDeploymentDetail(context.Context, *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error)
+	ListContainers(context.Context, *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error)
+	ListEvents(context.Context, *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error)
 	// Secret RPCs
 	CreateSecret(context.Context, *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error)
 	ListSecrets(context.Context, *connect.Request[banyanpb.ListSecretsRequest]) (*connect.Response[banyanpb.ListSecretsResponse], error)
@@ -199,6 +224,42 @@ func NewEngineServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(engineServiceMethods.ByName("GetDashboardData")),
 			connect.WithClientOptions(opts...),
 		),
+		getClusterOverview: connect.NewClient[banyanpb.GetClusterOverviewRequest, banyanpb.GetClusterOverviewResponse](
+			httpClient,
+			baseURL+EngineServiceGetClusterOverviewProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("GetClusterOverview")),
+			connect.WithClientOptions(opts...),
+		),
+		listAgents: connect.NewClient[banyanpb.ListAgentsRequest, banyanpb.ListAgentsResponse](
+			httpClient,
+			baseURL+EngineServiceListAgentsProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("ListAgents")),
+			connect.WithClientOptions(opts...),
+		),
+		listDeployments: connect.NewClient[banyanpb.ListDeploymentsRequest, banyanpb.ListDeploymentsResponse](
+			httpClient,
+			baseURL+EngineServiceListDeploymentsProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("ListDeployments")),
+			connect.WithClientOptions(opts...),
+		),
+		getDeploymentDetail: connect.NewClient[banyanpb.GetDeploymentDetailRequest, banyanpb.GetDeploymentDetailResponse](
+			httpClient,
+			baseURL+EngineServiceGetDeploymentDetailProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("GetDeploymentDetail")),
+			connect.WithClientOptions(opts...),
+		),
+		listContainers: connect.NewClient[banyanpb.ListContainersRequest, banyanpb.ListContainersResponse](
+			httpClient,
+			baseURL+EngineServiceListContainersProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("ListContainers")),
+			connect.WithClientOptions(opts...),
+		),
+		listEvents: connect.NewClient[banyanpb.ListEventsRequest, banyanpb.ListEventsResponse](
+			httpClient,
+			baseURL+EngineServiceListEventsProcedure,
+			connect.WithSchema(engineServiceMethods.ByName("ListEvents")),
+			connect.WithClientOptions(opts...),
+		),
 		createSecret: connect.NewClient[banyanpb.CreateSecretRequest, banyanpb.CreateSecretResponse](
 			httpClient,
 			baseURL+EngineServiceCreateSecretProcedure,
@@ -242,6 +303,12 @@ type engineServiceClient struct {
 	scale                 *connect.Client[banyanpb.ScaleRequest, banyanpb.ScaleResponse]
 	stopTask              *connect.Client[banyanpb.StopTaskRequest, banyanpb.StopTaskResponse]
 	getDashboardData      *connect.Client[banyanpb.GetDashboardDataRequest, banyanpb.GetDashboardDataResponse]
+	getClusterOverview    *connect.Client[banyanpb.GetClusterOverviewRequest, banyanpb.GetClusterOverviewResponse]
+	listAgents            *connect.Client[banyanpb.ListAgentsRequest, banyanpb.ListAgentsResponse]
+	listDeployments       *connect.Client[banyanpb.ListDeploymentsRequest, banyanpb.ListDeploymentsResponse]
+	getDeploymentDetail   *connect.Client[banyanpb.GetDeploymentDetailRequest, banyanpb.GetDeploymentDetailResponse]
+	listContainers        *connect.Client[banyanpb.ListContainersRequest, banyanpb.ListContainersResponse]
+	listEvents            *connect.Client[banyanpb.ListEventsRequest, banyanpb.ListEventsResponse]
 	createSecret          *connect.Client[banyanpb.CreateSecretRequest, banyanpb.CreateSecretResponse]
 	listSecrets           *connect.Client[banyanpb.ListSecretsRequest, banyanpb.ListSecretsResponse]
 	getSecret             *connect.Client[banyanpb.GetSecretRequest, banyanpb.GetSecretResponse]
@@ -318,6 +385,36 @@ func (c *engineServiceClient) GetDashboardData(ctx context.Context, req *connect
 	return c.getDashboardData.CallUnary(ctx, req)
 }
 
+// GetClusterOverview calls banyan.v1.EngineService.GetClusterOverview.
+func (c *engineServiceClient) GetClusterOverview(ctx context.Context, req *connect.Request[banyanpb.GetClusterOverviewRequest]) (*connect.Response[banyanpb.GetClusterOverviewResponse], error) {
+	return c.getClusterOverview.CallUnary(ctx, req)
+}
+
+// ListAgents calls banyan.v1.EngineService.ListAgents.
+func (c *engineServiceClient) ListAgents(ctx context.Context, req *connect.Request[banyanpb.ListAgentsRequest]) (*connect.Response[banyanpb.ListAgentsResponse], error) {
+	return c.listAgents.CallUnary(ctx, req)
+}
+
+// ListDeployments calls banyan.v1.EngineService.ListDeployments.
+func (c *engineServiceClient) ListDeployments(ctx context.Context, req *connect.Request[banyanpb.ListDeploymentsRequest]) (*connect.Response[banyanpb.ListDeploymentsResponse], error) {
+	return c.listDeployments.CallUnary(ctx, req)
+}
+
+// GetDeploymentDetail calls banyan.v1.EngineService.GetDeploymentDetail.
+func (c *engineServiceClient) GetDeploymentDetail(ctx context.Context, req *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error) {
+	return c.getDeploymentDetail.CallUnary(ctx, req)
+}
+
+// ListContainers calls banyan.v1.EngineService.ListContainers.
+func (c *engineServiceClient) ListContainers(ctx context.Context, req *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error) {
+	return c.listContainers.CallUnary(ctx, req)
+}
+
+// ListEvents calls banyan.v1.EngineService.ListEvents.
+func (c *engineServiceClient) ListEvents(ctx context.Context, req *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error) {
+	return c.listEvents.CallUnary(ctx, req)
+}
+
 // CreateSecret calls banyan.v1.EngineService.CreateSecret.
 func (c *engineServiceClient) CreateSecret(ctx context.Context, req *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error) {
 	return c.createSecret.CallUnary(ctx, req)
@@ -356,8 +453,15 @@ type EngineServiceHandler interface {
 	Scale(context.Context, *connect.Request[banyanpb.ScaleRequest]) (*connect.Response[banyanpb.ScaleResponse], error)
 	// Operational RPCs (dashboard actions)
 	StopTask(context.Context, *connect.Request[banyanpb.StopTaskRequest]) (*connect.Response[banyanpb.StopTaskResponse], error)
-	// Dashboard RPCs
+	// Dashboard RPCs (monolithic — used by CLI TUI)
 	GetDashboardData(context.Context, *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error)
+	// Web dashboard RPCs (per-page, lighter payloads)
+	GetClusterOverview(context.Context, *connect.Request[banyanpb.GetClusterOverviewRequest]) (*connect.Response[banyanpb.GetClusterOverviewResponse], error)
+	ListAgents(context.Context, *connect.Request[banyanpb.ListAgentsRequest]) (*connect.Response[banyanpb.ListAgentsResponse], error)
+	ListDeployments(context.Context, *connect.Request[banyanpb.ListDeploymentsRequest]) (*connect.Response[banyanpb.ListDeploymentsResponse], error)
+	GetDeploymentDetail(context.Context, *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error)
+	ListContainers(context.Context, *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error)
+	ListEvents(context.Context, *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error)
 	// Secret RPCs
 	CreateSecret(context.Context, *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error)
 	ListSecrets(context.Context, *connect.Request[banyanpb.ListSecretsRequest]) (*connect.Response[banyanpb.ListSecretsResponse], error)
@@ -456,6 +560,42 @@ func NewEngineServiceHandler(svc EngineServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(engineServiceMethods.ByName("GetDashboardData")),
 		connect.WithHandlerOptions(opts...),
 	)
+	engineServiceGetClusterOverviewHandler := connect.NewUnaryHandler(
+		EngineServiceGetClusterOverviewProcedure,
+		svc.GetClusterOverview,
+		connect.WithSchema(engineServiceMethods.ByName("GetClusterOverview")),
+		connect.WithHandlerOptions(opts...),
+	)
+	engineServiceListAgentsHandler := connect.NewUnaryHandler(
+		EngineServiceListAgentsProcedure,
+		svc.ListAgents,
+		connect.WithSchema(engineServiceMethods.ByName("ListAgents")),
+		connect.WithHandlerOptions(opts...),
+	)
+	engineServiceListDeploymentsHandler := connect.NewUnaryHandler(
+		EngineServiceListDeploymentsProcedure,
+		svc.ListDeployments,
+		connect.WithSchema(engineServiceMethods.ByName("ListDeployments")),
+		connect.WithHandlerOptions(opts...),
+	)
+	engineServiceGetDeploymentDetailHandler := connect.NewUnaryHandler(
+		EngineServiceGetDeploymentDetailProcedure,
+		svc.GetDeploymentDetail,
+		connect.WithSchema(engineServiceMethods.ByName("GetDeploymentDetail")),
+		connect.WithHandlerOptions(opts...),
+	)
+	engineServiceListContainersHandler := connect.NewUnaryHandler(
+		EngineServiceListContainersProcedure,
+		svc.ListContainers,
+		connect.WithSchema(engineServiceMethods.ByName("ListContainers")),
+		connect.WithHandlerOptions(opts...),
+	)
+	engineServiceListEventsHandler := connect.NewUnaryHandler(
+		EngineServiceListEventsProcedure,
+		svc.ListEvents,
+		connect.WithSchema(engineServiceMethods.ByName("ListEvents")),
+		connect.WithHandlerOptions(opts...),
+	)
 	engineServiceCreateSecretHandler := connect.NewUnaryHandler(
 		EngineServiceCreateSecretProcedure,
 		svc.CreateSecret,
@@ -510,6 +650,18 @@ func NewEngineServiceHandler(svc EngineServiceHandler, opts ...connect.HandlerOp
 			engineServiceStopTaskHandler.ServeHTTP(w, r)
 		case EngineServiceGetDashboardDataProcedure:
 			engineServiceGetDashboardDataHandler.ServeHTTP(w, r)
+		case EngineServiceGetClusterOverviewProcedure:
+			engineServiceGetClusterOverviewHandler.ServeHTTP(w, r)
+		case EngineServiceListAgentsProcedure:
+			engineServiceListAgentsHandler.ServeHTTP(w, r)
+		case EngineServiceListDeploymentsProcedure:
+			engineServiceListDeploymentsHandler.ServeHTTP(w, r)
+		case EngineServiceGetDeploymentDetailProcedure:
+			engineServiceGetDeploymentDetailHandler.ServeHTTP(w, r)
+		case EngineServiceListContainersProcedure:
+			engineServiceListContainersHandler.ServeHTTP(w, r)
+		case EngineServiceListEventsProcedure:
+			engineServiceListEventsHandler.ServeHTTP(w, r)
 		case EngineServiceCreateSecretProcedure:
 			engineServiceCreateSecretHandler.ServeHTTP(w, r)
 		case EngineServiceListSecretsProcedure:
@@ -581,6 +733,30 @@ func (UnimplementedEngineServiceHandler) StopTask(context.Context, *connect.Requ
 
 func (UnimplementedEngineServiceHandler) GetDashboardData(context.Context, *connect.Request[banyanpb.GetDashboardDataRequest]) (*connect.Response[banyanpb.GetDashboardDataResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.GetDashboardData is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) GetClusterOverview(context.Context, *connect.Request[banyanpb.GetClusterOverviewRequest]) (*connect.Response[banyanpb.GetClusterOverviewResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.GetClusterOverview is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) ListAgents(context.Context, *connect.Request[banyanpb.ListAgentsRequest]) (*connect.Response[banyanpb.ListAgentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.ListAgents is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) ListDeployments(context.Context, *connect.Request[banyanpb.ListDeploymentsRequest]) (*connect.Response[banyanpb.ListDeploymentsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.ListDeployments is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) GetDeploymentDetail(context.Context, *connect.Request[banyanpb.GetDeploymentDetailRequest]) (*connect.Response[banyanpb.GetDeploymentDetailResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.GetDeploymentDetail is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) ListContainers(context.Context, *connect.Request[banyanpb.ListContainersRequest]) (*connect.Response[banyanpb.ListContainersResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.ListContainers is not implemented"))
+}
+
+func (UnimplementedEngineServiceHandler) ListEvents(context.Context, *connect.Request[banyanpb.ListEventsRequest]) (*connect.Response[banyanpb.ListEventsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("banyan.v1.EngineService.ListEvents is not implemented"))
 }
 
 func (UnimplementedEngineServiceHandler) CreateSecret(context.Context, *connect.Request[banyanpb.CreateSecretRequest]) (*connect.Response[banyanpb.CreateSecretResponse], error) {

@@ -1,4 +1,4 @@
-.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo
+.PHONY: setup run lint test build clean test-integration test-integration-build test-integration-shell proto demo web web-build
 
 # Development setup (run once)
 setup: install-dependencies setup-hooks
@@ -127,3 +127,15 @@ test-integration-list:
 # Record terminal demo (requires vhs: https://github.com/charmbracelet/vhs)
 demo:
 	sudo env VHS_NO_SANDBOX=true $(shell which vhs) demo.tape
+
+# ============================================================================
+# Web Dashboard
+# ============================================================================
+
+# Start web dashboard dev server (port 3000, proxies API to :9091)
+web:
+	cd web && npm run dev
+
+# Build web dashboard for production
+web-build:
+	cd web && npm run build

@@ -236,28 +236,7 @@ See [Secrets](/guides/secrets/) for the guide and [Manifest Reference — Secret
 
 ---
 
-## Milestone 12 — Advanced Security
-
-Authorization and certificate lifecycle management.
-
-- Attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
-- Certificate rotation support
-
----
-
-## Milestone 13 — Advanced Networking
-
-Service discovery, traffic policies, and encrypted communication across the cluster.
-
-- **Health-check-based routing**: Only route to healthy containers — health status is already tracked via `healthcheck:` in the manifest; next step is filtering backends by health status in HeartbeatResponse
-- **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
-- **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
-- **VPC peering**: Allow explicit cross-deployment communication — deployments are isolated by default (per-deployment iptables chains); VPC peering lets users define exceptions so specific services in one deployment can reach services in another (e.g., a shared database deployment)
-- **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
-
----
-
-## Milestone 14 — Self-Healing Deployments
+## Milestone 12 — Self-Healing Deployments
 
 Redesign the deployment lifecycle so Banyan keeps user workloads running through any failure — container crashes, agent deaths, engine restarts, or full cluster outages. Replace the current case-by-case patches with a systematic desired-state reconciliation engine.
 
@@ -324,6 +303,27 @@ This milestone consolidates and replaces all current ad-hoc recovery logic:
 - Stale agent reconciliation in engine loop (current quick fix)
 - Dashboard auto-reconcile for superseded deployments
 - Agent-side `restoreActiveContainers()` on Register
+
+---
+
+## Milestone 13 — Advanced Security
+
+Authorization and certificate lifecycle management.
+
+- Attribute-based access control (ABAC) for CLI commands and API actions — define roles and permissions in a config file, enforce in engine gRPC handlers
+- Certificate rotation support
+
+---
+
+## Milestone 14 — Advanced Networking
+
+Service discovery, traffic policies, and encrypted communication across the cluster.
+
+- **Health-check-based routing**: Only route to healthy containers — health status is already tracked via `healthcheck:` in the manifest; next step is filtering backends by health status in HeartbeatResponse
+- **Session affinity**: Optional sticky sessions per service using iptables `recent` module or connection tracking (`session_affinity: true` in banyan.yaml)
+- **Network policies**: Control which services can communicate — iptables rules on each agent to filter traffic between service subnets (service-level allow/deny in banyan.yaml)
+- **VPC peering**: Allow explicit cross-deployment communication — deployments are isolated by default (per-deployment iptables chains); VPC peering lets users define exceptions so specific services in one deployment can reach services in another (e.g., a shared database deployment)
+- **Ingress / L7 routing**: HTTP path/host-based routing via a lightweight reverse proxy (Caddy or Envoy) auto-configured from service definitions
 
 ---
 

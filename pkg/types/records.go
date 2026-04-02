@@ -56,6 +56,7 @@ type DeploymentRecord struct {
 	UpdateStrategy string                   `json:"update_strategy,omitempty"`
 	ReplacesID     string                   `json:"replaces_id,omitempty"`
 	Tags           []string                 `json:"tags,omitempty"`
+	HealthStatus   string                   `json:"health_status,omitempty"` // healthy, degraded, recovering, stopped
 }
 
 // ServiceRecord describes a service within a deployment.
@@ -115,6 +116,10 @@ type TaskRecord struct {
 	MemoryUsedBytes    uint64               `json:"memory_used_bytes,omitempty"`
 	MemoryLimitBytes   uint64               `json:"memory_limit_bytes,omitempty"`
 	ReplicaIndex       int                  `json:"replica_index"`
+	ExitCode           int                  `json:"exit_code,omitempty"`
+	RestartCount       int                  `json:"restart_count,omitempty"`
+	StopReason         string               `json:"stop_reason,omitempty"` // "user" (banyan-cli down), "agent_stale", ""
+	LastRestartAt      time.Time            `json:"last_restart_at,omitempty"`
 }
 
 // TaskResultRecord stores the outcome of task execution.

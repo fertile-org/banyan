@@ -58,6 +58,7 @@ type Engine struct {
 	metricsRegistry  *metrics.EngineMetricsRegistry
 	metricsCollector *metrics.SystemCollector
 	events           EventLog
+	reconcilers      []Reconciler
 	startedAt        time.Time
 	log              *logging.Logger
 }
@@ -109,6 +110,19 @@ func New(opts *Options) (*Engine, error) {
 	}
 	// Seed the CPU sample so the first metrics read gets a real value
 	e.metricsCollector.Collect()
+
+	// Initialize reconcilers (Agent → Container → Deployment order)
+	deps := &ReconcilerDeps{
+		Store:   store,
+		Events:  eventLog,
+		Metrics: e.metricsRegistry,
+		Log:     e.log,
+	}
+	e.reconcilers = []Reconciler{
+		NewAgentReconciler(deps),
+		NewContainerReconciler(deps),
+		NewDeploymentReconciler(deps),
+	}
 
 	// Load secrets encryption key (optional — secrets features disabled if key missing)
 	secretsKeyPath := filepath.Join(types.DefaultKeysDir, "secrets.key")
@@ -261,6 +275,10 @@ func (e *Engine) Run(ctx context.Context) error {
 	grpcAddr := grpcBindAddr + ":" + e.opts.GRPCPort
 	e.registerEngine(ctx, grpcAddr)
 
+	// Run startup reconciliation before entering the main loop
+	RunReconciliation(ctx, e.reconcilers, e.log)
+	e.emitEvent("engine.reconciliation.startup", "Startup reconciliation complete", "info")
+
 	// Start the orchestration loop
 	go e.engineLoop(ctx)
 
@@ -365,6 +383,8 @@ func (e *Engine) engineLoop(ctx context.Context) {
 	defer autoscaleTicker.Stop()
 	rebalanceTicker := time.NewTicker(60 * time.Second)
 	defer rebalanceTicker.Stop()
+	reconcileTicker := time.NewTicker(10 * time.Second)
+	defer reconcileTicker.Stop()
 
 	for {
 		select {
@@ -379,7 +399,14 @@ func (e *Engine) engineLoop(ctx context.Context) {
 			e.evaluateAutoscale(ctx)
 		case <-rebalanceTicker.C:
 			e.evaluateRebalance(ctx)
-			e.grpcServer.reconcileStaleAgents(ctx)
+		case <-reconcileTicker.C:
+			go func() {
+				if !reconcileOnce.TryLock() {
+					return
+				}
+				defer reconcileOnce.Unlock()
+				RunReconciliation(ctx, e.reconcilers, e.log)
+			}()
 		}
 	}
 }

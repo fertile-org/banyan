@@ -4,7 +4,6 @@ package engine
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
@@ -65,19 +64,8 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 		latestDeployIDs[allDeploys[idx].record.ID] = true
 	}
 
-	// Auto-reconcile: mark superseded "running" deployments as stopped in the store
-	for i := range allDeploys {
-		d := &allDeploys[i]
-		if d.record.Status == types.StatusRunning && !latestDeployIDs[d.record.ID] {
-			d.record.Status = types.StatusStopped
-			d.record.UpdatedAt = time.Now()
-			if err := s.store.Save(ctx, d.key, &d.record); err != nil {
-				s.logger().Warn("Failed to mark superseded deployment as stopped", "deployment_id", d.record.ID, "error", err)
-			} else {
-				s.emitEvent("deployment.stopped", fmt.Sprintf("Deployment %s superseded by newer version", d.record.Name), "info")
-			}
-		}
-	}
+	// NOTE: Superseded deployment reconciliation is now handled by DeploymentReconciler
+	// (see reconcile_deployment.go). Dashboard is read-only — no state mutations.
 
 	// --- Collect agents with system metrics ---
 	nodeKeys, _ := s.store.List(ctx, types.KeyNodes)
@@ -218,6 +206,8 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 				CpuPercent:             allTasks[j].CPUPercent,
 				MemoryUsedBytes:        allTasks[j].MemoryUsedBytes,
 				MemoryLimitBytes:       allTasks[j].MemoryLimitBytes,
+				ExitCode:               int32(allTasks[j].ExitCode),     //nolint:gosec // exit code fits int32
+				RestartCount:           int32(allTasks[j].RestartCount), //nolint:gosec // restart count is always small
 				// Environment intentionally omitted — may contain secrets
 			})
 		}
@@ -226,6 +216,7 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 			Id:            record.ID,
 			Name:          record.Name,
 			Status:        record.Status,
+			HealthStatus:  record.HealthStatus,
 			Services:      services,
 			CreatedAtUnix: record.CreatedAt.Unix(),
 			UpdatedAtUnix: record.UpdatedAt.Unix(),

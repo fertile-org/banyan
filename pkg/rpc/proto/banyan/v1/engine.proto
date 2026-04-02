@@ -151,6 +151,7 @@ message ContainerStatus {
   double cpu_percent = 5;                     // 0.0-100.0 (from nerdctl stats)
   uint64 memory_used_bytes = 6;
   uint64 memory_limit_bytes = 7;
+  int32 exit_code = 8;
 }
 
 message ServiceBackend {
@@ -328,6 +329,7 @@ message DeploymentInfo {
   int32 healthy = 9;
   int32 total = 10;
   repeated string tags = 11;
+  string health_status = 12;
 }
 
 message ServiceInfo {
@@ -361,6 +363,8 @@ message TaskInfo {
   double cpu_percent = 19;          // 0.0-100.0 (from container stats)
   uint64 memory_used_bytes = 20;
   uint64 memory_limit_bytes = 21;
+  int32 exit_code = 22;
+  int32 restart_count = 23;
 }
 
 message GetLogsRequest {

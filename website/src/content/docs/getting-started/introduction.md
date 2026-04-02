@@ -27,6 +27,10 @@ Teams who've outgrown a single server but don't need — or don't want — Kuber
 
 Read the [white paper](/blog/from-one-server-to-many/) — it covers the orchestration landscape honestly (where Kubernetes is the right choice, where it isn't), explains Banyan's design principles, and walks through the technical architecture.
 
+## How does it work?
+
+Read [How Banyan Works](/getting-started/how-it-works/) — the mental model behind the whole system, explained in 5 ideas. Takes 10 minutes and makes everything else click.
+
 ## Ready to try it?
 
-Head to the [quickstart](/getting-started/quickstart/) — you'll have a running cluster in a few minutes.
+Head to the [quickstart](/getting-started/quickstart/) to deploy your first application.

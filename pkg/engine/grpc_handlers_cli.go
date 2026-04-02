@@ -189,6 +189,11 @@ func (s *engineGRPCServer) Down(ctx context.Context, req *banyanpb.DownRPCReques
 	// Create stop_and_remove tasks
 	now := time.Now()
 	for i := range targetTasks {
+		targetTasks[i].StopReason = "user"
+		targetTasks[i].UpdatedAt = now
+		origKey := types.KeyTasks + targetTasks[i].AgentID + "/" + targetTasks[i].ID
+		_ = s.store.Save(ctx, origKey, &targetTasks[i])
+
 		stopTask := &types.TaskRecord{
 			ID:            targetTasks[i].ID + "-stop",
 			DeploymentID:  targetTasks[i].DeploymentID,
@@ -515,6 +520,11 @@ func teardownDeployment(ctx context.Context, store storage.StateStore, deploymen
 
 	now := time.Now()
 	for i := range targetTasks {
+		targetTasks[i].StopReason = "user"
+		targetTasks[i].UpdatedAt = now
+		origKey := types.KeyTasks + targetTasks[i].AgentID + "/" + targetTasks[i].ID
+		_ = store.Save(ctx, origKey, &targetTasks[i])
+
 		stopTask := &types.TaskRecord{
 			ID:            targetTasks[i].ID + "-stop",
 			DeploymentID:  targetTasks[i].DeploymentID,
@@ -852,6 +862,11 @@ func (s *engineGRPCServer) StopTask(ctx context.Context, req *banyanpb.StopTaskR
 	if err := s.store.Get(ctx, stopTaskKey, &existing); err == nil {
 		return nil, status.Error(codes.AlreadyExists, "already stopping")
 	}
+
+	// Mark original task with user stop reason
+	task.StopReason = "user"
+	task.UpdatedAt = time.Now()
+	_ = s.store.Save(ctx, taskKey, &task)
 
 	// Create the stop task
 	now := time.Now()

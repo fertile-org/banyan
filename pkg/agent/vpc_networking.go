@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -253,6 +254,54 @@ func (a *Agent) addContainerToIsolation(ctx context.Context, containerIP, deploy
 	_ = ipt.Insert("filter", isolationChainName, 1, "-s", containerIP, "-j", chainName)
 
 	a.logger().Debug("Container added to isolation immediately", "ip", containerIP, "deployment", deploymentName)
+}
+
+// cleanupStaleNetworking removes stale network interfaces and iptables rules
+// from a previous agent run. Best-effort — all errors are ignored.
+func (a *Agent) cleanupStaleNetworking() {
+	// Remove stale banyan-wg interface
+	if err := exec.Command("ip", "link", "show", "banyan-wg").Run(); err == nil { //nolint:gosec // fixed args
+		exec.Command("ip", "link", "delete", "banyan-wg").Run() //nolint:errcheck,gosec // best-effort
+		a.logger().Info("Removed stale banyan-wg interface")
+	}
+
+	// Remove stale banyan0 bridge
+	if err := exec.Command("ip", "link", "show", "banyan0").Run(); err == nil { //nolint:gosec // fixed args
+		exec.Command("ip", "link", "delete", "banyan0").Run() //nolint:errcheck,gosec // best-effort
+		a.logger().Info("Removed stale banyan0 bridge")
+	}
+
+	// Flush iptables rules from previous runs
+	ipt, err := iptablesFactory()
+	if err != nil {
+		return
+	}
+
+	// Remove FORWARD jump rules to BANYAN-ISOLATION
+	jumpRules := [][]string{
+		{"-i", "banyan0", "-o", "banyan-wg", "-j", isolationChainName},
+		{"-i", "banyan-wg", "-o", "banyan0", "-j", isolationChainName},
+	}
+	for _, rule := range jumpRules {
+		ipt.Delete("filter", "FORWARD", rule...) //nolint:errcheck // best-effort
+	}
+
+	// Clear and delete BANYAN-ISOLATION chain
+	ipt.ClearChain("filter", isolationChainName) //nolint:errcheck // best-effort
+	ipt.DeleteChain("filter", isolationChainName) //nolint:errcheck // best-effort
+
+	// Clean up BN-DEP-* chains
+	chains, listErr := ipt.ListChains("filter")
+	if listErr == nil {
+		for _, chain := range chains {
+			if strings.HasPrefix(chain, depChainPrefix) {
+				ipt.ClearChain("filter", chain)  //nolint:errcheck // best-effort
+				ipt.DeleteChain("filter", chain) //nolint:errcheck // best-effort
+			}
+		}
+	}
+
+	a.logger().Debug("Stale networking cleanup complete")
 }
 
 func defaultOverlayDriverFactory(wgPrivateKey, wgPublicKey string) overlay.OverlayDriver {

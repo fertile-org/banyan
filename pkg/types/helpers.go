@@ -147,7 +147,7 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 		for i := 0; i < svc.Replicas; i++ {
 			var agent NodeRecord
 			if hasMetrics {
-				agent = pickAgentByResources(eligible, batchMemory, resReq)
+				agent = PickAgentByResources(eligible, batchMemory, resReq)
 			} else {
 				agent = eligible[agentIdx%len(eligible)]
 				agentIdx++
@@ -186,9 +186,9 @@ func BuildTasksForDeployment(deployment *DeploymentRecord, agents []NodeRecord) 
 	return tasks, nil
 }
 
-// pickAgentByResources selects the agent with the most available memory,
+// PickAgentByResources selects the agent with the most available memory,
 // accounting for resources already scheduled in this batch.
-func pickAgentByResources(agents []NodeRecord, batchMemory map[string]uint64, _ ResourceRequest) NodeRecord {
+func PickAgentByResources(agents []NodeRecord, batchMemory map[string]uint64, _ ResourceRequest) NodeRecord {
 	bestIdx := 0
 	bestAvail := int64(0)
 

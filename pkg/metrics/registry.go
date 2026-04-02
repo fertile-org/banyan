@@ -50,6 +50,10 @@ type EngineMetricsRegistry struct {
 	// Event counters
 	eventsTotal *prometheus.CounterVec
 
+	// Reconciliation counters
+	reconcileRunsTotal    *prometheus.CounterVec
+	reconcileActionsTotal *prometheus.CounterVec
+
 	// Internal storage for dashboard data access (parallel to prometheus gauges)
 	engineMetrics atomic.Pointer[SystemMetrics]
 	agentMetrics  sync.Map // map[string]*SystemMetrics
@@ -171,6 +175,16 @@ func NewEngineMetricsRegistry() *EngineMetricsRegistry {
 			Name: "banyan_events_total",
 			Help: "Cumulative event count by type.",
 		}, []string{"type"}),
+
+		// Reconciliation
+		reconcileRunsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "banyan_reconcile_runs_total",
+			Help: "Number of reconciliation runs by reconciler type.",
+		}, []string{"reconciler"}),
+		reconcileActionsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "banyan_reconcile_actions_total",
+			Help: "Number of reconciliation actions by type (restart, reschedule, mark_stale, etc).",
+		}, []string{"action"}),
 	}
 
 	// Register all metrics
@@ -185,6 +199,7 @@ func NewEngineMetricsRegistry() *EngineMetricsRegistry {
 		r.agentContainers, r.agentInfo,
 		r.deployReplicasDesired, r.deployReplicasHealthy, r.deployInfo,
 		r.eventsTotal,
+		r.reconcileRunsTotal, r.reconcileActionsTotal,
 	)
 
 	return r
@@ -291,4 +306,14 @@ func (r *EngineMetricsRegistry) GetAgentMetrics(name string) (SystemMetrics, boo
 		return SystemMetrics{}, false
 	}
 	return *val.(*SystemMetrics), true
+}
+
+// IncrementReconcileRun increments the reconciliation run counter for the given reconciler type.
+func (r *EngineMetricsRegistry) IncrementReconcileRun(reconciler string) {
+	r.reconcileRunsTotal.WithLabelValues(reconciler).Inc()
+}
+
+// IncrementReconcileAction increments the reconciliation action counter for the given action type.
+func (r *EngineMetricsRegistry) IncrementReconcileAction(action string) {
+	r.reconcileActionsTotal.WithLabelValues(action).Inc()
 }

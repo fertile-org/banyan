@@ -83,6 +83,7 @@ var (
 	containerRemover          = removeContainer
 	containerIPGetter         = getContainerIP
 	containerMetricsCollector = collectContainerMetrics // mockable in tests
+	containerExitCodeGetter  = getContainerExitCode   // mockable in tests
 	vpcNetworkEnabled         bool                     // set by Agent.Run() after VPC init
 	dnsGatewayIPAddr          string         // set by Agent.Run() after DNS init, used in buildNerdctlRunArgs
 	bindMountDataDir          = "/var/lib/banyan/data" // base dir for relative bind mount paths
@@ -177,6 +178,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.logger().Info("Agent registered", "agent", a.opts.AgentName, "registry", registryURL)
 	a.connected.Store(true)
 
+	// Clean up stale networking from previous agent runs before VPC init
+	a.cleanupStaleNetworking()
+
 	// Initialize VPC overlay networking after registration
 	if vpcConfig != nil && vpcConfig.AllocatedSubnet != "" {
 		a.logger().Info("Initializing VPC overlay networking")
@@ -219,19 +223,26 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	<-ctx.Done()
 
+	a.logger().Info("Shutting down agent")
+
 	// Stop DNS server
 	if a.dnsServer != nil {
 		if stopErr := a.dnsServer.Stop(); stopErr != nil {
 			a.logger().Warn("DNS server stop failed", "error", stopErr)
 		}
+		a.logger().Info("DNS server stopped")
 	}
 	dnsGatewayIPAddr = ""
+
+	// Clean up stale networking (iptables, interfaces)
+	a.cleanupStaleNetworking()
 
 	// Clean up overlay networking
 	if a.overlayDriver != nil {
 		if cleanupErr := a.overlayDriver.Cleanup(context.Background()); cleanupErr != nil {
 			a.logger().Warn("Overlay cleanup failed", "error", cleanupErr)
 		}
+		a.logger().Info("Overlay networking cleaned up")
 	}
 
 	a.logger().Info("Agent stopped")
@@ -664,6 +675,21 @@ func getContainerHealthStatus(ctx context.Context, containerName string) string 
 	return strings.TrimSpace(stdout.String())
 }
 
+// getContainerExitCode runs nerdctl inspect to get the container's exit code.
+func getContainerExitCode(ctx context.Context, containerName string) int32 {
+	cmd := exec.CommandContext(ctx, "nerdctl", "inspect", "--format", "{{.State.ExitCode}}", containerName) //nolint:gosec // container name comes from engine
+	var stdout bytes.Buffer
+	cmd.Stdout = &stdout
+	if err := cmd.Run(); err != nil {
+		return 0
+	}
+	code, err := strconv.ParseInt(strings.TrimSpace(stdout.String()), 10, 32)
+	if err != nil {
+		return 0
+	}
+	return int32(code) //nolint:gosec // exit code fits int32
+}
+
 // doOneHeartbeat sends a single heartbeat and reconciles peers/backends/DNS.
 // Called once at startup to get VPC peers before the task loop starts.
 func (a *Agent) doOneHeartbeat(ctx context.Context) {
@@ -848,6 +874,9 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 			ContainerName: c.containerName,
 			Status:        status,
 			Ip:            c.containerIP,
+		}
+		if status == "exited" || status == "dead" {
+			cs.ExitCode = containerExitCodeGetter(ctx, c.containerName)
 		}
 		if hs := containerHealthStatusFunc(ctx, c.containerName); hs != "" {
 			cs.HealthStatus = hs

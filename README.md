@@ -109,6 +109,7 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
 - **Three binaries, nothing else** — No package managers, no plugins, no Helm charts. Download `banyan-engine`, `banyan-agent`, and `banyan-cli`. That's the entire stack.
 - **Built-in image registry** — Use `build:` in your manifest and Banyan builds, stores, and distributes images across your cluster. No Docker Hub account, no Harbor, no ECR setup.
 - **Containers talk across servers** — Services on different machines communicate as if they were on the same network. All traffic encrypted with WireGuard. Banyan sets up the overlay network and DNS automatically.
+- **Self-healing deployments** — Container crashes? Restarted automatically. Server dies? Work rescheduled to healthy servers. Banyan checks reality against your manifest every 10 seconds and repairs any drift.
 - **Auto-scaling built in** — Define `target_cpu` in your manifest and Banyan scales replicas automatically. Or scale manually with `banyan-cli scale my-app api=5`.
 - **Encrypted secrets** — `banyan-cli secret create DB_PASSWORD` — encrypted at rest, injected into containers as env vars. No plaintext in manifests, no external Vault.
 - **High availability** — Run multiple engines for zero-downtime control plane. All engines are active — no leader election, no manual failover.

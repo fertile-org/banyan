@@ -278,6 +278,7 @@ func (s *engineGRPCServer) collectDeployments(ctx context.Context, includeTasks 
 			Id:            record.ID,
 			Name:          record.Name,
 			Status:        record.Status,
+			HealthStatus:  record.HealthStatus,
 			Services:      services,
 			CreatedAtUnix: record.CreatedAt.Unix(),
 			UpdatedAtUnix: record.UpdatedAt.Unix(),
@@ -482,5 +483,7 @@ func taskRecordToProto(t *types.TaskRecord) *banyanpb.TaskInfo {
 		CpuPercent:             t.CPUPercent,
 		MemoryUsedBytes:        t.MemoryUsedBytes,
 		MemoryLimitBytes:       t.MemoryLimitBytes,
+		ExitCode:               int32(t.ExitCode),     //nolint:gosec // exit code fits int32
+		RestartCount:           int32(t.RestartCount), //nolint:gosec // restart count is always small
 	}
 }

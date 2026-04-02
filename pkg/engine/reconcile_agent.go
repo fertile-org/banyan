@@ -189,7 +189,7 @@ func (a *AgentReconciler) reconcileStaleAgent(
 
 		// Pick the best agent using resource-aware scheduling.
 		resReq := types.ServiceResourceRequest(svc)
-		agent := pickAgentForReschedule(eligible, batchMemory, resReq)
+		agent := types.PickAgentByResources(eligible, batchMemory, resReq)
 		batchMemory[agent.Name] += resReq.MemoryBytes
 
 		a.createRescheduleTask(ctx, &task, dep, svc, agent.Name)
@@ -355,19 +355,3 @@ func matchPlacement(agentName, pattern string) bool {
 	return ok
 }
 
-// pickAgentForReschedule selects the agent with the most available memory,
-// accounting for resources already scheduled in this batch.
-func pickAgentForReschedule(agents []types.NodeRecord, batchMemory map[string]uint64, _ types.ResourceRequest) types.NodeRecord {
-	bestIdx := 0
-	bestAvail := int64(0)
-
-	for i := range agents {
-		avail := int64(agents[i].MemoryTotalBytes) - int64(agents[i].MemoryUsedBytes) - int64(batchMemory[agents[i].Name]) //nolint:gosec // values are bounds-checked in heartbeat handler
-		if i == 0 || avail > bestAvail {
-			bestAvail = avail
-			bestIdx = i
-		}
-	}
-
-	return agents[bestIdx]
-}

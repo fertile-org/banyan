@@ -240,78 +240,16 @@ See [Secrets](/guides/secrets/) for the guide and [Manifest Reference — Secret
 
 Status: **Done**
 
-Banyan keeps your workloads running through any failure — container crashes, agent deaths, engine restarts, or full cluster outages. A desired-state reconciliation engine checks every 10 seconds that reality matches your manifest, and repairs any drift automatically.
+Automatic failure recovery through a desired-state reconciliation engine. Banyan checks every 10 seconds that reality matches your manifest and repairs any drift.
 
-### Core architecture
+- **Reconciliation loop**: Three controllers (Agent, Container, Deployment) run in sequence every 10 seconds. Container crashes are restarted, dead agents get their work rescheduled, deployment health is computed automatically.
+- **Restart policy enforcement**: Respects Docker Compose `restart:` field — `always` (default), `on-failure`, `on-failure:N` (with retry limit), `unless-stopped`, `no`. Exponential backoff prevents restart storms.
+- **Agent failure rescheduling**: When an agent dies, its containers are rescheduled to healthy agents after a grace period (2 min standard, 5 min for long-running agents). Safeguards: anti-flapping cooldown, capacity checks, stateful pinning for services with local volumes.
+- **Deployment health status**: Each deployment is `healthy`, `recovering`, `degraded`, or `stopped` — visible in CLI, TUI dashboard, and web dashboard.
+- **Engine restart recovery**: On startup, the engine runs a full reconciliation pass before accepting new deploys.
+- **Agent lifecycle cleanup**: Graceful shutdown cleans up WireGuard, iptables, DNS, and CNI. Stale interface recovery on startup ensures clean networking regardless of prior state.
 
-- **Desired state model**: The deployment record IS the desired state. A "running" deployment with 3 web replicas and 1 db replica means Banyan must ensure exactly that is running at all times, not just at deploy time.
-- **Actual state tracking**: Each agent reports its full container inventory (name, status, IP, metrics) in every health report. The engine maintains an authoritative map of actual state per agent.
-- **Reconciliation loop**: A dedicated engine loop (every 10s, configurable) compares desired vs actual state for every running deployment and generates repair tasks. This is the single source of all recovery — not scattered across health reports, registration, and dashboard queries.
-
-### Failure recovery matrix
-
-Every failure scenario has a defined detection method, recovery action, and timing guarantee:
-
-- **Container crashes on healthy agent**: Detected via health report (container status → exited). Recovery: create new `create_and_start` task on same agent. Respects `restart:` policy from manifest (always, on-failure, no). Timing: within one health check interval (~10s).
-- **Agent restarts, containers gone**: Detected via health report with 0 containers (agent alive, nothing running). Recovery: re-create all tasks for that agent's share of every running deployment. Timing: within one health check interval (~10s).
-- **Single agent dies**: Detected via staleness (no heartbeat for >60s). Recovery: reschedule the dead agent's tasks to other available agents using resource-aware scheduling. Grace period before rescheduling (configurable, default 2 min) to avoid flapping if agent is just rebooting. Timing: grace period + scheduling cycle.
-- **Agent comes back after rescheduling**: Re-registers, receives cleanup tasks for old containers. No duplicate work — tasks already rescheduled elsewhere are not re-assigned.
-- **Engine restarts**: On startup, engine runs a full reconciliation pass before accepting new deploys. Compares all "running" deployment records against last-known task states. Generates repair tasks for any drift found. Timing: immediate on startup.
-- **All agents die**: All deployments marked as degraded (not stopped — desired state preserved). Tasks are queued. As agents come back and register, engine immediately schedules pending repair tasks. First agent gets work within seconds of registering.
-- **Network partition**: Agent can't reach engine but containers are fine. Engine sees agent as stale, but uses an extended grace period (configurable, default 5 min) before rescheduling — partitions are usually transient. If agent reconnects, it sends a health report and the engine sees containers are still running. No unnecessary rescheduling.
-- **Partial deployment failure**: Some tasks succeed, some fail. Engine retries failed tasks (up to configurable limit, default 3). If retry limit exceeded, deployment marked as degraded with clear error. Successful containers keep running — no full rollback for partial failures.
-
-### Restart policy support
-
-Respect Docker Compose `restart:` field in the manifest:
-- `restart: always` (default) — always restart crashed containers
-- `restart: on-failure` — restart only on non-zero exit code
-- `restart: no` — never restart; mark as exited and leave it
-
-### Rescheduling safeguards
-
-Prevent cascading failures and flapping:
-- **Grace period**: Don't reschedule immediately when an agent goes stale. Wait for it to come back (default 2 min).
-- **Anti-flapping**: Per-container cooldown (5 min) prevents the same container from being rescheduled repeatedly between agents.
-- **Capacity check**: Don't reschedule if remaining agents lack capacity. Mark deployment as degraded with actionable error instead.
-- **Stateful pinning**: Services with `deploy.placement.node` or local volume mounts are NOT rescheduled to other agents — they wait for their agent to come back.
-
-### Observability
-
-- **Deployment health status**: New field on DeploymentRecord — `healthy`, `degraded`, `recovering`, `stopped`. Dashboard and CLI show this prominently.
-- **Reconciliation events**: Every drift detection and repair action emits a cluster event (visible in dashboard and `banyan-cli events`).
-- **Reconciliation metrics**: Prometheus counters for drift detections, repair tasks created, rescheduling events, and failed recoveries.
-
-### Agent lifecycle cleanup
-
-- **Graceful shutdown**: Agent traps SIGTERM/SIGINT and cleans up all resources — VXLAN interface, WireGuard tunnel, CNI config, DNS server, iptables rules. No stale interfaces left behind.
-- **Stale interface recovery on startup**: Before initializing networking, agent detects and removes leftover interfaces (banyan0, vxlan1, wg-control) from a previous unclean shutdown. Startup always succeeds regardless of prior state.
-
-### Critical design constraint: container name is NOT a unique identifier
-
-Container names like `my-app-api-0` are reused across deployments. The same app deployed three times creates three tasks all named `my-app-api-0`. Any logic that matches by container name alone will incorrectly update/affect tasks from old deployments. This applies to:
-- Health report processing (status updates, IP assignment, metrics)
-- Unreported container detection (marking containers as exited)
-- Cleanup task creation (stop_and_remove)
-- Log streaming (which container to stream from)
-- StopTask routing (which task to stop)
-
-**All operations must scope by deployment ID** (or use the task ID directly). Container name is only unique within a single deployment, never across deployments. The reconciliation engine must enforce this invariant everywhere.
-
-### Stale iptables / networking cleanup on restart
-
-After engine+agent restart, containers get new VPC IPs but old iptables DNAT rules still point to the previous IPs. This causes "No route to host" on exposed ports and breaks log streaming (agent API address points to stale WireGuard tunnel IP). The reconciliation engine must:
-- Flush and re-create iptables DNAT/proxy rules on agent startup using current container IPs
-- Re-register agent API address with the engine after WireGuard tunnel re-establishment
-- Reconcile cross-host load balancing backends with current container IPs
-
-### What this replaces
-
-This milestone consolidates and replaces all current ad-hoc recovery logic:
-- Health report unreported-container detection (current quick fix)
-- Stale agent reconciliation in engine loop (current quick fix)
-- Dashboard auto-reconcile for superseded deployments
-- Agent-side `restoreActiveContainers()` on Register
+See [How Banyan Works](/getting-started/how-it-works/) for the mental model behind reconciliation.
 
 ---
 

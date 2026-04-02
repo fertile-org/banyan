@@ -111,6 +111,9 @@ Same `services`, `build`, `ports`, `environment` you already know from Docker Co
   <Card title="Built-in monitoring" icon="seti:cake_php">
     `banyan-cli dashboard --web` opens a live web dashboard in your browser — cluster overview, agent metrics, container status, log viewer, and command palette. Prefer the terminal? `banyan-cli dashboard` gives you the same data as a TUI. Both are built into the CLI. No Grafana setup, no separate server — monitoring is one command away.
   </Card>
+  <Card title="Self-healing deployments" icon="approve-check">
+    Container crashes? Restarted automatically based on your `restart:` policy. Server dies? Work rescheduled to healthy servers within minutes. Banyan checks reality against your manifest every 10 seconds and repairs any drift.
+  </Card>
   <Card title="Auto-scaling built in" icon="approve-check">
     Define `target_cpu` in your manifest and Banyan scales replicas automatically. Scale up under load, scale down when idle. Graceful drain prevents dropped requests. Or scale manually with `banyan-cli scale my-app api=5`.
   </Card>
@@ -172,4 +175,4 @@ Three focused binaries — engine, agent, and CLI. No package managers. No plugi
   <img src="/architecture.svg" alt="Banyan architecture — CLI, Engine, VPC, Observability" style="max-width: 100%; border-radius: 12px; border: 1px solid var(--sl-color-gray-5); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);" />
 </div>
 
-The **CLI** sends your manifest to the **Engine**, which stores state in etcd, manages encrypted secrets, and schedules containers across **Agents** (with auto-scaling). Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard. For high availability, run [multiple engines](/guides/high-availability/) — they coordinate automatically.
+The **CLI** sends your manifest to the **Engine**, which stores state in etcd, manages encrypted secrets, and schedules containers across **Agents** (with auto-scaling). A reconciliation loop checks every 10 seconds that reality matches your manifest — crashed containers are restarted, dead agents get their work rescheduled. Each Agent runs containerd and pulls images from the Engine's built-in registry. All communication is encrypted with WireGuard. For high availability, run [multiple engines](/guides/high-availability/) — they coordinate automatically.

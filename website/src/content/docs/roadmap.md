@@ -238,7 +238,9 @@ See [Secrets](/guides/secrets/) for the guide and [Manifest Reference — Secret
 
 ## Milestone 12 — Self-Healing Deployments
 
-Redesign the deployment lifecycle so Banyan keeps user workloads running through any failure — container crashes, agent deaths, engine restarts, or full cluster outages. Replace the current case-by-case patches with a systematic desired-state reconciliation engine.
+Status: **Done**
+
+Banyan keeps your workloads running through any failure — container crashes, agent deaths, engine restarts, or full cluster outages. A desired-state reconciliation engine checks every 10 seconds that reality matches your manifest, and repairs any drift automatically.
 
 ### Core architecture
 

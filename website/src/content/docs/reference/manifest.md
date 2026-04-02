@@ -104,7 +104,7 @@ services:
 | `deploy.resources.limits.memory` | string | No | -- | Memory limit (e.g., `512m`, `1g`). Container is killed if it exceeds this. Also used for scheduling if no reservation is set. |
 | `deploy.resources.limits.cpus` | string | No | -- | CPU limit (e.g., `"0.5"`, `"2"`). Fractional cores allowed. |
 | `deploy.resources.reservations.memory` | string | No | -- | Memory reservation (e.g., `256m`). Used by the scheduler to decide which agent runs this service. Takes priority over `limits.memory` for scheduling. |
-| `restart` | string | No | `no` | Restart policy: `no`, `always`, `unless-stopped`, `on-failure`, or `on-failure:N`. |
+| `restart` | string | No | `always` | Restart policy. Banyan's reconciler enforces this — crashed containers are restarted automatically. Options: `always` (restart on any exit), `on-failure` (non-zero exit only), `on-failure:N` (non-zero, max N retries), `unless-stopped` (restart unless you ran `banyan-cli down`), `no` (never restart). |
 | `entrypoint` | string or list | No | -- | Override the container's ENTRYPOINT. Supports string or list form. |
 | `ports` | list | No | -- | Port mappings in `host:container` format. |
 | `environment` | list | No | -- | Environment variables in `KEY=value` format. |

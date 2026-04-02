@@ -9,6 +9,8 @@ linters-settings:
     local-prefixes: github.com/fertile-org/banyan
   govet:
     enable-all: true
+    disable:
+      - fieldalignment  # struct field reordering breaks positional literals in tests
   staticcheck:
     checks: ["all"]
   gosec:

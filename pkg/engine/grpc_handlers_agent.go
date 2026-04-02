@@ -392,7 +392,11 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 				task.HealthStatus = hs
 			}
 			if ec, hasEC := exitCodeMap[task.ContainerName]; hasEC {
-				task.ExitCode = int(ec)
+				// Clamp to POSIX range (0-255). Values outside this range
+				// indicate a reporting bug, not a real exit code.
+				if ec >= 0 && ec <= 255 {
+					task.ExitCode = int(ec)
+				}
 			}
 			if m, hasM := metricsMap[task.ContainerName]; hasM {
 				task.CPUPercent = m.cpuPercent

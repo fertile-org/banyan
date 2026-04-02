@@ -112,6 +112,11 @@ func (a *AgentReconciler) reconcileStaleAgent(
 		return
 	}
 
+	// Pre-build pending replacement sets per deployment. This replaces the
+	// old hasPendingReplacement() which scanned ALL agents per task — O(N*M).
+	// Now we scan once per deployment — O(agents*tasks) total, not per-task.
+	pendingByDep := make(map[string]map[string]bool) // depID → set of "svc-replica" keys
+
 	for _, taskKey := range taskKeys {
 		var task types.TaskRecord
 		if err := a.deps.Store.Get(ctx, taskKey, &task); err != nil {
@@ -175,8 +180,14 @@ func (a *AgentReconciler) reconcileStaleAgent(
 			continue
 		}
 
-		// Check for existing pending replacement.
-		if a.hasPendingReplacement(ctx, task.DeploymentID, task.ServiceName, task.ReplicaIndex) {
+		// Check for existing pending replacement (lazily build set per deployment).
+		pending, built := pendingByDep[dep.ID]
+		if !built {
+			pending = buildPendingSet(ctx, a.deps.Store, dep.ID)
+			pendingByDep[dep.ID] = pending
+		}
+		pendingKey := fmt.Sprintf("%s-%d", task.ServiceName, task.ReplicaIndex)
+		if pending[pendingKey] {
 			continue
 		}
 
@@ -193,6 +204,10 @@ func (a *AgentReconciler) reconcileStaleAgent(
 		batchMemory[agent.Name] += resReq.MemoryBytes
 
 		a.createRescheduleTask(ctx, &task, dep, svc, agent.Name)
+
+		// Mark this replica as having a pending replacement so we don't
+		// create duplicates for other tasks on the same replica.
+		pending[pendingKey] = true
 	}
 }
 
@@ -293,40 +308,21 @@ func (a *AgentReconciler) filterEligibleAgents(
 	return eligible
 }
 
-// hasPendingReplacement checks all agents for an existing pending create_and_start task
-// for the given deployment, service, and replica index.
-func (a *AgentReconciler) hasPendingReplacement(ctx context.Context, depID, svcName string, replicaIndex int) bool {
-	nodeKeys, err := a.deps.Store.List(ctx, types.KeyNodes)
-	if err != nil {
-		return false
-	}
-
-	for _, nodeKey := range nodeKeys {
-		var node types.NodeRecord
-		if err := a.deps.Store.Get(ctx, nodeKey, &node); err != nil {
-			continue
-		}
-
-		taskKeys, err := a.deps.Store.List(ctx, types.KeyTasks+node.Name+"/")
-		if err != nil {
-			continue
-		}
-
-		for _, taskKey := range taskKeys {
-			var t types.TaskRecord
-			if err := a.deps.Store.Get(ctx, taskKey, &t); err != nil {
-				continue
-			}
-			if t.DeploymentID == depID &&
-				t.ServiceName == svcName &&
-				t.ReplicaIndex == replicaIndex &&
-				t.Type == types.TaskTypeCreateAndStart &&
-				t.Status == types.StatusPending {
-				return true
-			}
+// buildPendingSet collects all pending create_and_start tasks for a deployment
+// and returns a set keyed by "serviceName-replicaIndex". This is called once
+// per deployment instead of once per task, reducing O(tasks*nodes*tasks) to
+// O(nodes*tasks) via CollectDeploymentTasks.
+func buildPendingSet(ctx context.Context, store storage.StateStore, depID string) map[string]bool {
+	tasks := types.CollectDeploymentTasks(ctx, store, depID)
+	set := make(map[string]bool)
+	for i := range tasks {
+		t := &tasks[i]
+		if t.Type == types.TaskTypeCreateAndStart && t.Status == types.StatusPending {
+			key := fmt.Sprintf("%s-%d", t.ServiceName, t.ReplicaIndex)
+			set[key] = true
 		}
 	}
-	return false
+	return set
 }
 
 // shouldRescheduleOnAgentDeath returns true unless the service restart policy is "no".

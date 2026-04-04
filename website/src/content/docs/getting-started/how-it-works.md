@@ -86,7 +86,7 @@ This loop — **observe, diff, act** — runs continuously. It is called the **r
 
 - **Self-healing.** A container crashes? The reconciler notices the gap between desired (3 replicas) and actual (2 replicas), and creates a new one. You don't intervene.
 - **Agent dies? Same loop.** The engine notices the agent stopped sending heartbeats, waits a grace period (in case it's rebooting), then reschedules its containers to other agents. Your manifest didn't change. The engine converges back to it.
-- **Engine restarts? Still the same loop.** On startup, the engine runs a full reconciliation pass — compares every "running" deployment against what agents report, and repairs any drift it finds.
+- **Engine restarts? Still the same loop.** The reconciliation loop starts within 10 seconds of the engine coming back up. Once agents reconnect and report their container state, the reconciler detects any drift and repairs it automatically.
 - **You can always re-deploy.** If something looks wrong, run `banyan-cli up -f banyan.yaml` again. The engine diffs desired against actual and only changes what needs changing.
 
 **The corollary:** Banyan doesn't guarantee anything happens right now. It guarantees **eventual convergence** toward your desired state, within seconds for container crashes, within minutes for server failures.

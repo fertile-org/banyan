@@ -275,9 +275,12 @@ func (e *Engine) Run(ctx context.Context) error {
 	grpcAddr := grpcBindAddr + ":" + e.opts.GRPCPort
 	e.registerEngine(ctx, grpcAddr)
 
-	// Run startup reconciliation before entering the main loop
-	RunReconciliation(ctx, e.reconcilers, e.log)
-	e.emitEvent("engine.reconciliation.startup", "Startup reconciliation complete", "info")
+	// NOTE: No startup reconciliation here. The 10s reconcile loop handles it.
+	// Running reconciliation at startup is premature — agents haven't reconnected
+	// yet, so all agents appear stale. The AgentReconciler would mark healthy
+	// containers for cleanup, and when agents reconnect seconds later, they'd
+	// kill their own running containers. The 10s loop gives agents time to
+	// re-register and send heartbeats before reconciliation begins.
 
 	// Start the orchestration loop
 	go e.engineLoop(ctx)

@@ -259,16 +259,13 @@ func (a *Agent) addContainerToIsolation(ctx context.Context, containerIP, deploy
 // cleanupStaleNetworking removes stale network interfaces and iptables rules
 // from a previous agent run. Best-effort — all errors are ignored.
 func (a *Agent) cleanupStaleNetworking() {
-	// Remove stale banyan-wg interface
+	// Remove stale WireGuard interface — will be recreated by initializeVPCNetworking.
+	// NOTE: do NOT delete banyan0 bridge. Running containers have veth pairs attached
+	// to it. Deleting the bridge orphans all container networking. The bridge persists
+	// across agent restarts by design (same as overlay.Cleanup).
 	if err := exec.Command("ip", "link", "show", "banyan-wg").Run(); err == nil { //nolint:gosec // fixed args
 		exec.Command("ip", "link", "delete", "banyan-wg").Run() //nolint:errcheck,gosec // best-effort
 		a.logger().Info("Removed stale banyan-wg interface")
-	}
-
-	// Remove stale banyan0 bridge
-	if err := exec.Command("ip", "link", "show", "banyan0").Run(); err == nil { //nolint:gosec // fixed args
-		exec.Command("ip", "link", "delete", "banyan0").Run() //nolint:errcheck,gosec // best-effort
-		a.logger().Info("Removed stale banyan0 bridge")
 	}
 
 	// Flush iptables rules from previous runs

@@ -644,6 +644,37 @@ func TestContainerReconciler_RestartTaskHasCorrectFields(t *testing.T) {
 	}
 }
 
+// Regression: container with status "not_found" should be restarted, same as "exited".
+// Before the fix, "not_found" containers were stuck forever — the reconciler only
+// checked for "exited" and ignored all other statuses.
+func TestContainerReconciler_NotFound_RestartedLikeExited(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	deps := testReconcilerDeps(store)
+
+	dep := makeRunningDeployment("dep1", "app", map[string]types.ServiceRecord{
+		"web": {Image: "nginx:latest", Replicas: 1, Restart: "always"},
+	})
+	saveDeployment(t, ctx, store, dep)
+	saveNode(t, ctx, store, makeNode("agent1", time.Now()))
+
+	// Container was removed from nerdctl (e.g., cleanup ran but create failed).
+	// Agent reports "not_found" as the container status.
+	task := makeTask("dep1-web-0", "dep1", "web", "agent1", 0, "not_found")
+	saveTask(t, ctx, store, task)
+
+	origIDs := map[string]bool{"dep1-web-0": true}
+
+	r := NewContainerReconciler(deps)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if n := countNewTasks(t, ctx, store, origIDs); n < 1 {
+		t.Errorf("expected restart task for not_found container, got %d new tasks", n)
+	}
+}
+
 // --- mockReconciler for RunReconciliation tests ---
 
 type mockReconciler struct {

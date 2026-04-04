@@ -114,8 +114,11 @@ func (c *ContainerReconciler) reconcileDeployment(ctx context.Context, dep types
 		}
 
 		for _, task := range latestByReplica {
-			// Only consider exited containers on healthy agents.
-			if task.ContainerStatus != "exited" {
+			// Only consider exited/not_found containers on healthy agents.
+			// "not_found" means the container was removed from nerdctl but
+			// the task record still exists — treat the same as "exited".
+			isGone := task.ContainerStatus == "exited" || task.ContainerStatus == "not_found"
+			if !isGone {
 				// If running, mark healthy for backoff reset.
 				if task.ContainerStatus == types.StatusRunning {
 					backoffKey := fmt.Sprintf("%s-%s-%d", dep.ID, svcName, task.ReplicaIndex)

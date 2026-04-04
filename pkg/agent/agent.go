@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -273,6 +274,13 @@ func (a *Agent) processTasks(ctx context.Context) {
 	if err != nil {
 		return
 	}
+
+	// Sort tasks so stop_and_remove runs before create_and_start.
+	// This prevents name conflicts when the reconciler creates a cleanup
+	// task + restart task for the same container name.
+	sort.SliceStable(tasks, func(i, j int) bool {
+		return tasks[i].Type == types.TaskTypeStopAndRemove && tasks[j].Type != types.TaskTypeStopAndRemove
+	})
 
 	for _, pbTask := range tasks {
 		// Report running (best-effort)

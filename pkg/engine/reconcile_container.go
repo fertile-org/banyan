@@ -91,10 +91,16 @@ func (c *ContainerReconciler) reconcileDeployment(ctx context.Context, dep types
 			continue
 		}
 
-		// Find the latest task per replica (by CreatedAt).
+		// Find the latest create_and_start task per replica (by CreatedAt).
+		// Only track create tasks — stop_and_remove cleanup tasks must not
+		// shadow the actual container task, or the reconciler loses track
+		// of replicas that need restarting.
 		latestByReplica := make(map[int]*types.TaskRecord)
 		for i := range tasks {
 			t := &tasks[i]
+			if t.Type != types.TaskTypeCreateAndStart {
+				continue
+			}
 			existing, found := latestByReplica[t.ReplicaIndex]
 			if !found || t.CreatedAt.After(existing.CreatedAt) {
 				latestByReplica[t.ReplicaIndex] = t

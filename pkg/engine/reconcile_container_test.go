@@ -644,6 +644,60 @@ func TestContainerReconciler_RestartTaskHasCorrectFields(t *testing.T) {
 	}
 }
 
+// Regression: cleanup task must not shadow exited container in latestByReplica.
+// A stop_and_remove cleanup task for the same replica has a newer CreatedAt and
+// would be selected as "latest", hiding the exited create_and_start task.
+// The reconciler must only track create_and_start tasks in latestByReplica.
+func TestContainerReconciler_CleanupTaskDoesNotShadowExited(t *testing.T) {
+	ctx := context.Background()
+	store := storage.NewMemoryStore()
+	deps := testReconcilerDeps(store)
+
+	dep := makeRunningDeployment("dep1", "app", map[string]types.ServiceRecord{
+		"api": {Image: "api:latest", Replicas: 3, Restart: "always"},
+	})
+	saveDeployment(t, ctx, store, dep)
+	saveNode(t, ctx, store, makeNode("agent1", time.Now()))
+
+	// Two healthy replicas
+	saveTask(t, ctx, store, makeTask("dep1-api-1", "dep1", "api", "agent1", 1, types.StatusRunning))
+	saveTask(t, ctx, store, makeTask("dep1-api-2", "dep1", "api", "agent1", 2, types.StatusRunning))
+
+	// Replica 0: original task is exited
+	exitedTask := makeTask("dep1-api-0", "dep1", "api", "agent1", 0, "exited")
+	exitedTask.CreatedAt = time.Now().Add(-time.Hour)
+	saveTask(t, ctx, store, exitedTask)
+
+	// Replica 0: cleanup task exists with NEWER CreatedAt (shadows the exited task if not filtered)
+	cleanupTask := &types.TaskRecord{
+		ID:            "dep1-api-0-agent-cleanup",
+		DeploymentID:  "dep1",
+		ServiceName:   "api",
+		AgentID:       "agent1",
+		ReplicaIndex:  0,
+		Type:          types.TaskTypeStopAndRemove,
+		Status:        types.StatusCompleted,
+		ContainerName: "app-api-0",
+		CreatedAt:     time.Now(), // newer than the exited task
+	}
+	saveTask(t, ctx, store, cleanupTask)
+
+	origIDs := map[string]bool{
+		"dep1-api-0": true, "dep1-api-1": true, "dep1-api-2": true,
+		"dep1-api-0-agent-cleanup": true,
+	}
+
+	r := NewContainerReconciler(deps)
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// A restart task should be created for replica 0 despite the cleanup task
+	if n := countNewTasks(t, ctx, store, origIDs); n < 1 {
+		t.Errorf("expected restart task for exited replica 0 (cleanup task must not shadow it), got %d new tasks", n)
+	}
+}
+
 // Regression: container with status "not_found" should be restarted, same as "exited".
 // Before the fix, "not_found" containers were stuck forever — the reconciler only
 // checked for "exited" and ignored all other statuses.

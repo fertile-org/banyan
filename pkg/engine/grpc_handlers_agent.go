@@ -1,6 +1,6 @@
 // grpc_handlers_agent.go contains gRPC handlers for agent-to-engine RPCs:
 // Register, Heartbeat, PollTasks, ReportTaskResult, ReportContainerHealth,
-// and related helper methods (reconcileDeploymentStatus, collectServiceBackends, etc.).
+// and related helpers (collectServiceBackends, countAgentContainers, etc.).
 package engine
 
 import (

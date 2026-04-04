@@ -285,8 +285,8 @@ func (s *engineGRPCServer) collectDeployments(ctx context.Context, includeTasks 
 		}
 
 		if includeTasks {
-			for j := range allTasks {
-				di.Tasks = append(di.Tasks, taskRecordToProto(&allTasks[j]))
+			for j := range createTasks {
+				di.Tasks = append(di.Tasks, taskRecordToProto(&createTasks[j]))
 			}
 		}
 

@@ -3406,6 +3406,7 @@ func TestCollectServiceBackends(t *testing.T) {
 	// Task with IP, ports, running, completed — should be included
 	store.Save(ctx, types.KeyTasks+"worker-1/task-1", &types.TaskRecord{
 		ID: "task-1", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "web",
+		ReplicaIndex: 0,
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-0", ContainerStatus: "running",
 		ContainerIP: "10.0.1.5", Ports: []string{"8080:80"},
@@ -3414,6 +3415,7 @@ func TestCollectServiceBackends(t *testing.T) {
 	// Task without IP — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-1/task-2", &types.TaskRecord{
 		ID: "task-2", DeploymentID: "deploy-1", AgentID: "worker-1", ServiceName: "api",
+		ReplicaIndex: 0,
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-api-0", ContainerStatus: "running",
 		Ports: []string{"9090:90"},
@@ -3422,6 +3424,7 @@ func TestCollectServiceBackends(t *testing.T) {
 	// Task with IP but no ports — should be INCLUDED (DNS needs portless containers)
 	store.Save(ctx, types.KeyTasks+"worker-2/task-3", &types.TaskRecord{
 		ID: "task-3", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "db",
+		ReplicaIndex: 0,
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-worker-0", ContainerStatus: "running",
 		ContainerIP: "10.0.2.5",
@@ -3430,6 +3433,7 @@ func TestCollectServiceBackends(t *testing.T) {
 	// Task with IP and ports but not running — should be excluded
 	store.Save(ctx, types.KeyTasks+"worker-2/task-4", &types.TaskRecord{
 		ID: "task-4", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "db",
+		ReplicaIndex: 1,
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-db-0", ContainerStatus: "exited",
 		ContainerIP: "10.0.2.6", Ports: []string{"5432:5432"},
@@ -3445,6 +3449,7 @@ func TestCollectServiceBackends(t *testing.T) {
 	// Full match on worker-2
 	store.Save(ctx, types.KeyTasks+"worker-2/task-6", &types.TaskRecord{
 		ID: "task-6", DeploymentID: "deploy-1", AgentID: "worker-2", ServiceName: "web",
+		ReplicaIndex: 1,
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
 		ContainerName: "app-web-1", ContainerStatus: "running",
 		ContainerIP: "10.0.2.7", Ports: []string{"8080:80"},

@@ -480,7 +480,16 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 		return nil
 	}
 
-	var backends []*banyanpb.ServiceBackend
+	// Collect all create_and_start tasks, then filter to the latest per
+	// deployment+service+replica. After a container restart, both old and new
+	// tasks exist briefly — only the latest should be a backend.
+	type replicaKey struct {
+		depID   string
+		svc     string
+		replica int
+	}
+	latestTask := make(map[replicaKey]*types.TaskRecord)
+
 	for _, nodeKey := range nodeKeys {
 		var node types.NodeRecord
 		if err := s.store.Get(ctx, nodeKey, &node); err != nil {
@@ -497,24 +506,38 @@ func (s *engineGRPCServer) collectServiceBackends(ctx context.Context) []*banyan
 			if err := s.store.Get(ctx, taskKey, &task); err != nil {
 				continue
 			}
-			// Only include running containers from active deployments
-			depName, isRunning := runningDeployments[task.DeploymentID]
-			if task.Type != types.TaskTypeCreateAndStart ||
-				task.Status != types.StatusCompleted ||
-				task.ContainerStatus != types.StatusRunning ||
-				task.ContainerIP == "" ||
-				!isRunning {
+			if task.Type != types.TaskTypeCreateAndStart {
 				continue
 			}
-			backends = append(backends, &banyanpb.ServiceBackend{
-				ContainerName:  task.ContainerName,
-				ContainerIp:    task.ContainerIP,
-				Ports:          task.Ports,
-				AgentName:      task.AgentID,
-				ServiceName:    task.ServiceName,
-				DeploymentName: depName,
-			})
+			if _, isRunning := runningDeployments[task.DeploymentID]; !isRunning {
+				continue
+			}
+
+			k := replicaKey{depID: task.DeploymentID, svc: task.ServiceName, replica: task.ReplicaIndex}
+			if existing, ok := latestTask[k]; !ok || task.CreatedAt.After(existing.CreatedAt) {
+				t := task // copy
+				latestTask[k] = &t
+			}
 		}
+	}
+
+	// Only include the latest task per replica, and only if it's actually running with an IP.
+	var backends []*banyanpb.ServiceBackend
+	for _, task := range latestTask {
+		if task.Status != types.StatusCompleted ||
+			task.ContainerStatus != types.StatusRunning ||
+			task.ContainerIP == "" {
+			continue
+		}
+		depName := runningDeployments[task.DeploymentID]
+		backends = append(backends, &banyanpb.ServiceBackend{
+			ContainerName:  task.ContainerName,
+			ContainerIp:    task.ContainerIP,
+			Ports:          task.Ports,
+			AgentName:      task.AgentID,
+			ServiceName:    task.ServiceName,
+			DeploymentName: depName,
+		})
 	}
 
 	return backends

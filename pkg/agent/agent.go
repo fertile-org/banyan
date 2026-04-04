@@ -880,6 +880,7 @@ func (a *Agent) checkContainerHealth(ctx context.Context) {
 		status := containerStatusFunc(ctx, c.containerName)
 		cs := &banyanpb.ContainerStatus{
 			ContainerName: c.containerName,
+			TaskId:        c.taskID,
 			Status:        status,
 			Ip:            c.containerIP,
 		}

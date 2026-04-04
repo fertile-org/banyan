@@ -986,7 +986,8 @@ type ContainerStatus struct {
 	CpuPercent       float64                `protobuf:"fixed64,5,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`     // 0.0-100.0 (from nerdctl stats)
 	MemoryUsedBytes  uint64                 `protobuf:"varint,6,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
 	MemoryLimitBytes uint64                 `protobuf:"varint,7,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
-	ExitCode         int32                  `protobuf:"varint,8,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	ExitCode         int32                  `protobuf:"varint,8,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"` // container exit code (only set when status is "exited" or "dead")
+	TaskId           string                 `protobuf:"bytes,9,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`        // the task ID that created this container (unique, used for direct lookup)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1075,6 +1076,13 @@ func (x *ContainerStatus) GetExitCode() int32 {
 		return x.ExitCode
 	}
 	return 0
+}
+
+func (x *ContainerStatus) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
 }
 
 type ServiceBackend struct {
@@ -5207,7 +5215,7 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12:\n" +
 	"\n" +
 	"containers\x18\x02 \x03(\v2\x1a.banyan.v1.ContainerStatusR\n" +
-	"containers\"\x9d\x02\n" +
+	"containers\"\xb6\x02\n" +
 	"\x0fContainerStatus\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x0e\n" +
@@ -5217,7 +5225,8 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"cpuPercent\x12*\n" +
 	"\x11memory_used_bytes\x18\x06 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
 	"\x12memory_limit_bytes\x18\a \x01(\x04R\x10memoryLimitBytes\x12\x1b\n" +
-	"\texit_code\x18\b \x01(\x05R\bexitCode\"\xdb\x01\n" +
+	"\texit_code\x18\b \x01(\x05R\bexitCode\x12\x17\n" +
+	"\atask_id\x18\t \x01(\tR\x06taskId\"\xdb\x01\n" +
 	"\x0eServiceBackend\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12!\n" +
 	"\fcontainer_ip\x18\x02 \x01(\tR\vcontainerIp\x12\x14\n" +

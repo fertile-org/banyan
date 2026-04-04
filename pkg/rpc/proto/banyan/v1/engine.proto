@@ -151,7 +151,8 @@ message ContainerStatus {
   double cpu_percent = 5;                     // 0.0-100.0 (from nerdctl stats)
   uint64 memory_used_bytes = 6;
   uint64 memory_limit_bytes = 7;
-  int32 exit_code = 8;
+  int32 exit_code = 8;                        // container exit code (only set when status is "exited" or "dead")
+  string task_id = 9;                         // the task ID that created this container (unique, used for direct lookup)
 }
 
 message ServiceBackend {

@@ -321,101 +321,47 @@ func (s *engineGRPCServer) ReportContainerHealth(ctx context.Context, req *banya
 		return nil, status.Error(codes.InvalidArgument, "agent_name is required")
 	}
 
-	// Build maps of container statuses, IPs, and health statuses for quick lookup
-	statusMap := make(map[string]string, len(req.Containers))
-	ipMap := make(map[string]string, len(req.Containers))
-	healthMap := make(map[string]string, len(req.Containers))
-	exitCodeMap := make(map[string]int32)
-	type containerMetrics struct {
-		cpuPercent float64
-		memUsed    uint64
-		memLimit   uint64
-		hasMetrics bool
-	}
-	metricsMap := make(map[string]containerMetrics)
-
+	// Each container report includes its task_id, enabling direct O(1) lookup.
+	// No scanning, no container-name matching, no "latest" heuristics.
+	// This eliminates ghost-container bugs from container name reuse after restarts.
+	now := time.Now()
 	for _, c := range req.Containers {
-		statusMap[c.ContainerName] = c.Status
-		if c.Ip != "" {
-			ipMap[c.ContainerName] = c.Ip
+		if c.TaskId == "" {
+			continue // skip entries without task ID (shouldn't happen with current agent)
 		}
-		if c.HealthStatus != "" {
-			healthMap[c.ContainerName] = c.HealthStatus
-		}
-		if c.ExitCode != 0 {
-			exitCodeMap[c.ContainerName] = c.ExitCode
-		}
-		if c.CpuPercent > 0 || c.MemoryUsedBytes > 0 {
-			metricsMap[c.ContainerName] = containerMetrics{
-				cpuPercent: c.CpuPercent,
-				memUsed:    c.MemoryUsedBytes,
-				memLimit:   c.MemoryLimitBytes,
-				hasMetrics: true,
-			}
-		}
-	}
 
-	// Update matching tasks in store
-	taskPrefix := types.KeyTasks + req.AgentName + "/"
-	keys, err := s.store.List(ctx, taskPrefix)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to list tasks: %v", err)
-	}
-
-	// Track which deployments have changed container status
-	affectedDeployments := make(map[string]bool)
-
-	// Build set of latest deployment IDs so we only update tasks from the
-	// current deployment. Old deployments may have tasks with the same container
-	// name — updating them would cause stale records to mirror live status.
-	latestDeployIDs := s.latestDeploymentIDs(ctx)
-
-	for _, key := range keys {
+		taskKey := types.KeyTasks + req.AgentName + "/" + c.TaskId
 		var task types.TaskRecord
-		if err := s.store.Get(ctx, key, &task); err != nil {
-			continue
+		if err := s.store.Get(ctx, taskKey, &task); err != nil {
+			continue // task not found (may have been cleaned up)
 		}
+
+		// Only update completed create_and_start tasks
 		if task.Type != types.TaskTypeCreateAndStart || task.Status != types.StatusCompleted {
 			continue
 		}
-		// Only update tasks from the latest deployment per name
-		if !latestDeployIDs[task.DeploymentID] {
-			continue
+
+		task.ContainerStatus = c.Status
+		task.ContainerCheckedAt = now
+		if c.Ip != "" {
+			task.ContainerIP = c.Ip
 		}
-		if containerStatus, ok := statusMap[task.ContainerName]; ok {
-			task.ContainerStatus = containerStatus
-			task.ContainerCheckedAt = time.Now()
-			if ip, hasIP := ipMap[task.ContainerName]; hasIP {
-				task.ContainerIP = ip
-			}
-			if hs, hasHS := healthMap[task.ContainerName]; hasHS {
-				task.HealthStatus = hs
-			}
-			if ec, hasEC := exitCodeMap[task.ContainerName]; hasEC {
-				// Clamp to POSIX range (0-255). Values outside this range
-				// indicate a reporting bug, not a real exit code.
-				if ec >= 0 && ec <= 255 {
-					task.ExitCode = int(ec)
-				}
-			}
-			if m, hasM := metricsMap[task.ContainerName]; hasM {
-				task.CPUPercent = m.cpuPercent
-				task.MemoryUsedBytes = m.memUsed
-				task.MemoryLimitBytes = m.memLimit
-			}
-			if err := s.store.Save(ctx, key, &task); err != nil {
-				s.logger().Warn("Failed to save container health", "container", task.ContainerName, "error", err)
-			}
-			if task.DeploymentID != "" {
-				affectedDeployments[task.DeploymentID] = true
-			}
+		if c.HealthStatus != "" {
+			task.HealthStatus = c.HealthStatus
+		}
+		if c.ExitCode != 0 && c.ExitCode >= 0 && c.ExitCode <= 255 {
+			task.ExitCode = int(c.ExitCode)
+		}
+		if c.CpuPercent > 0 || c.MemoryUsedBytes > 0 {
+			task.CPUPercent = c.CpuPercent
+			task.MemoryUsedBytes = c.MemoryUsedBytes
+			task.MemoryLimitBytes = c.MemoryLimitBytes
+		}
+
+		if err := s.store.Save(ctx, taskKey, &task); err != nil {
+			s.logger().Warn("Failed to save container health", "container", task.ContainerName, "error", err)
 		}
 	}
-
-	// NOTE: Unreported container detection and deployment status reconciliation
-	// are now handled by the reconciliation engine (ContainerReconciler and
-	// DeploymentReconciler) which runs every 10 seconds. This handler only
-	// updates task status/metrics from agent health reports.
 
 	return &banyanpb.ReportContainerHealthResponse{}, nil
 }

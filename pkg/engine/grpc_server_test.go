@@ -395,7 +395,7 @@ func TestReportContainerHealth(t *testing.T) {
 		_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 			AgentName: "worker-1",
 			Containers: []*banyanpb.ContainerStatus{
-				{ContainerName: "test-web-0", Status: "running"},
+				{ContainerName: "test-web-0", TaskId: "task-1", Status: "running"},
 			},
 		})
 		if err != nil {
@@ -572,8 +572,8 @@ func TestReportContainerHealth_NonMatchingTask(t *testing.T) {
 	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName: "worker-3",
 		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "pending-container", Status: "running"},
-			{ContainerName: "stop-container", Status: "running"},
+			{ContainerName: "pending-container", TaskId: "task-p", Status: "running"},
+			{ContainerName: "stop-container", TaskId: "task-s", Status: "running"},
 		},
 	})
 	if err != nil {
@@ -2008,25 +2008,8 @@ func TestPollTasks_GetError(t *testing.T) {
 	}
 }
 
-func TestReportContainerHealth_ListError(t *testing.T) {
-	memStore := storage.NewMemoryStore()
-	store := &errorStore{MemoryStore: memStore, listErr: true}
-	srv := &engineGRPCServer{store: store}
-
-	ctx := context.Background()
-	_, err := srv.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
-		AgentName: "agent-1",
-		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "test-web-0", Status: "running"},
-		},
-	})
-	if err == nil {
-		t.Fatal("expected error when store.List fails")
-	}
-	if status.Code(err) != codes.Internal {
-		t.Errorf("expected Internal, got %v", status.Code(err))
-	}
-}
+// NOTE: TestReportContainerHealth_ListError removed — the new task-ID-based
+// handler does direct key lookups, not List scans.
 
 func TestReportContainerHealth_GetError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
@@ -2042,7 +2025,7 @@ func TestReportContainerHealth_GetError(t *testing.T) {
 	resp, err := srv.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName: "agent-1",
 		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "test-web-0", Status: "running"},
+			{ContainerName: "test-web-0", TaskId: "task-1", Status: "running"},
 		},
 	})
 	if err != nil {
@@ -2054,11 +2037,31 @@ func TestReportContainerHealth_GetError(t *testing.T) {
 	}
 }
 
-func TestReportContainerHealth_ContainerNotInMap(t *testing.T) {
+func TestReportContainerHealth_UnknownTaskId(t *testing.T) {
 	memStore := storage.NewMemoryStore()
 	ctx := context.Background()
 
-	// Task exists and is completed, but the reported containers don't match its name
+	srv := &engineGRPCServer{store: memStore}
+
+	// Report with a task_id that doesn't exist — should be silently skipped
+	resp, err := srv.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
+		AgentName: "agent-1",
+		Containers: []*banyanpb.ContainerStatus{
+			{ContainerName: "test-web-0", TaskId: "nonexistent-task", Status: "running"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp == nil {
+		t.Error("expected non-nil response")
+	}
+}
+
+func TestReportContainerHealth_MissingTaskId_Skipped(t *testing.T) {
+	memStore := storage.NewMemoryStore()
+	ctx := context.Background()
+
 	memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
 		Status: types.StatusCompleted, ContainerName: "test-web-0",
@@ -2066,10 +2069,11 @@ func TestReportContainerHealth_ContainerNotInMap(t *testing.T) {
 
 	srv := &engineGRPCServer{store: memStore}
 
+	// Report without task_id — should be skipped, task NOT updated
 	resp, err := srv.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName: "agent-1",
 		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "other-container", Status: "running"},
+			{ContainerName: "test-web-0", Status: "running"},
 		},
 	})
 	if err != nil {
@@ -2079,11 +2083,10 @@ func TestReportContainerHealth_ContainerNotInMap(t *testing.T) {
 		t.Error("expected non-nil response")
 	}
 
-	// Verify the task's container status was NOT updated
 	var task types.TaskRecord
 	memStore.Get(ctx, types.KeyTasks+"agent-1/task-1", &task)
 	if task.ContainerStatus != "" {
-		t.Errorf("expected empty container status, got %q", task.ContainerStatus)
+		t.Errorf("task should NOT be updated without TaskId, got status %q", task.ContainerStatus)
 	}
 }
 
@@ -2091,13 +2094,11 @@ func TestReportContainerHealth_SaveError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
 	ctx := context.Background()
 
-	// Seed a completed create_and_start task
 	memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
 		Status: types.StatusCompleted, ContainerName: "test-web-0",
 	})
 
-	// Use a store that only fails on Save (List and Get work normally)
 	store := &saveOnlyErrorStore{MemoryStore: memStore}
 	srv := &engineGRPCServer{store: store}
 
@@ -2105,7 +2106,7 @@ func TestReportContainerHealth_SaveError(t *testing.T) {
 	resp, err := srv.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName: "agent-1",
 		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "test-web-0", Status: "running"},
+			{ContainerName: "test-web-0", TaskId: "task-1", Status: "running"},
 		},
 	})
 	if err != nil {
@@ -3325,7 +3326,7 @@ func TestReportContainerHealth_StoresIP(t *testing.T) {
 	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName: "worker-1",
 		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "app-web-0", Status: "running", Ip: "10.0.1.5"},
+			{ContainerName: "app-web-0", TaskId: "task-ip1", Status: "running", Ip: "10.0.1.5"},
 		},
 	})
 	if err != nil {
@@ -3362,7 +3363,7 @@ func TestReportContainerHealth_StoresHealthStatus(t *testing.T) {
 	_, err := client.ReportContainerHealth(ctx, &banyanpb.ReportContainerHealthRequest{
 		AgentName: "worker-1",
 		Containers: []*banyanpb.ContainerStatus{
-			{ContainerName: "app-db-0", Status: "running", Ip: "10.0.1.10", HealthStatus: "healthy"},
+			{ContainerName: "app-db-0", TaskId: "task-hc1", Status: "running", Ip: "10.0.1.10", HealthStatus: "healthy"},
 		},
 	})
 	if err != nil {

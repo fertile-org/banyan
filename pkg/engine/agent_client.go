@@ -15,7 +15,9 @@ import (
 // No application-layer auth is needed — the agent verifies the caller is the engine
 // by checking the peer IP matches the engine's control tunnel IP.
 func streamAgentLogs(ctx context.Context, agentAddr, containerName string, follow bool, tail int32) (io.ReadCloser, error) {
-	conn, err := grpc.NewClient(agentAddr,
+	// Use passthrough scheme for direct IP:port addresses. grpc.NewClient defaults
+	// to the "dns" resolver which can silently fail on bare IP addresses.
+	conn, err := grpc.NewClient("passthrough:///"+agentAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	if err != nil {

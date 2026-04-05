@@ -7,6 +7,7 @@ import type {
   DeploymentInfo,
   ContainerInfo,
   ClusterEvent,
+  SecretInfo,
   StopTaskRequest,
   StopTaskResponse,
   ScaleRequest,
@@ -95,8 +96,26 @@ export function listEvents(limit?: number): Promise<{ events?: ClusterEvent[] }>
   return rpc("ListEvents", { limit: limit ?? 0 });
 }
 
-export function getRecentLogs(containerName: string, tail: number = 500): Promise<{ lines?: string[]; containerName?: string }> {
-  return rpc("GetRecentLogs", { containerName, tail });
+export function getRecentLogs(containerName: string, tail: number = 500, agentId?: string): Promise<{ lines?: string[]; containerName?: string }> {
+  return rpc("GetRecentLogs", { containerName, tail, agentId: agentId || "" });
+}
+
+// --- Secret APIs ---
+
+export function listSecrets(): Promise<{ secrets?: SecretInfo[] }> {
+  return rpc("ListSecrets", {});
+}
+
+export function createSecret(name: string, value: string): Promise<object> {
+  return rpc("CreateSecret", { name, value });
+}
+
+export function getSecret(name: string, reveal: boolean): Promise<SecretInfo> {
+  return rpc("GetSecret", { name, reveal });
+}
+
+export function deleteSecret(name: string): Promise<object> {
+  return rpc("DeleteSecret", { name });
 }
 
 // --- Action APIs ---
@@ -122,11 +141,12 @@ export function healthCheck(): Promise<{ status: string }> {
 export async function* streamLogs(
   containerName: string,
   tail: number = 100,
+  agentId?: string,
 ): AsyncGenerator<string> {
   const res = await fetch(`${BASE_URL}/GetLogs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ containerName, follow: true, tail }),
+    body: JSON.stringify({ containerName, follow: true, tail, agentId: agentId || "" }),
   });
 
   if (!res.ok || !res.body) {

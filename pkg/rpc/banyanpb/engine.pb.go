@@ -986,7 +986,8 @@ type ContainerStatus struct {
 	CpuPercent       float64                `protobuf:"fixed64,5,opt,name=cpu_percent,json=cpuPercent,proto3" json:"cpu_percent,omitempty"`     // 0.0-100.0 (from nerdctl stats)
 	MemoryUsedBytes  uint64                 `protobuf:"varint,6,opt,name=memory_used_bytes,json=memoryUsedBytes,proto3" json:"memory_used_bytes,omitempty"`
 	MemoryLimitBytes uint64                 `protobuf:"varint,7,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
-	ExitCode         int32                  `protobuf:"varint,8,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
+	ExitCode         int32                  `protobuf:"varint,8,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"` // container exit code (only set when status is "exited" or "dead")
+	TaskId           string                 `protobuf:"bytes,9,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`        // the task ID that created this container (unique, used for direct lookup)
 	unknownFields    protoimpl.UnknownFields
 	sizeCache        protoimpl.SizeCache
 }
@@ -1075,6 +1076,13 @@ func (x *ContainerStatus) GetExitCode() int32 {
 		return x.ExitCode
 	}
 	return 0
+}
+
+func (x *ContainerStatus) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
 }
 
 type ServiceBackend struct {
@@ -3098,6 +3106,7 @@ type GetLogsRequest struct {
 	ContainerName string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
 	Follow        bool                   `protobuf:"varint,2,opt,name=follow,proto3" json:"follow,omitempty"`
 	Tail          int32                  `protobuf:"varint,3,opt,name=tail,proto3" json:"tail,omitempty"`
+	AgentId       string                 `protobuf:"bytes,4,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // direct lookup — skip scanning when provided
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3151,6 +3160,13 @@ func (x *GetLogsRequest) GetTail() int32 {
 		return x.Tail
 	}
 	return 0
+}
+
+func (x *GetLogsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
 }
 
 type GetLogsResponse struct {
@@ -5018,7 +5034,8 @@ func (x *ListEventsResponse) GetEvents() []*ClusterEvent {
 type GetRecentLogsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ContainerName string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
-	Tail          int32                  `protobuf:"varint,2,opt,name=tail,proto3" json:"tail,omitempty"` // number of lines (0 = default 500)
+	Tail          int32                  `protobuf:"varint,2,opt,name=tail,proto3" json:"tail,omitempty"`                     // number of lines (0 = default 500)
+	AgentId       string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // direct lookup — skip scanning when provided
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5065,6 +5082,13 @@ func (x *GetRecentLogsRequest) GetTail() int32 {
 		return x.Tail
 	}
 	return 0
+}
+
+func (x *GetRecentLogsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
 }
 
 type GetRecentLogsResponse struct {
@@ -5207,7 +5231,7 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12:\n" +
 	"\n" +
 	"containers\x18\x02 \x03(\v2\x1a.banyan.v1.ContainerStatusR\n" +
-	"containers\"\x9d\x02\n" +
+	"containers\"\xb6\x02\n" +
 	"\x0fContainerStatus\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x0e\n" +
@@ -5217,7 +5241,8 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"cpuPercent\x12*\n" +
 	"\x11memory_used_bytes\x18\x06 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
 	"\x12memory_limit_bytes\x18\a \x01(\x04R\x10memoryLimitBytes\x12\x1b\n" +
-	"\texit_code\x18\b \x01(\x05R\bexitCode\"\xdb\x01\n" +
+	"\texit_code\x18\b \x01(\x05R\bexitCode\x12\x17\n" +
+	"\atask_id\x18\t \x01(\tR\x06taskId\"\xdb\x01\n" +
 	"\x0eServiceBackend\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12!\n" +
 	"\fcontainer_ip\x18\x02 \x01(\tR\vcontainerIp\x12\x14\n" +
@@ -5419,11 +5444,12 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"\x11memory_used_bytes\x18\x14 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
 	"\x12memory_limit_bytes\x18\x15 \x01(\x04R\x10memoryLimitBytes\x12\x1b\n" +
 	"\texit_code\x18\x16 \x01(\x05R\bexitCode\x12#\n" +
-	"\rrestart_count\x18\x17 \x01(\x05R\frestartCount\"c\n" +
+	"\rrestart_count\x18\x17 \x01(\x05R\frestartCount\"~\n" +
 	"\x0eGetLogsRequest\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06follow\x18\x02 \x01(\bR\x06follow\x12\x12\n" +
-	"\x04tail\x18\x03 \x01(\x05R\x04tail\"%\n" +
+	"\x04tail\x18\x03 \x01(\x05R\x04tail\x12\x19\n" +
+	"\bagent_id\x18\x04 \x01(\tR\aagentId\"%\n" +
 	"\x0fGetLogsResponse\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\x10\n" +
 	"\x0eGetInfoRequest\"4\n" +
@@ -5550,10 +5576,11 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"\x11ListEventsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\"E\n" +
 	"\x12ListEventsResponse\x12/\n" +
-	"\x06events\x18\x01 \x03(\v2\x17.banyan.v1.ClusterEventR\x06events\"Q\n" +
+	"\x06events\x18\x01 \x03(\v2\x17.banyan.v1.ClusterEventR\x06events\"l\n" +
 	"\x14GetRecentLogsRequest\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x12\n" +
-	"\x04tail\x18\x02 \x01(\x05R\x04tail\"T\n" +
+	"\x04tail\x18\x02 \x01(\x05R\x04tail\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\"T\n" +
 	"\x15GetRecentLogsResponse\x12\x14\n" +
 	"\x05lines\x18\x01 \x03(\tR\x05lines\x12%\n" +
 	"\x0econtainer_name\x18\x02 \x01(\tR\rcontainerName2\xb8\x0f\n" +

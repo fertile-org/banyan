@@ -118,11 +118,12 @@ func (c *EngineClient) Info(ctx context.Context) (*banyanpb.GetInfoResponse, err
 }
 
 // StreamLogs streams logs for a container from the engine gRPC API.
-func (c *EngineClient) StreamLogs(ctx context.Context, container string, follow bool, tail int) (io.ReadCloser, error) {
+func (c *EngineClient) StreamLogs(ctx context.Context, container string, follow bool, tail int, agentID string) (io.ReadCloser, error) {
 	stream, err := c.client.GetLogs(ctx, &banyanpb.GetLogsRequest{
 		ContainerName: container,
 		Follow:        follow,
 		Tail:          int32(tail), //nolint:gosec // tail count is always small
+		AgentId:       agentID,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to stream logs: %w", err)

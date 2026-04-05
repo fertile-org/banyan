@@ -246,7 +246,7 @@ Automatic failure recovery through a desired-state reconciliation engine. Banyan
 - **Restart policy enforcement**: Respects Docker Compose `restart:` field — `always` (default), `on-failure`, `on-failure:N` (with retry limit), `unless-stopped`, `no`. Exponential backoff prevents restart storms.
 - **Agent failure rescheduling**: When an agent dies, its containers are rescheduled to healthy agents after a grace period (2 min standard, 5 min for long-running agents). Safeguards: anti-flapping cooldown, capacity checks, stateful pinning for services with local volumes.
 - **Deployment health status**: Each deployment is `healthy`, `recovering`, `degraded`, or `stopped` — visible in CLI, TUI dashboard, and web dashboard.
-- **Engine restart recovery**: On startup, the engine runs a full reconciliation pass before accepting new deploys.
+- **Engine restart recovery**: The reconciliation loop starts within 10 seconds of the engine coming back up. Agents reconnect, report their state, and the reconciler repairs any drift.
 - **Agent lifecycle cleanup**: Graceful shutdown cleans up WireGuard, iptables, DNS, and CNI. Stale interface recovery on startup ensures clean networking regardless of prior state.
 
 See [How Banyan Works](/getting-started/how-it-works/) for the mental model behind reconciliation.

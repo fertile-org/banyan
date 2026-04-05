@@ -86,7 +86,7 @@ func (s *engineGRPCServer) GetRecentLogs(ctx context.Context, req *banyanpb.GetR
 		tail = 500
 	}
 
-	task, node, err := s.findContainerAgent(ctx, req.ContainerName)
+	task, node, err := s.findContainerAgent(ctx, req.ContainerName, req.AgentId)
 	if err != nil {
 		return nil, err
 	}
@@ -249,12 +249,8 @@ func (s *engineGRPCServer) collectDeployments(ctx context.Context, includeTasks 
 		record := allDeploys[i].record
 
 		allTasks := types.CollectDeploymentTasks(ctx, s.store, record.ID)
-		var createTasks []types.TaskRecord
-		for j := range allTasks {
-			if allTasks[j].Type == types.TaskTypeCreateAndStart {
-				createTasks = append(createTasks, allTasks[j])
-			}
-		}
+		// Filter to latest task per replica — old/failed restart tasks don't count.
+		createTasks := latestTasksPerReplica(allTasks)
 
 		healthy := 0
 		for j := range createTasks {
@@ -289,8 +285,8 @@ func (s *engineGRPCServer) collectDeployments(ctx context.Context, includeTasks 
 		}
 
 		if includeTasks {
-			for j := range allTasks {
-				di.Tasks = append(di.Tasks, taskRecordToProto(&allTasks[j]))
+			for j := range createTasks {
+				di.Tasks = append(di.Tasks, taskRecordToProto(&createTasks[j]))
 			}
 		}
 
@@ -344,10 +340,11 @@ func (s *engineGRPCServer) collectContainers(ctx context.Context) []*banyanpb.Co
 		if !latestIDs[allDeploys[i].record.ID] {
 			continue
 		}
-		tasks := types.CollectDeploymentTasks(ctx, s.store, allDeploys[i].record.ID)
+		allTasks := types.CollectDeploymentTasks(ctx, s.store, allDeploys[i].record.ID)
+		tasks := latestTasksPerReplica(allTasks)
 		for j := range tasks {
 			t := &tasks[j]
-			if t.Type != types.TaskTypeCreateAndStart || t.Status != types.StatusCompleted {
+			if t.Status != types.StatusCompleted {
 				continue
 			}
 			containers = append(containers, &banyanpb.ContainerInfo{
@@ -458,6 +455,34 @@ func (s *engineGRPCServer) buildClusterSummary(ctx context.Context, agents []*ba
 		HealthyContainers:  healthyContainers,
 		TasksByStatus:      tasksByStatus,
 	}
+}
+
+// latestTasksPerReplica filters tasks to only the most recent create_and_start
+// task per service+replica. Old tasks (superseded restarts, failed attempts)
+// are excluded. This keeps container counts stable across restart cycles.
+func latestTasksPerReplica(allTasks []types.TaskRecord) []types.TaskRecord {
+	type key struct {
+		svc     string
+		replica int
+	}
+	latest := make(map[key]*types.TaskRecord)
+
+	for i := range allTasks {
+		t := &allTasks[i]
+		if t.Type != types.TaskTypeCreateAndStart {
+			continue
+		}
+		k := key{svc: t.ServiceName, replica: t.ReplicaIndex}
+		if existing, ok := latest[k]; !ok || t.CreatedAt.After(existing.CreatedAt) {
+			latest[k] = t
+		}
+	}
+
+	result := make([]types.TaskRecord, 0, len(latest))
+	for _, t := range latest {
+		result = append(result, *t)
+	}
+	return result
 }
 
 // taskRecordToProto converts a types.TaskRecord to a banyanpb.TaskInfo.

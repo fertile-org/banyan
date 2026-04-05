@@ -324,7 +324,7 @@ func (s *engineGRPCServer) GetLogs(req *banyanpb.GetLogsRequest, stream grpc.Ser
 	ctx := stream.Context()
 
 	// Find which agent has this container
-	task, node, err := s.findContainerAgent(ctx, req.ContainerName)
+	task, node, err := s.findContainerAgent(ctx, req.ContainerName, req.AgentId)
 	if err != nil {
 		return status.Errorf(codes.NotFound, "%v", err)
 	}
@@ -805,16 +805,57 @@ func (s *engineGRPCServer) findDeploymentByName(ctx context.Context, name string
 	return best, bestKey, nil
 }
 
-// findContainerAgent scans to find which agent has the given container.
-func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName string) (*types.TaskRecord, *types.NodeRecord, error) {
+// findContainerAgent finds which agent has the given container.
+//
+// If agentID is provided, does a direct O(1) lookup — no scanning.
+// If agentID is empty (CLI fallback), scans only healthy agents.
+func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName, agentID string) (*types.TaskRecord, *types.NodeRecord, error) {
+	// Direct lookup when agent_id is provided (web dashboard, connect API)
+	if agentID != "" {
+		var node types.NodeRecord
+		if err := s.store.Get(ctx, types.KeyNodes+agentID, &node); err != nil {
+			return nil, nil, fmt.Errorf("agent %q not found", agentID)
+		}
+
+		taskKeys, err := s.store.List(ctx, types.KeyTasks+agentID+"/")
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to list tasks on agent %q: %w", agentID, err)
+		}
+
+		var best *types.TaskRecord
+		for _, key := range taskKeys {
+			var task types.TaskRecord
+			if err := s.store.Get(ctx, key, &task); err != nil {
+				continue
+			}
+			if task.ContainerName == containerName && task.Type == types.TaskTypeCreateAndStart {
+				if best == nil || task.CreatedAt.After(best.CreatedAt) {
+					t := task
+					best = &t
+				}
+			}
+		}
+		if best == nil {
+			return nil, nil, fmt.Errorf("container %q not found on agent %q", containerName, agentID)
+		}
+		return best, &node, nil
+	}
+
+	// Fallback: scan healthy agents only (CLI which doesn't have agent_id)
 	nodeKeys, err := s.store.List(ctx, types.KeyNodes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
+	var bestTask *types.TaskRecord
+	var bestNode *types.NodeRecord
+
 	for _, nodeKey := range nodeKeys {
 		var node types.NodeRecord
 		if err := s.store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+		if node.Status != "ready" || time.Since(node.LastSeen) > agentStalenessThreshold {
 			continue
 		}
 
@@ -828,13 +869,22 @@ func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName
 			if err := s.store.Get(ctx, taskKey, &task); err != nil {
 				continue
 			}
-			if task.ContainerName == containerName && task.Type == types.TaskTypeCreateAndStart {
-				return &task, &node, nil
+			if task.ContainerName != containerName || task.Type != types.TaskTypeCreateAndStart {
+				continue
+			}
+			if bestTask == nil || task.CreatedAt.After(bestTask.CreatedAt) {
+				t := task
+				n := node
+				bestTask = &t
+				bestNode = &n
 			}
 		}
 	}
 
-	return nil, nil, fmt.Errorf("container %q not found in cluster", containerName)
+	if bestTask == nil {
+		return nil, nil, fmt.Errorf("container %q not found on any healthy agent", containerName)
+	}
+	return bestTask, bestNode, nil
 }
 
 // StopTask stops a single container by creating a stop_and_remove task for the given task.

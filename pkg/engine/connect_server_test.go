@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -58,7 +59,7 @@ func TestConnectAdapter_GetDashboardData(t *testing.T) {
 	// Seed a node and deployment so the response is non-empty
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 	_ = srv.store.Save(ctx, types.KeyDeployments+"myapp-1", &types.DeploymentRecord{
 		ID:     "myapp-1",
@@ -93,7 +94,7 @@ func TestConnectAdapter_Scale(t *testing.T) {
 	// Seed a running deployment with a service
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 	_ = srv.store.Save(ctx, types.KeyDeployments+"myapp-1", &types.DeploymentRecord{
 		ID:     "myapp-1",
@@ -138,7 +139,7 @@ func TestConnectAdapter_Down(t *testing.T) {
 	// Seed a running deployment with a completed task
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 	_ = srv.store.Save(ctx, types.KeyDeployments+"myapp-1", &types.DeploymentRecord{
 		ID:     "myapp-1",
@@ -177,7 +178,7 @@ func TestConnectAdapter_GetStatus(t *testing.T) {
 
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 
 	resp, err := client.GetStatus(ctx, connect.NewRequest(&banyanpb.GetStatusRequest{}))
@@ -227,7 +228,7 @@ func TestConnectAdapter_Deploy(t *testing.T) {
 	// Need at least one agent for scheduling
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 
 	resp, err := client.Deploy(ctx, connect.NewRequest(&banyanpb.DeployRPCRequest{
@@ -421,7 +422,7 @@ func TestConnectAdapter_PollTasks(t *testing.T) {
 	ctx := context.Background()
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 
 	resp, err := client.PollTasks(ctx, connect.NewRequest(&banyanpb.PollTasksRequest{
@@ -442,7 +443,7 @@ func TestConnectAdapter_ReportTaskResult(t *testing.T) {
 	ctx := context.Background()
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID:           "task-1",
@@ -472,7 +473,7 @@ func TestConnectAdapter_ReportContainerHealth(t *testing.T) {
 	ctx := context.Background()
 	_ = srv.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{
 		Name:   "agent-1",
-		Status: "ready",
+		Status: "ready", LastSeen: time.Now(),
 	})
 
 	resp, err := client.ReportContainerHealth(ctx, connect.NewRequest(&banyanpb.ReportContainerHealthRequest{
@@ -709,6 +710,7 @@ func TestConnectAdapter_GetLogs_Success(t *testing.T) {
 		Name:       "agent-1",
 		Status:     "ready",
 		APIAddress: agentAddr,
+		LastSeen:   time.Now(),
 	})
 	_ = srv.store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID:            "task-1",

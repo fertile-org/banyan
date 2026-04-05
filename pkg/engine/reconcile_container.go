@@ -91,10 +91,16 @@ func (c *ContainerReconciler) reconcileDeployment(ctx context.Context, dep types
 			continue
 		}
 
-		// Find the latest task per replica (by CreatedAt).
+		// Find the latest create_and_start task per replica (by CreatedAt).
+		// Only track create tasks — stop_and_remove cleanup tasks must not
+		// shadow the actual container task, or the reconciler loses track
+		// of replicas that need restarting.
 		latestByReplica := make(map[int]*types.TaskRecord)
 		for i := range tasks {
 			t := &tasks[i]
+			if t.Type != types.TaskTypeCreateAndStart {
+				continue
+			}
 			existing, found := latestByReplica[t.ReplicaIndex]
 			if !found || t.CreatedAt.After(existing.CreatedAt) {
 				latestByReplica[t.ReplicaIndex] = t
@@ -114,8 +120,11 @@ func (c *ContainerReconciler) reconcileDeployment(ctx context.Context, dep types
 		}
 
 		for _, task := range latestByReplica {
-			// Only consider exited containers on healthy agents.
-			if task.ContainerStatus != "exited" {
+			// Only consider exited/not_found containers on healthy agents.
+			// "not_found" means the container was removed from nerdctl but
+			// the task record still exists — treat the same as "exited".
+			isGone := task.ContainerStatus == "exited" || task.ContainerStatus == "not_found"
+			if !isGone {
 				// If running, mark healthy for backoff reset.
 				if task.ContainerStatus == types.StatusRunning {
 					backoffKey := fmt.Sprintf("%s-%s-%d", dep.ID, svcName, task.ReplicaIndex)

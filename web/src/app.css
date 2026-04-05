@@ -678,6 +678,184 @@ tbody tr:hover td {
 }
 
 /* ============================================================
+   Filter Bar + Custom Select
+   ============================================================ */
+
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.filter-bar .form-input {
+  max-width: 180px;
+  padding: 5px 10px;
+  font-size: 12px;
+}
+
+.filter-info {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+/* Custom Select */
+
+.filter-select {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.filter-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 150ms;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-select-trigger:hover {
+  border-color: var(--border-accent);
+}
+
+.filter-select-trigger.active {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.filter-select-placeholder {
+  color: var(--text-muted);
+}
+
+.filter-select-chevron {
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 150ms;
+}
+
+.filter-select-chevron.open {
+  transform: rotate(180deg);
+}
+
+.filter-select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 100%;
+  max-width: 280px;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border-accent);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  padding: 4px 0;
+}
+
+.filter-select-option {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  transition: background 100ms;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-select-option:hover {
+  background: var(--surface-hover);
+}
+
+.filter-select-option.active {
+  color: var(--primary);
+  background: var(--primary-dim);
+}
+
+.filter-select-group {
+  padding: 8px 12px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
+.filter-select-group:not(:first-child) {
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+  padding-top: 8px;
+}
+
+/* ============================================================
+   Log Panel Collapse (smooth expand/collapse)
+   ============================================================ */
+
+.log-panel-collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms ease-out;
+}
+
+.log-panel-collapse.expanded {
+  grid-template-rows: 1fr;
+}
+
+.log-panel-collapse > div {
+  overflow: hidden;
+}
+
+/* ============================================================
+   Input with Reveal Toggle
+   ============================================================ */
+
+.input-reveal {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-reveal .form-input {
+  padding-right: 36px;
+}
+
+.input-reveal-toggle {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  transition: color 150ms;
+}
+
+.input-reveal-toggle:hover {
+  color: var(--text);
+}
+
+/* ============================================================
    Responsive
    ============================================================ */
 

@@ -14,8 +14,9 @@ import (
 )
 
 var (
-	logsFollow bool
-	logsTail   int
+	logsFollow  bool
+	logsTail    int
+	logsAgentID string
 )
 
 var logsCmd = &cobra.Command{
@@ -39,6 +40,7 @@ func init() {
 
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Follow log output")
 	logsCmd.Flags().IntVar(&logsTail, "tail", 0, "Number of lines from end (0 means all)")
+	logsCmd.Flags().StringVar(&logsAgentID, "agent-id", "", "Agent running the container (skips scanning)")
 }
 
 func runLogs(cmd *cobra.Command, args []string) error {
@@ -65,7 +67,7 @@ func runLogs(cmd *cobra.Command, args []string) error {
 	}
 	defer client.Close()
 
-	reader, err := client.StreamLogs(ctx, containerName, logsFollow, logsTail)
+	reader, err := client.StreamLogs(ctx, containerName, logsFollow, logsTail, logsAgentID)
 	if err != nil {
 		return fmt.Errorf("failed to stream logs: %w", err)
 	}

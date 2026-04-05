@@ -167,6 +167,60 @@ For each `.proto` file:
 
 ---
 
+## IDENT — Identity and Lookup Correctness
+
+The M12 retrospective revealed a recurring pattern: using non-unique identifiers as lookup keys, then patching with increasingly complex heuristics when collisions appeared. The correct fix was always to use the unique identifier that was available from the start. Simplicity is not carelessness.
+
+### IDENT-1: Lookup Key Uniqueness
+
+For every function that finds/matches a record (task, container, node, deployment):
+
+- [ ] The lookup key is **globally unique** (task ID, deployment ID) — not a display name (container name, service name) that can be reused across deployments or restart cycles
+- [ ] If the caller has a unique ID available, it passes it — the function does not re-derive it from a non-unique name
+- [ ] If a non-unique name must be used (e.g., user-facing CLI input), the code explicitly handles ambiguity (latest by CreatedAt, filter by status, etc.) rather than returning the first match
+
+**Red flag**: Any function that matches records by iterating a list and returning the first name match. This is almost always wrong in a system where names are reused.
+
+### IDENT-2: Caller Has More Context Than Receiver
+
+When code calls an API or function, check:
+
+- [ ] The caller passes **all available identifying information**, not just the minimum. If the caller knows the agent_id AND the container name, it passes both — even if the API only requires one.
+- [ ] Proto request messages include optional fields for direct lookup (e.g., `agent_id`, `task_id`) alongside human-readable fields (e.g., `container_name`)
+- [ ] The handler uses the most specific identifier available, falling back to scanning only when the specific ID is absent
+
+**Red flag**: A web dashboard or API client that has the full task record (with task_id, agent_id) but only passes the container name to the backend. The backend then scans all nodes to guess which agent has the container.
+
+### IDENT-3: No Scan When Direct Lookup Is Possible
+
+For every function that iterates through a collection to find a match:
+
+- [ ] A direct key lookup (`store.Get(key)`) was not possible with the available inputs. If a unique key could be constructed from the inputs, the scan is wrong.
+- [ ] If the scan is necessary (only non-unique info available), it filters to the **smallest correct scope** (e.g., only healthy agents, only running deployments) — not all records.
+- [ ] Among multiple matches, the function picks the **latest/most relevant** (by CreatedAt, by status) — not the first match in arbitrary order (etcd returns keys alphabetically, which has no semantic meaning).
+
+**Red flag**: `for _, node := range allNodes { for _, task := range allTasks { if task.Name == target { return } } }` — scanning everything to find one record, when `store.Get("tasks/"+agentID+"/"+taskID)` would give the answer directly.
+
+### IDENT-4: Proto Messages Support Direct Lookup
+
+For every proto request message that triggers a server-side lookup:
+
+- [ ] The message includes an optional field for the **unique identifier** (task_id, agent_id, deployment_id), not just the human-readable name
+- [ ] The handler checks for the unique ID first, falls back to name-based search only if absent
+- [ ] The frontend/CLI passes the unique ID when it has it (which is almost always — the data came from a previous API response that included it)
+
+### IDENT-5: Historical Records Don't Shadow Current State
+
+After restarts, redeployments, or scaling events, old records coexist with new ones in etcd:
+
+- [ ] Queries that return "the current state" filter to the **latest record per logical entity** (latest task per replica, latest deployment per name) — not all historical records
+- [ ] Cleanup/stop_and_remove tasks do not appear in results meant for container state (they are operational artifacts, not container identity)
+- [ ] Health reports, status displays, and backend lists use the same "latest per entity" filter consistently
+
+**Red flag**: A dashboard showing 4/6 containers healthy after one restart — the denominator should be 4 (current), not 6 (current + historical).
+
+---
+
 ## SMELL — Code Smells
 
 ### SMELL-1: Error Handling
@@ -300,13 +354,30 @@ Check that the same error handling style is used across all packages:
 
 During a time-constrained audit, check in this order:
 
-1. **DOC-6** — Roadmap accuracy (fast check, high impact)
-2. **DOC-1** — Landing page claims (user's first impression)
-3. **INT-1** — Package import chain (catches VPC-style issues)
-4. **INT-2/3** — Startup completeness (are new components wired in?)
-5. **DEAD-1** — Unused packages (quick win)
-6. **BUILD-1** — go.mod health (30-second check)
-7. **TEST-1** — Coverage gaps (identifies risk)
-8. Everything else
+1. **IDENT-1/3** — Lookup key uniqueness (catches the "container name collision" class of bugs)
+2. **DOC-6** ��� Roadmap accuracy (fast check, high impact)
+3. **DOC-1** �� Landing page claims (user's first impression)
+4. **INT-1** — Package import chain (catches VPC-style issues)
+5. **INT-2/3** — Startup completeness (are new components wired in?)
+6. **DEAD-1** — Unused packages (quick win)
+7. **BUILD-1** — go.mod health (30-second check)
+8. **TEST-1** — Coverage gaps (identifies risk)
+9. Everything else
 
 This order maximizes issue-finding per minute of audit time.
+
+---
+
+## Retrospective: The M12 Pattern (reference for auditors)
+
+During Milestone 12 (self-healing deployments), the team hit the same bug pattern five times:
+
+1. **Health reports** matched by container name → ghost containers after restart → fixed with task_id
+2. **findContainerAgent** scanned all nodes by name → stale node returned → fixed with agent_id direct lookup
+3. **collectServiceBackends** returned all tasks → stale IPs in proxy → fixed with latest-per-replica filter
+4. **Dashboard counts** counted all historical tasks → inflated numbers → fixed with latestTasksPerReplica
+5. **Cleanup tasks** shadowed exited containers in latestByReplica → reconciler lost track → fixed with type filter
+
+Every instance was the same root cause: **using a non-unique display name as a lookup key when a unique ID was available**. Each quick fix added a heuristic that broke in the next edge case. The proper fix was always: pass the unique ID, do a direct lookup.
+
+**The lesson**: When you see a function scanning a collection to match by name, ask: "Does the caller have a unique ID it could pass instead?" If yes, the scan is technical debt, not simplicity.

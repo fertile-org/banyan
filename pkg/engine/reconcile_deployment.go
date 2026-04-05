@@ -191,7 +191,7 @@ func computeHealthStatus(dep *types.DeploymentRecord, tasks []types.TaskRecord) 
 				} else {
 					runningCount++
 				}
-			case task.ContainerStatus == "exited":
+			case task.ContainerStatus == "exited" || task.ContainerStatus == "not_found":
 				exitedCount++
 			case task.Status == types.StatusPending:
 				pendingCount++

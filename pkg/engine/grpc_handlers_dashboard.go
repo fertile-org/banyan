@@ -157,12 +157,8 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 		}
 
 		allTasks := types.CollectDeploymentTasks(ctx, s.store, record.ID)
-		var createTasks []types.TaskRecord
-		for j := range allTasks {
-			if allTasks[j].Type == types.TaskTypeCreateAndStart {
-				createTasks = append(createTasks, allTasks[j])
-			}
-		}
+		// Filter to latest task per replica — old/failed restart tasks don't count.
+		createTasks := latestTasksPerReplica(allTasks)
 
 		healthy := 0
 		for j := range createTasks {
@@ -184,30 +180,30 @@ func (s *engineGRPCServer) GetDashboardData(ctx context.Context, req *banyanpb.G
 		}
 
 		var taskInfos []*banyanpb.TaskInfo
-		for j := range allTasks {
+		for j := range createTasks {
 			taskInfos = append(taskInfos, &banyanpb.TaskInfo{
-				Id:                     allTasks[j].ID,
-				DeploymentId:           allTasks[j].DeploymentID,
-				ServiceName:            allTasks[j].ServiceName,
-				ReplicaIndex:           int32(allTasks[j].ReplicaIndex), //nolint:gosec // replica index is always small
-				AgentId:                allTasks[j].AgentID,
-				Type:                   allTasks[j].Type,
-				Status:                 allTasks[j].Status,
-				Image:                  allTasks[j].Image,
-				ContainerName:          allTasks[j].ContainerName,
-				Ports:                  allTasks[j].Ports,
-				Command:                allTasks[j].Command,
-				ContainerStatus:        allTasks[j].ContainerStatus,
-				HealthStatus:           allTasks[j].HealthStatus,
-				ContainerCheckedAtUnix: allTasks[j].ContainerCheckedAt.Unix(),
-				CreatedAtUnix:          allTasks[j].CreatedAt.Unix(),
-				UpdatedAtUnix:          allTasks[j].UpdatedAt.Unix(),
-				Error:                  allTasks[j].Error,
-				CpuPercent:             allTasks[j].CPUPercent,
-				MemoryUsedBytes:        allTasks[j].MemoryUsedBytes,
-				MemoryLimitBytes:       allTasks[j].MemoryLimitBytes,
-				ExitCode:               int32(allTasks[j].ExitCode),     //nolint:gosec // exit code fits int32
-				RestartCount:           int32(allTasks[j].RestartCount), //nolint:gosec // restart count is always small
+				Id:                     createTasks[j].ID,
+				DeploymentId:           createTasks[j].DeploymentID,
+				ServiceName:            createTasks[j].ServiceName,
+				ReplicaIndex:           int32(createTasks[j].ReplicaIndex), //nolint:gosec // replica index is always small
+				AgentId:                createTasks[j].AgentID,
+				Type:                   createTasks[j].Type,
+				Status:                 createTasks[j].Status,
+				Image:                  createTasks[j].Image,
+				ContainerName:          createTasks[j].ContainerName,
+				Ports:                  createTasks[j].Ports,
+				Command:                createTasks[j].Command,
+				ContainerStatus:        createTasks[j].ContainerStatus,
+				HealthStatus:           createTasks[j].HealthStatus,
+				ContainerCheckedAtUnix: createTasks[j].ContainerCheckedAt.Unix(),
+				CreatedAtUnix:          createTasks[j].CreatedAt.Unix(),
+				UpdatedAtUnix:          createTasks[j].UpdatedAt.Unix(),
+				Error:                  createTasks[j].Error,
+				CpuPercent:             createTasks[j].CPUPercent,
+				MemoryUsedBytes:        createTasks[j].MemoryUsedBytes,
+				MemoryLimitBytes:       createTasks[j].MemoryLimitBytes,
+				ExitCode:               int32(createTasks[j].ExitCode),     //nolint:gosec // exit code fits int32
+				RestartCount:           int32(createTasks[j].RestartCount), //nolint:gosec // restart count is always small
 				// Environment intentionally omitted — may contain secrets
 			})
 		}

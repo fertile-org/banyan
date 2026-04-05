@@ -1,4 +1,4 @@
-// Web Dashboard Demo — records a video navigating through all pages.
+// Web Dashboard Demo — records a short video: Overview → Agents → Container (db) → Logs.
 // Run with: make demo-web
 // Requires: npx playwright install chromium
 
@@ -30,98 +30,42 @@ async function main() {
   // --- Overview ---
   await page.goto(DASHBOARD_URL);
   await page.waitForSelector(".stat-grid", { timeout: 10000 });
-  await sleep(2000);
+  await sleep(2500);
   await page.screenshot({ path: path.join(OUTPUT_DIR, "website/public/dashboard/web-overview.png") });
 
   // --- Agents ---
   await page.click('a[href="/agents"]');
   await page.waitForSelector("table");
-  await sleep(1500);
+  await sleep(2000);
 
-  // Click first agent row
-  const agentRow = page.locator("tbody tr").first();
-  if (await agentRow.count()) {
-    await agentRow.click();
-    await sleep(1500);
-    await page.goBack();
-    await sleep(500);
-  }
-
-  // --- Deployments ---
-  await page.click('a[href="/deployments"]');
-  await page.waitForSelector("table");
-  await sleep(1500);
-
-  // Click first deployment
-  const deployRow = page.locator("tbody tr").first();
-  if (await deployRow.count()) {
-    await deployRow.click();
-    await sleep(2000);
-    await page.goBack();
-    await sleep(500);
-  }
-
-  // --- Containers ---
+  // --- Containers → click the db container ---
   await page.click('a[href="/containers"]');
   await page.waitForSelector("table");
   await sleep(1500);
 
-  // Use filter
-  const filterInput = page.locator('input[placeholder*="Filter"]');
-  if (await filterInput.count()) {
-    await filterInput.fill("api");
-    await sleep(1000);
-    await filterInput.fill("");
-    await sleep(500);
-  }
-
-  // Click first container for detail
-  const containerRow = page.locator("tbody tr").first();
-  if (await containerRow.count()) {
-    await containerRow.click();
+  // Find and click the row containing "db" in the container name
+  const dbRow = page.locator("tbody tr", { hasText: "db" }).first();
+  if (await dbRow.count()) {
+    await dbRow.click();
     await sleep(2000);
-    await page.goBack();
-    await sleep(500);
-  }
 
-  // --- Engine ---
-  await page.click('a[href="/engine"]');
-  await sleep(1500);
+    // Expand the inline log panel
+    const logPanelHeader = page.locator(".panel-header", { hasText: "Recent Logs" });
+    if (await logPanelHeader.count()) {
+      await logPanelHeader.click();
+      await sleep(2000);
+    }
 
-  // --- Events ---
-  await page.click('a[href="/events"]');
-  await sleep(1500);
-
-  // --- Logs ---
-  await page.click('a[href="/logs"]');
-  await sleep(1000);
-
-  // Select first container in dropdown
-  const logSelect = page.locator("select").first();
-  if (await logSelect.count()) {
-    const options = await logSelect.locator("option").allTextContents();
-    const containerOption = options.find((o) => o !== "Select a container...");
-    if (containerOption) {
-      await logSelect.selectOption({ label: containerOption });
+    // Navigate to full logs page via the Logs button
+    const logsBtn = page.locator("button", { hasText: "Logs" });
+    if (await logsBtn.count()) {
+      await logsBtn.click();
       await sleep(3000);
     }
-  }
-
-  // --- Command Palette ---
-  await page.keyboard.press("Control+k");
-  await sleep(1000);
-  await page.keyboard.type("over", { delay: 100 });
-  await sleep(800);
-  await page.keyboard.press("Enter");
-  await sleep(1500);
-
-  // --- Toggle theme ---
-  const themeBtn = page.locator('button[title="Toggle theme"]');
-  if (await themeBtn.count()) {
-    await themeBtn.click();
-    await sleep(1500);
-    await themeBtn.click();
-    await sleep(1000);
+  } else {
+    // Fallback: go to logs page directly
+    await page.click('a[href="/logs"]');
+    await sleep(3000);
   }
 
   // Done

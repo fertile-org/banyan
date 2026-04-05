@@ -1084,7 +1084,7 @@ func TestFindContainerAgent(t *testing.T) {
 			Type: types.TaskTypeCreateAndStart,
 		})
 
-		task, node, err := srv.findContainerAgent(ctx, "myapp-web-0")
+		task, node, err := srv.findContainerAgent(ctx, "myapp-web-0", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1102,7 +1102,7 @@ func TestFindContainerAgent(t *testing.T) {
 
 		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 
-		_, _, err := srv.findContainerAgent(ctx, "nonexistent")
+		_, _, err := srv.findContainerAgent(ctx, "nonexistent", "")
 		if err == nil {
 			t.Fatal("expected error for nonexistent container")
 		}
@@ -1324,7 +1324,7 @@ func TestFindContainerAgent_MultipleAgents(t *testing.T) {
 	})
 
 	t.Run("finds container on second agent", func(t *testing.T) {
-		task, node, err := srv.findContainerAgent(ctx, "app-api-0")
+		task, node, err := srv.findContainerAgent(ctx, "app-api-0", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1337,7 +1337,7 @@ func TestFindContainerAgent_MultipleAgents(t *testing.T) {
 	})
 
 	t.Run("finds container on first agent", func(t *testing.T) {
-		task, node, err := srv.findContainerAgent(ctx, "app-web-0")
+		task, node, err := srv.findContainerAgent(ctx, "app-web-0", "")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1362,7 +1362,7 @@ func TestFindContainerAgent_SkipsNonCreateTasks(t *testing.T) {
 		Type: types.TaskTypeStopAndRemove,
 	})
 
-	_, _, err := srv.findContainerAgent(ctx, "myapp-web-0")
+	_, _, err := srv.findContainerAgent(ctx, "myapp-web-0", "")
 	if err == nil {
 		t.Fatal("expected error because only stop tasks exist for this container")
 	}
@@ -1381,7 +1381,7 @@ func TestFindContainerAgent_EmptyContainerName(t *testing.T) {
 	})
 
 	// Searching for a non-empty container should not match the empty one
-	_, _, err := srv.findContainerAgent(ctx, "some-container")
+	_, _, err := srv.findContainerAgent(ctx, "some-container", "")
 	if err == nil {
 		t.Fatal("expected error, task has empty container name")
 	}
@@ -1392,7 +1392,7 @@ func TestFindContainerAgent_NoNodes(t *testing.T) {
 	store := storage.NewMemoryStore()
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findContainerAgent(ctx, "some-container")
+	_, _, err := srv.findContainerAgent(ctx, "some-container", "")
 	if err == nil {
 		t.Fatal("expected error when no nodes exist")
 	}
@@ -2238,7 +2238,7 @@ func TestFindContainerAgent_ListNodesError(t *testing.T) {
 	store := &errorStore{MemoryStore: memStore, listErr: true}
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findContainerAgent(context.Background(), "container")
+	_, _, err := srv.findContainerAgent(context.Background(), "container", "")
 	if err == nil {
 		t.Fatal("expected error when store.List fails")
 	}
@@ -2252,7 +2252,7 @@ func TestFindContainerAgent_GetNodeError(t *testing.T) {
 	store := &errorStore{MemoryStore: memStore, getErr: true}
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findContainerAgent(ctx, "container")
+	_, _, err := srv.findContainerAgent(ctx, "container", "")
 	if err == nil {
 		t.Fatal("expected error when no container found (nodes skipped due to Get error)")
 	}
@@ -2310,7 +2310,7 @@ func TestFindContainerAgent_ListTasksError(t *testing.T) {
 	store := &countingListErrorStore{MemoryStore: memStore, failAfterN: 1}
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findContainerAgent(ctx, "some-container")
+	_, _, err := srv.findContainerAgent(ctx, "some-container", "")
 	if err == nil {
 		t.Fatal("expected error when container not found (task list failed)")
 	}
@@ -2329,7 +2329,7 @@ func TestFindContainerAgent_GetTaskError(t *testing.T) {
 	store := &countingGetErrorStore{MemoryStore: memStore, failAfterN: 1}
 	srv := &engineGRPCServer{store: store}
 
-	_, _, err := srv.findContainerAgent(ctx, "target-container")
+	_, _, err := srv.findContainerAgent(ctx, "target-container", "")
 	if err == nil {
 		t.Fatal("expected error when task Get fails")
 	}

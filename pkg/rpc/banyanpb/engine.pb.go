@@ -3106,6 +3106,7 @@ type GetLogsRequest struct {
 	ContainerName string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
 	Follow        bool                   `protobuf:"varint,2,opt,name=follow,proto3" json:"follow,omitempty"`
 	Tail          int32                  `protobuf:"varint,3,opt,name=tail,proto3" json:"tail,omitempty"`
+	AgentId       string                 `protobuf:"bytes,4,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // direct lookup — skip scanning when provided
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -3159,6 +3160,13 @@ func (x *GetLogsRequest) GetTail() int32 {
 		return x.Tail
 	}
 	return 0
+}
+
+func (x *GetLogsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
 }
 
 type GetLogsResponse struct {
@@ -5026,7 +5034,8 @@ func (x *ListEventsResponse) GetEvents() []*ClusterEvent {
 type GetRecentLogsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ContainerName string                 `protobuf:"bytes,1,opt,name=container_name,json=containerName,proto3" json:"container_name,omitempty"`
-	Tail          int32                  `protobuf:"varint,2,opt,name=tail,proto3" json:"tail,omitempty"` // number of lines (0 = default 500)
+	Tail          int32                  `protobuf:"varint,2,opt,name=tail,proto3" json:"tail,omitempty"`                     // number of lines (0 = default 500)
+	AgentId       string                 `protobuf:"bytes,3,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"` // direct lookup — skip scanning when provided
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -5073,6 +5082,13 @@ func (x *GetRecentLogsRequest) GetTail() int32 {
 		return x.Tail
 	}
 	return 0
+}
+
+func (x *GetRecentLogsRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
 }
 
 type GetRecentLogsResponse struct {
@@ -5428,11 +5444,12 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"\x11memory_used_bytes\x18\x14 \x01(\x04R\x0fmemoryUsedBytes\x12,\n" +
 	"\x12memory_limit_bytes\x18\x15 \x01(\x04R\x10memoryLimitBytes\x12\x1b\n" +
 	"\texit_code\x18\x16 \x01(\x05R\bexitCode\x12#\n" +
-	"\rrestart_count\x18\x17 \x01(\x05R\frestartCount\"c\n" +
+	"\rrestart_count\x18\x17 \x01(\x05R\frestartCount\"~\n" +
 	"\x0eGetLogsRequest\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x16\n" +
 	"\x06follow\x18\x02 \x01(\bR\x06follow\x12\x12\n" +
-	"\x04tail\x18\x03 \x01(\x05R\x04tail\"%\n" +
+	"\x04tail\x18\x03 \x01(\x05R\x04tail\x12\x19\n" +
+	"\bagent_id\x18\x04 \x01(\tR\aagentId\"%\n" +
 	"\x0fGetLogsResponse\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\fR\x04data\"\x10\n" +
 	"\x0eGetInfoRequest\"4\n" +
@@ -5559,10 +5576,11 @@ const file_banyan_v1_engine_proto_rawDesc = "" +
 	"\x11ListEventsRequest\x12\x14\n" +
 	"\x05limit\x18\x01 \x01(\x05R\x05limit\"E\n" +
 	"\x12ListEventsResponse\x12/\n" +
-	"\x06events\x18\x01 \x03(\v2\x17.banyan.v1.ClusterEventR\x06events\"Q\n" +
+	"\x06events\x18\x01 \x03(\v2\x17.banyan.v1.ClusterEventR\x06events\"l\n" +
 	"\x14GetRecentLogsRequest\x12%\n" +
 	"\x0econtainer_name\x18\x01 \x01(\tR\rcontainerName\x12\x12\n" +
-	"\x04tail\x18\x02 \x01(\x05R\x04tail\"T\n" +
+	"\x04tail\x18\x02 \x01(\x05R\x04tail\x12\x19\n" +
+	"\bagent_id\x18\x03 \x01(\tR\aagentId\"T\n" +
 	"\x15GetRecentLogsResponse\x12\x14\n" +
 	"\x05lines\x18\x01 \x03(\tR\x05lines\x12%\n" +
 	"\x0econtainer_name\x18\x02 \x01(\tR\rcontainerName2\xb8\x0f\n" +

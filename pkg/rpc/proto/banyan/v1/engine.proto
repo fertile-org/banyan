@@ -372,6 +372,7 @@ message GetLogsRequest {
   string container_name = 1;
   bool follow = 2;
   int32 tail = 3;
+  string agent_id = 4;                        // direct lookup — skip scanning when provided
 }
 
 message GetLogsResponse {
@@ -546,6 +547,7 @@ message ListEventsResponse {
 message GetRecentLogsRequest {
   string container_name = 1;
   int32 tail = 2;       // number of lines (0 = default 500)
+  string agent_id = 3;  // direct lookup — skip scanning when provided
 }
 message GetRecentLogsResponse {
   repeated string lines = 1;

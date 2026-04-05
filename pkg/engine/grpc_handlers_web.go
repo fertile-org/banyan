@@ -86,7 +86,7 @@ func (s *engineGRPCServer) GetRecentLogs(ctx context.Context, req *banyanpb.GetR
 		tail = 500
 	}
 
-	task, node, err := s.findContainerAgent(ctx, req.ContainerName)
+	task, node, err := s.findContainerAgent(ctx, req.ContainerName, req.AgentId)
 	if err != nil {
 		return nil, err
 	}

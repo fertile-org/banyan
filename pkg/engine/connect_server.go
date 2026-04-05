@@ -123,7 +123,7 @@ func (a *connectAdapter) GetLogs(ctx context.Context, req *connect.Request[banya
 		return connect.NewError(connect.CodeInvalidArgument, nil)
 	}
 
-	task, node, err := a.srv.findContainerAgent(ctx, req.Msg.ContainerName)
+	task, node, err := a.srv.findContainerAgent(ctx, req.Msg.ContainerName, req.Msg.AgentId)
 	if err != nil {
 		return connect.NewError(connect.CodeNotFound, err)
 	}

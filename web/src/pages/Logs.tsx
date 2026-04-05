@@ -8,7 +8,7 @@ const POLL_INTERVAL = 3000;
 
 export function Logs() {
   const { data: containers } = useContainers();
-  const containerNames = (containers ?? []).map((c) => c.containerName).sort();
+  const containerList = (containers ?? []).sort((a, b) => a.containerName.localeCompare(b.containerName));
 
   const [selected, setSelected] = useState("");
   const [lines, setLines] = useState<string[]>([]);
@@ -22,9 +22,15 @@ export function Logs() {
   const logEndRef = useRef<HTMLDivElement>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Resolve container name → agent_id for direct lookup
+  const agentForContainer = useCallback((name: string): string => {
+    const c = containerList.find((c) => c.containerName === name);
+    return c?.agentId ?? "";
+  }, [containerList]);
+
   const fetchLogs = useCallback(async (containerName: string, tailCount: number) => {
     try {
-      const resp = await getRecentLogs(containerName, tailCount);
+      const resp = await getRecentLogs(containerName, tailCount, agentForContainer(containerName));
       setLines(resp.lines ?? []);
       setError(null);
     } catch (err) {
@@ -108,8 +114,8 @@ export function Logs() {
             style={{ maxWidth: 260, fontSize: 12, padding: "5px 10px" }}
           >
             <option value="">Select a container...</option>
-            {containerNames.map((name) => (
-              <option key={name} value={name}>{name}</option>
+            {containerList.map((c) => (
+              <option key={c.containerName} value={c.containerName}>{c.containerName}</option>
             ))}
           </select>
           <select

@@ -340,10 +340,11 @@ func (s *engineGRPCServer) collectContainers(ctx context.Context) []*banyanpb.Co
 		if !latestIDs[allDeploys[i].record.ID] {
 			continue
 		}
-		tasks := types.CollectDeploymentTasks(ctx, s.store, allDeploys[i].record.ID)
+		allTasks := types.CollectDeploymentTasks(ctx, s.store, allDeploys[i].record.ID)
+		tasks := latestTasksPerReplica(allTasks)
 		for j := range tasks {
 			t := &tasks[j]
-			if t.Type != types.TaskTypeCreateAndStart || t.Status != types.StatusCompleted {
+			if t.Status != types.StatusCompleted {
 				continue
 			}
 			containers = append(containers, &banyanpb.ContainerInfo{

@@ -120,6 +120,15 @@ export interface ContainerInfo {
   error?: string;
 }
 
+// --- Secrets types ---
+
+export interface SecretInfo {
+  name: string;
+  createdAt?: string;
+  updatedAt?: string;
+  value?: string; // only populated when reveal=true
+}
+
 // --- Legacy monolithic response (kept for CLI TUI compatibility) ---
 
 export interface DashboardData {

@@ -10,6 +10,7 @@ import {
   getDeploymentDetail,
   listContainers,
   listEvents,
+  listSecrets,
   healthCheck,
 } from "@/api/client";
 import type {
@@ -18,6 +19,7 @@ import type {
   DeploymentInfo,
   ContainerInfo,
   ClusterEvent,
+  SecretInfo,
 } from "@/api/types";
 
 const POLL_INTERVAL = 10_000;
@@ -106,6 +108,14 @@ export function useEvents(limit?: number): UseApiResult<ClusterEvent[]> {
     const resp = await listEvents(limit);
     return resp.events ?? [];
   }, [limit]);
+  return usePolling(fetcher);
+}
+
+export function useSecrets(): UseApiResult<SecretInfo[]> {
+  const fetcher = useCallback(async () => {
+    const resp = await listSecrets();
+    return resp.secrets ?? [];
+  }, []);
   return usePolling(fetcher);
 }
 

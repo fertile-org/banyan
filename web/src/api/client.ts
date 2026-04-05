@@ -7,6 +7,7 @@ import type {
   DeploymentInfo,
   ContainerInfo,
   ClusterEvent,
+  SecretInfo,
   StopTaskRequest,
   StopTaskResponse,
   ScaleRequest,
@@ -97,6 +98,24 @@ export function listEvents(limit?: number): Promise<{ events?: ClusterEvent[] }>
 
 export function getRecentLogs(containerName: string, tail: number = 500, agentId?: string): Promise<{ lines?: string[]; containerName?: string }> {
   return rpc("GetRecentLogs", { containerName, tail, agentId: agentId || "" });
+}
+
+// --- Secret APIs ---
+
+export function listSecrets(): Promise<{ secrets?: SecretInfo[] }> {
+  return rpc("ListSecrets", {});
+}
+
+export function createSecret(name: string, value: string): Promise<object> {
+  return rpc("CreateSecret", { name, value });
+}
+
+export function getSecret(name: string, reveal: boolean): Promise<SecretInfo> {
+  return rpc("GetSecret", { name, reveal });
+}
+
+export function deleteSecret(name: string): Promise<object> {
+  return rpc("DeleteSecret", { name });
 }
 
 // --- Action APIs ---

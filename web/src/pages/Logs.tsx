@@ -1,14 +1,28 @@
 import { ScrollText, RefreshCw, Pause, Play } from "lucide-react";
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useContainers } from "@/hooks/use-api";
+import { FilterSelect } from "@/components/FilterSelect";
 import { getRecentLogs } from "@/api/client";
 
 const TAIL_OPTIONS = [100, 500, 1000] as const;
 const POLL_INTERVAL = 3000;
 
 export function Logs() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: containers } = useContainers();
-  const containerList = (containers ?? []).sort((a, b) => a.containerName.localeCompare(b.containerName));
+  const containerList = (containers ?? [])
+    .filter((c) => c.containerStatus === "running")
+    .sort((a, b) => a.containerName.localeCompare(b.containerName));
+
+  // Group containers by deployment for the dropdown
+  const containersByDeployment = containerList.reduce<Record<string, typeof containerList>>((acc, c) => {
+    const key = c.deploymentName || "unknown";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(c);
+    return acc;
+  }, {});
+  const deploymentNames = Object.keys(containersByDeployment).sort();
 
   const [selected, setSelected] = useState("");
   const [lines, setLines] = useState<string[]>([]);
@@ -17,6 +31,7 @@ export function Logs() {
   const [tail, setTail] = useState<number>(500);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [userScrolledUp, setUserScrolledUp] = useState(false);
+  const initializedFromParams = useRef(false);
 
   const logPaneRef = useRef<HTMLDivElement>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
@@ -39,6 +54,20 @@ export function Logs() {
       setLoading(false);
     }
   }, []);
+
+  // Auto-select container from URL params (e.g., navigating from ContainerDetail)
+  useEffect(() => {
+    if (initializedFromParams.current || !containerList.length) return;
+    const paramContainer = searchParams.get("container");
+    if (paramContainer && containerList.some((c) => c.containerName === paramContainer)) {
+      initializedFromParams.current = true;
+      setSelected(paramContainer);
+      setLoading(true);
+      void fetchLogs(paramContainer, tail);
+      // Clean up URL params
+      setSearchParams({}, { replace: true });
+    }
+  }, [containerList, searchParams, fetchLogs, tail, setSearchParams]);
 
   // Initial fetch when container is selected
   const handleSelect = (name: string) => {
@@ -107,27 +136,23 @@ export function Logs() {
       <div className="page-header">
         <h1 className="page-title"><ScrollText size={22} /> Logs</h1>
         <div className="header-actions">
-          <select
-            className="form-input"
+          <FilterSelect
             value={selected}
-            onChange={(e) => handleSelect(e.target.value)}
-            style={{ maxWidth: 260, fontSize: 12, padding: "5px 10px" }}
-          >
-            <option value="">Select a container...</option>
-            {containerList.map((c) => (
-              <option key={c.containerName} value={c.containerName}>{c.containerName}</option>
-            ))}
-          </select>
-          <select
-            className="form-input"
-            value={tail}
-            onChange={(e) => handleTailChange(Number(e.target.value))}
-            style={{ maxWidth: 100, fontSize: 12, padding: "5px 10px" }}
-          >
-            {TAIL_OPTIONS.map((n) => (
-              <option key={n} value={n}>{n} lines</option>
-            ))}
-          </select>
+            onChange={handleSelect}
+            groups={deploymentNames.map((dep) => ({
+              label: dep,
+              items: (containersByDeployment[dep] ?? []).map((c) => c.containerName),
+            }))}
+            placeholder="Select a container..."
+            width={260}
+          />
+          <FilterSelect
+            value={tail ? `${tail} lines` : ""}
+            onChange={(v) => handleTailChange(parseInt(v) || 500)}
+            options={TAIL_OPTIONS.map((n) => `${n} lines`)}
+            placeholder="Tail lines"
+            width={110}
+          />
           <button
             className={`icon-btn${autoRefresh ? " active-toggle" : ""}`}
             onClick={() => setAutoRefresh((v) => !v)}

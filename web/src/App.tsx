@@ -12,6 +12,8 @@ import { ContainerDetail } from "@/pages/ContainerDetail";
 import { EnginePage } from "@/pages/Engine";
 import { Events } from "@/pages/Events";
 import { Logs } from "@/pages/Logs";
+import { Secrets } from "@/pages/Secrets";
+import { Configuration } from "@/pages/Configuration";
 import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function App() {
@@ -33,6 +35,8 @@ export function App() {
           <Route path="/engine" element={<EnginePage />} />
           <Route path="/events" element={<Events />} />
           <Route path="/logs" element={<Logs />} />
+          <Route path="/secrets" element={<Secrets />} />
+          <Route path="/settings" element={<Configuration />} />
         </Routes>
         <ThemeToggle />
       </main>

@@ -1,12 +1,12 @@
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { Container, ArrowLeft, ScrollText, Square } from "lucide-react";
+import { Container, ArrowLeft, ScrollText, Square, ChevronDown, ChevronRight, RefreshCw } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Sparkline } from "@/components/Sparkline";
 import { formatBytes, formatCPU, timeAgo } from "@/lib/format";
 import { useContainers } from "@/hooks/use-api";
 import { useCPUHistory } from "@/hooks/use-cpu-history";
-import { stopTask } from "@/api/client";
-import { useState } from "react";
+import { stopTask, getRecentLogs } from "@/api/client";
+import { useState, useEffect, useCallback } from "react";
 
 export function ContainerDetail() {
   const { name } = useParams<{ name: string }>();
@@ -46,7 +46,7 @@ export function ContainerDetail() {
           <Container size={22} /> {container.containerName} <StatusBadge status={container.containerStatus} />
         </h1>
         <div className="header-actions">
-          <button className="btn btn-secondary" onClick={() => navigate(`/logs?container=${encodeURIComponent(container.containerName)}`)}><ScrollText size={14} /> Logs</button>
+          <button className="btn btn-secondary" onClick={() => navigate(`/logs?container=${encodeURIComponent(container.containerName)}&agent=${encodeURIComponent(container.agentId)}`)}><ScrollText size={14} /> Logs</button>
           <button className="btn btn-danger" onClick={() => void handleStop()} disabled={stopping}><Square size={14} /> {stopping ? "Stopping..." : "Stop"}</button>
         </div>
       </div>
@@ -98,7 +98,72 @@ export function ContainerDetail() {
           </div>
         </div>
       </div>
+
+      <InlineLogPanel containerName={container.containerName} agentId={container.agentId} />
     </>
+  );
+}
+
+function InlineLogPanel({ containerName, agentId }: { containerName: string; agentId: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const [lines, setLines] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchLogs = useCallback(async () => {
+    setLoading(true);
+    try {
+      const resp = await getRecentLogs(containerName, 50, agentId);
+      setLines(resp.lines ?? []);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to fetch logs");
+    } finally {
+      setLoading(false);
+    }
+  }, [containerName, agentId]);
+
+  useEffect(() => {
+    if (expanded && lines.length === 0 && !error) {
+      void fetchLogs();
+    }
+  }, [expanded]);
+
+  return (
+    <div className="panel">
+      <div className="panel-header" style={{ cursor: "pointer" }} onClick={() => setExpanded((v) => !v)}>
+        <div className="panel-title">
+          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          <ScrollText size={16} /> Recent Logs
+        </div>
+        {expanded && (
+          <div className="panel-actions">
+            <button className="icon-btn" onClick={(e) => { e.stopPropagation(); void fetchLogs(); }} title="Refresh logs">
+              <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+            </button>
+          </div>
+        )}
+      </div>
+      <div className={`log-panel-collapse${expanded ? " expanded" : ""}`}>
+        <div>
+          <div className="log-pane" style={{ maxHeight: 300 }}>
+            {loading && lines.length === 0 && <div className="text-muted">Loading logs...</div>}
+            {error && <div style={{ color: "var(--red)" }}>Error: {error}</div>}
+            {!loading && lines.length === 0 && !error && <div className="text-muted">No log output.</div>}
+            {lines.map((line, i) => {
+              const hasError = /\bERROR\b/i.test(line);
+              const hasWarn = /\bWARN(ING)?\b/i.test(line);
+              const hasInfo = /\bINFO\b/i.test(line);
+              let cls = "log-msg";
+              if (hasError) cls = "log-level-error";
+              else if (hasWarn) cls = "log-level-warn";
+              else if (hasInfo) cls = "log-level-info";
+              return <div key={i}><span className={cls}>{line}</span></div>;
+            })}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

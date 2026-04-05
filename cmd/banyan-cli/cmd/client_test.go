@@ -743,7 +743,7 @@ func TestEngineClient_StreamLogs(t *testing.T) {
 	defer cleanup()
 
 	t.Run("reads log data via stream", func(t *testing.T) {
-		reader, err := client.StreamLogs(context.Background(), "myapp-web-0", false, 0)
+		reader, err := client.StreamLogs(context.Background(), "myapp-web-0", false, 0, "")
 		if err != nil {
 			t.Fatalf("StreamLogs failed: %v", err)
 		}

@@ -673,6 +673,7 @@ The CLI requests logs from the Engine via gRPC. The Engine proxies them from the
 |------|-------|---------|-------------|
 | `--follow` | `-f` | `false` | Follow log output (like `tail -f`) |
 | `--tail` | | `0` | Number of lines from the end (`0` means all) |
+| `--agent-id` | | | Agent running the container. When provided, the engine connects directly to that agent instead of scanning. Useful in multi-agent clusters. |
 
 Examples:
 
@@ -685,6 +686,9 @@ banyan-cli logs my-app-web-0 -f
 
 # Show last 100 lines and follow
 banyan-cli logs my-app-web-0 -f --tail 100
+
+# Specify the agent (skips scanning, connects directly)
+banyan-cli logs my-app-web-0 --agent-id worker-1
 ```
 
 ### dashboard

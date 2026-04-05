@@ -617,7 +617,7 @@ func TestDown(t *testing.T) {
 	srv.store.Save(ctx, types.KeyDeployments+"deploy-1", deployment)
 
 	// Register a node (needed for CollectDeploymentTasks)
-	node := &types.NodeRecord{Name: "worker-1", Status: "ready"}
+	node := &types.NodeRecord{Name: "worker-1", Status: "ready", LastSeen: time.Now()}
 	srv.store.Save(ctx, types.KeyNodes+"worker-1", node)
 
 	task := &types.TaskRecord{
@@ -670,7 +670,7 @@ func TestDown(t *testing.T) {
 			CreatedAt: time.Now(),
 		}
 		srv2.store.Save(ctx, types.KeyDeployments+"deploy-svc", deployment2)
-		srv2.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		srv2.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		srv2.store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
 			ID: "task-web", DeploymentID: "deploy-svc", ServiceName: "web",
 			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
@@ -744,7 +744,7 @@ func TestDown(t *testing.T) {
 			Services:  map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
 			CreatedAt: time.Now(),
 		})
-		srv5.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		srv5.store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		srv5.store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
 			ID: "task-web", DeploymentID: "deploy-err", ServiceName: "web",
 			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
@@ -1078,7 +1078,7 @@ func TestFindContainerAgent(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", APIAddress: "agent-1:50052"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", APIAddress: "agent-1:50052", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 			ID: "task-1", AgentID: "agent-1", ContainerName: "myapp-web-0",
 			Type: types.TaskTypeCreateAndStart,
@@ -1100,7 +1100,7 @@ func TestFindContainerAgent(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 
 		_, _, err := srv.findContainerAgent(ctx, "nonexistent")
 		if err == nil {
@@ -1147,7 +1147,7 @@ func TestGetLogs(t *testing.T) {
 	t.Run("agent API address empty", func(t *testing.T) {
 		// Create a node with empty API address and a task matching the container
 		srv.store.Save(ctx, types.KeyNodes+"agent-no-api", &types.NodeRecord{
-			Name: "agent-no-api", Status: "ready", APIAddress: "",
+			Name: "agent-no-api", Status: "ready", LastSeen: time.Now(), APIAddress: "",
 		})
 		srv.store.Save(ctx, types.KeyTasks+"agent-no-api/task-logs", &types.TaskRecord{
 			ID: "task-logs", AgentID: "agent-no-api", ContainerName: "myapp-web-0",
@@ -1183,7 +1183,7 @@ func TestGetLogs_SuccessProxy(t *testing.T) {
 
 	// Seed the store with a node pointing to the mock agent and a matching task
 	store.Save(ctx, types.KeyNodes+"agent-logs", &types.NodeRecord{
-		Name: "agent-logs", Status: "ready", APIAddress: agentAddr,
+		Name: "agent-logs", Status: "ready", LastSeen: time.Now(), APIAddress: agentAddr,
 	})
 	store.Save(ctx, types.KeyTasks+"agent-logs/task-logs-1", &types.TaskRecord{
 		ID: "task-logs-1", AgentID: "agent-logs", ContainerName: "test-container",
@@ -1255,7 +1255,7 @@ func TestGetLogs_AgentConnectionFailure(t *testing.T) {
 
 	// Point to an address that nothing is listening on
 	store.Save(ctx, types.KeyNodes+"agent-dead", &types.NodeRecord{
-		Name: "agent-dead", Status: "ready", APIAddress: "127.0.0.1:1",
+		Name: "agent-dead", Status: "ready", LastSeen: time.Now(), APIAddress: "127.0.0.1:1",
 	})
 	store.Save(ctx, types.KeyTasks+"agent-dead/task-dead", &types.TaskRecord{
 		ID: "task-dead", AgentID: "agent-dead", ContainerName: "dead-container",
@@ -1311,8 +1311,8 @@ func TestFindContainerAgent_MultipleAgents(t *testing.T) {
 	srv := &engineGRPCServer{store: store}
 
 	// Two agents, each with different containers
-	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", APIAddress: "agent-1:50052"})
-	store.Save(ctx, types.KeyNodes+"agent-2", &types.NodeRecord{Name: "agent-2", Status: "ready", APIAddress: "agent-2:50052"})
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", APIAddress: "agent-1:50052", LastSeen: time.Now()})
+	store.Save(ctx, types.KeyNodes+"agent-2", &types.NodeRecord{Name: "agent-2", Status: "ready", APIAddress: "agent-2:50052", LastSeen: time.Now()})
 
 	store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", AgentID: "agent-1", ContainerName: "app-web-0",
@@ -1355,7 +1355,7 @@ func TestFindContainerAgent_SkipsNonCreateTasks(t *testing.T) {
 	store := storage.NewMemoryStore()
 	srv := &engineGRPCServer{store: store}
 
-	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	// A stop task with the same container name should be skipped
 	store.Save(ctx, types.KeyTasks+"agent-1/task-stop", &types.TaskRecord{
 		ID: "task-stop", AgentID: "agent-1", ContainerName: "myapp-web-0",
@@ -1373,7 +1373,7 @@ func TestFindContainerAgent_EmptyContainerName(t *testing.T) {
 	store := storage.NewMemoryStore()
 	srv := &engineGRPCServer{store: store}
 
-	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	// Task with empty container name
 	store.Save(ctx, types.KeyTasks+"agent-1/task-empty", &types.TaskRecord{
 		ID: "task-empty", AgentID: "agent-1", ContainerName: "",
@@ -1624,7 +1624,7 @@ func TestDown_ServiceFilterNoMatchingTasks(t *testing.T) {
 		},
 		CreatedAt: time.Now(),
 	})
-	srv.store.Save(ctx, types.KeyNodes+"agent-p", &types.NodeRecord{Name: "agent-p", Status: "ready"})
+	srv.store.Save(ctx, types.KeyNodes+"agent-p", &types.NodeRecord{Name: "agent-p", Status: "ready", LastSeen: time.Now()})
 	srv.store.Save(ctx, types.KeyTasks+"agent-p/task-web-p", &types.TaskRecord{
 		ID: "task-web-p", DeploymentID: "deploy-partial", ServiceName: "web",
 		AgentID: "agent-p", Type: types.TaskTypeCreateAndStart,
@@ -1660,7 +1660,7 @@ func TestGRPCLogReader_BufferedRead(t *testing.T) {
 	ctx := context.Background()
 
 	store.Save(ctx, types.KeyNodes+"agent-buf", &types.NodeRecord{
-		Name: "agent-buf", Status: "ready", APIAddress: agentAddr,
+		Name: "agent-buf", Status: "ready", LastSeen: time.Now(), APIAddress: agentAddr,
 	})
 	store.Save(ctx, types.KeyTasks+"agent-buf/task-buf", &types.TaskRecord{
 		ID: "task-buf", AgentID: "agent-buf", ContainerName: "buf-container",
@@ -1875,7 +1875,7 @@ func TestHeartbeat_VPCPeers(t *testing.T) {
 		})
 
 		// Heartbeat from worker-1 should see worker-2 as a peer
-		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready", LastSeen: time.Now()})
 		resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 			AgentName:    "worker-1",
 			SessionToken: "token-1",
@@ -1898,7 +1898,7 @@ func TestHeartbeat_VPCPeers(t *testing.T) {
 			registryURL: "localhost:5000",
 		}
 
-		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready", LastSeen: time.Now()})
 		resp, err := srv.Heartbeat(ctx, &banyanpb.HeartbeatRequest{
 			AgentName:    "worker-1",
 			SessionToken: "token-1",
@@ -1950,7 +1950,7 @@ func TestHeartbeat_SaveError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
 	// Pre-register the agent so Get succeeds (MED-009 check passes)
 	memStore.Save(context.Background(), types.KeyNodes+"agent-1", &types.NodeRecord{
-		Name: "agent-1", Status: "ready",
+		Name: "agent-1", Status: "ready", LastSeen: time.Now(),
 	})
 	store := &errorStore{MemoryStore: memStore, saveErr: true}
 	srv := &engineGRPCServer{store: store}
@@ -2172,7 +2172,7 @@ func TestDown_SaveStopTaskError(t *testing.T) {
 		Services:  map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
 		CreatedAt: time.Now(),
 	})
-	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", DeploymentID: "deploy-1", ServiceName: "web",
 		AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
@@ -2200,7 +2200,7 @@ func TestDown_DeploymentStatusSaveWarning(t *testing.T) {
 		Services:  map[string]types.ServiceRecord{"web": {Image: "nginx", Replicas: 1}},
 		CreatedAt: time.Now(),
 	})
-	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", DeploymentID: "deploy-1", ServiceName: "web",
 		AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
@@ -2247,7 +2247,7 @@ func TestFindContainerAgent_ListNodesError(t *testing.T) {
 func TestFindContainerAgent_GetNodeError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
 	ctx := context.Background()
-	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 
 	store := &errorStore{MemoryStore: memStore, getErr: true}
 	srv := &engineGRPCServer{store: store}
@@ -2261,7 +2261,7 @@ func TestFindContainerAgent_GetNodeError(t *testing.T) {
 func TestGetStatus_GetNodeError(t *testing.T) {
 	memStore := storage.NewMemoryStore()
 	ctx := context.Background()
-	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
 		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
 		Services:  map[string]types.ServiceRecord{"web": {Image: "nginx"}},
@@ -2304,7 +2304,7 @@ func TestFindDeploymentByName_GetError(t *testing.T) {
 func TestFindContainerAgent_ListTasksError(t *testing.T) {
 	ctx := context.Background()
 	memStore := storage.NewMemoryStore()
-	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 
 	// List succeeds for nodes (first call) but fails for tasks (second call)
 	store := &countingListErrorStore{MemoryStore: memStore, failAfterN: 1}
@@ -2319,7 +2319,7 @@ func TestFindContainerAgent_ListTasksError(t *testing.T) {
 func TestFindContainerAgent_GetTaskError(t *testing.T) {
 	ctx := context.Background()
 	memStore := storage.NewMemoryStore()
-	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", AgentID: "agent-1", ContainerName: "target-container",
 		Type: types.TaskTypeCreateAndStart,
@@ -2356,7 +2356,7 @@ func TestGetLogs_ClientCancelDuringSend(t *testing.T) {
 	ctx := context.Background()
 
 	store.Save(ctx, types.KeyNodes+"agent-cancel", &types.NodeRecord{
-		Name: "agent-cancel", Status: "ready", APIAddress: agentAddr,
+		Name: "agent-cancel", Status: "ready", LastSeen: time.Now(), APIAddress: agentAddr,
 	})
 	store.Save(ctx, types.KeyTasks+"agent-cancel/task-cancel", &types.TaskRecord{
 		ID: "task-cancel", AgentID: "agent-cancel", ContainerName: "cancel-container",
@@ -2423,7 +2423,7 @@ func TestTeardownDeployment(t *testing.T) {
 	t.Run("creates stop tasks for completed containers", func(t *testing.T) {
 		store := storage.NewMemoryStore()
 
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
 			ID: "task-web", DeploymentID: "deploy-1", ServiceName: "web",
 			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
@@ -2492,7 +2492,7 @@ func TestTeardownDeployment(t *testing.T) {
 	t.Run("save error returns error", func(t *testing.T) {
 		memStore := storage.NewMemoryStore()
 
-		memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		memStore.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 			ID: "task-1", DeploymentID: "deploy-3", ServiceName: "web",
 			AgentID: "agent-1", Type: types.TaskTypeCreateAndStart,
@@ -2688,7 +2688,7 @@ func TestPrepareForRedeploy(t *testing.T) {
 		memStore := storage.NewMemoryStore()
 
 		// Failed deployment with a completed task (teardown will need to create stop tasks)
-		memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		memStore.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		memStore.Save(ctx, types.KeyDeployments+"deploy-f", &types.DeploymentRecord{
 			ID: "deploy-f", Name: "app", Status: types.StatusFailed, CreatedAt: time.Now(),
 		})
@@ -2733,7 +2733,7 @@ func TestDeployBlueGreen(t *testing.T) {
 		srv := &engineGRPCServer{store: store, registryURL: "localhost:5000"}
 
 		// Existing running deployment with a completed container task
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyDeployments+"my-app-old", &types.DeploymentRecord{
 			ID: "my-app-old", Name: "my-app", Status: types.StatusRunning,
 			Services:  map[string]types.ServiceRecord{"web": {Image: "nginx"}},
@@ -2900,7 +2900,7 @@ func TestGetLogs_SuccessProxyWithFollow(t *testing.T) {
 	ctx := context.Background()
 
 	store.Save(ctx, types.KeyNodes+"agent-follow", &types.NodeRecord{
-		Name: "agent-follow", Status: "ready", APIAddress: agentAddr,
+		Name: "agent-follow", Status: "ready", LastSeen: time.Now(), APIAddress: agentAddr,
 	})
 	store.Save(ctx, types.KeyTasks+"agent-follow/task-follow", &types.TaskRecord{
 		ID: "task-follow", AgentID: "agent-follow", ContainerName: "follow-container",
@@ -3019,7 +3019,7 @@ func TestGetRunningServiceNames(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 			ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1",
 			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -3065,7 +3065,7 @@ func TestTeardownDeploymentServices(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
 			ID: "task-web", DeploymentID: "deploy-1", AgentID: "agent-1",
 			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -3109,7 +3109,7 @@ func TestTeardownDeploymentServices(t *testing.T) {
 		store := storage.NewMemoryStore()
 		srv := &engineGRPCServer{store: store}
 
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
 			ID: "task-web", DeploymentID: "deploy-1", AgentID: "agent-1",
 			ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusPending,
@@ -3192,7 +3192,7 @@ func TestDeployServices(t *testing.T) {
 		srv := &engineGRPCServer{store: store}
 
 		// Existing running deployment with web, api, db
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
 			ID: "old-deploy", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
 		})
@@ -3285,7 +3285,7 @@ func TestDeployServices(t *testing.T) {
 		srv := &engineGRPCServer{store: store}
 
 		// Running deployment with only web (no db)
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyDeployments+"old-deploy", &types.DeploymentRecord{
 			ID: "old-deploy", Name: "app", Status: types.StatusRunning, CreatedAt: time.Now(),
 		})
@@ -3394,8 +3394,8 @@ func TestCollectServiceBackends(t *testing.T) {
 	ctx := context.Background()
 
 	// Register agents and a running deployment
-	store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
-	store.Save(ctx, types.KeyNodes+"worker-2", &types.NodeRecord{Name: "worker-2", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready", LastSeen: time.Now()})
+	store.Save(ctx, types.KeyNodes+"worker-2", &types.NodeRecord{Name: "worker-2", Status: "ready", LastSeen: time.Now()})
 	store.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
 		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
 	})
@@ -3511,7 +3511,7 @@ func TestHeartbeat_ReturnsServiceBackends(t *testing.T) {
 	ctx := context.Background()
 
 	// Register agent, deployment, and add a running container with IP
-	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready", LastSeen: time.Now()})
 	memStore.Save(ctx, types.KeyDeployments+"deploy-1", &types.DeploymentRecord{
 		ID: "deploy-1", Name: "app", Status: types.StatusRunning,
 	})
@@ -3556,7 +3556,7 @@ func TestHeartbeat_NoBackendsWithoutPeerTracker(t *testing.T) {
 
 	ctx := context.Background()
 
-	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready"})
+	memStore.Save(ctx, types.KeyNodes+"worker-1", &types.NodeRecord{Name: "worker-1", Status: "ready", LastSeen: time.Now()})
 	memStore.Save(ctx, types.KeyTasks+"worker-1/task-hb2", &types.TaskRecord{
 		ID: "task-hb2", AgentID: "worker-1",
 		Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -4245,7 +4245,7 @@ func TestGetRunningServiceNames_ExcludesStopTasks(t *testing.T) {
 	store := storage.NewMemoryStore()
 	srv := &engineGRPCServer{store: store}
 
-	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 		ID: "task-1", DeploymentID: "deploy-1", AgentID: "agent-1",
 		ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -4273,7 +4273,7 @@ func TestTeardownDeploymentServices_EmptyServiceList(t *testing.T) {
 	store := storage.NewMemoryStore()
 	srv := &engineGRPCServer{store: store}
 
-	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+	store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 	store.Save(ctx, types.KeyTasks+"agent-1/task-web", &types.TaskRecord{
 		ID: "task-web", DeploymentID: "deploy-1", AgentID: "agent-1",
 		ServiceName: "web", Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -4309,7 +4309,7 @@ func TestCollectServiceBackends_EdgeCases(t *testing.T) {
 		store.Save(ctx, types.KeyDeployments+"d1", &types.DeploymentRecord{
 			ID: "d1", Name: "app", Status: types.StatusStopped,
 		})
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 			ID: "task-1", DeploymentID: "d1", AgentID: "agent-1", ServiceName: "web",
 			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -4330,7 +4330,7 @@ func TestCollectServiceBackends_EdgeCases(t *testing.T) {
 		store.Save(ctx, types.KeyDeployments+"d1", &types.DeploymentRecord{
 			ID: "d1", Name: "app", Status: types.StatusRunning,
 		})
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 			ID: "task-1", DeploymentID: "d1", AgentID: "agent-1", ServiceName: "web",
 			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,
@@ -4351,7 +4351,7 @@ func TestCollectServiceBackends_EdgeCases(t *testing.T) {
 		store.Save(ctx, types.KeyDeployments+"d1", &types.DeploymentRecord{
 			ID: "d1", Name: "app", Status: types.StatusRunning,
 		})
-		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready"})
+		store.Save(ctx, types.KeyNodes+"agent-1", &types.NodeRecord{Name: "agent-1", Status: "ready", LastSeen: time.Now()})
 		store.Save(ctx, types.KeyTasks+"agent-1/task-1", &types.TaskRecord{
 			ID: "task-1", DeploymentID: "d1", AgentID: "agent-1", ServiceName: "web",
 			Type: types.TaskTypeCreateAndStart, Status: types.StatusCompleted,

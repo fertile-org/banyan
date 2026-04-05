@@ -805,16 +805,25 @@ func (s *engineGRPCServer) findDeploymentByName(ctx context.Context, name string
 	return best, bestKey, nil
 }
 
-// findContainerAgent scans to find which agent has the given container.
+// findContainerAgent finds which healthy agent has the given container.
+// Only checks agents that are currently connected (status=ready, recent heartbeat).
+// Among matching tasks, returns the latest by CreatedAt to avoid stale restart artifacts.
 func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName string) (*types.TaskRecord, *types.NodeRecord, error) {
 	nodeKeys, err := s.store.List(ctx, types.KeyNodes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to list nodes: %w", err)
 	}
 
+	var bestTask *types.TaskRecord
+	var bestNode *types.NodeRecord
+
 	for _, nodeKey := range nodeKeys {
 		var node types.NodeRecord
 		if err := s.store.Get(ctx, nodeKey, &node); err != nil {
+			continue
+		}
+		// Only check healthy agents — stale/disconnected agents have unreachable API addresses
+		if node.Status != "ready" || time.Since(node.LastSeen) > agentStalenessThreshold {
 			continue
 		}
 
@@ -828,13 +837,23 @@ func (s *engineGRPCServer) findContainerAgent(ctx context.Context, containerName
 			if err := s.store.Get(ctx, taskKey, &task); err != nil {
 				continue
 			}
-			if task.ContainerName == containerName && task.Type == types.TaskTypeCreateAndStart {
-				return &task, &node, nil
+			if task.ContainerName != containerName || task.Type != types.TaskTypeCreateAndStart {
+				continue
+			}
+			// Pick the latest task (by CreatedAt) to avoid matching old restart artifacts
+			if bestTask == nil || task.CreatedAt.After(bestTask.CreatedAt) {
+				t := task
+				n := node
+				bestTask = &t
+				bestNode = &n
 			}
 		}
 	}
 
-	return nil, nil, fmt.Errorf("container %q not found in cluster", containerName)
+	if bestTask == nil {
+		return nil, nil, fmt.Errorf("container %q not found on any healthy agent", containerName)
+	}
+	return bestTask, bestNode, nil
 }
 
 // StopTask stops a single container by creating a stop_and_remove task for the given task.

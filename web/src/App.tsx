@@ -15,14 +15,21 @@ import { Logs } from "@/pages/Logs";
 import { Secrets } from "@/pages/Secrets";
 import { Configuration } from "@/pages/Configuration";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { Login } from "@/pages/Login";
+import { useAuth } from "@/hooks/use-auth";
 
 export function App() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const openPalette = useCallback(() => setPaletteOpen(true), []);
+  const { isAuthenticated, username, role, login, logout } = useAuth();
+
+  if (!isAuthenticated) {
+    return <Login onLogin={login} />;
+  }
 
   return (
     <div style={{ display: "flex", minHeight: "100vh" }}>
-      <Sidebar onOpenPalette={openPalette} />
+      <Sidebar onOpenPalette={openPalette} username={username} role={role} onLogout={logout} />
       <main className="main">
         <Routes>
           <Route path="/" element={<Overview />} />

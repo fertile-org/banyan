@@ -46,9 +46,24 @@ function normalizeKeys(obj: unknown): unknown {
 }
 
 async function rpc<TReq, TResp>(method: string, request: TReq): Promise<TResp> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+
+  // Attach bearer token if available
+  try {
+    const stored = localStorage.getItem("banyan_auth");
+    if (stored) {
+      const parsed = JSON.parse(stored) as { accessToken?: string };
+      if (parsed.accessToken) {
+        headers["Authorization"] = `Bearer ${parsed.accessToken}`;
+      }
+    }
+  } catch {
+    // no auth
+  }
+
   const res = await fetch(`${BASE_URL}/${method}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers,
     body: JSON.stringify(request),
   });
 
@@ -177,6 +192,20 @@ export async function* streamLogs(
       }
     }
   }
+}
+
+// --- Auth APIs ---
+
+interface LoginResponse {
+  accessToken: string;
+  refreshToken: string;
+  username: string;
+  role: string;
+  expiresInSeconds: number;
+}
+
+export function login(username: string, password: string): Promise<LoginResponse> {
+  return rpc("Login", { username, password });
 }
 
 export { ApiError };

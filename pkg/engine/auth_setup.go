@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/fertile-org/banyan/pkg/engine/auth"
 	"github.com/fertile-org/banyan/pkg/storage"
@@ -84,4 +85,32 @@ func consumeAuthBootstrap(ctx context.Context, users auth.UserStore, bootstrapPa
 	}
 	_ = os.Remove(bootstrapPath)
 	return nil
+}
+
+// setupEngineAuth assembles the auth.AuthDeps bundle the engine's gRPC and
+// Connect-go servers use to enforce authentication. It loads (or generates)
+// the JWT signing key and consumes the init-time admin bootstrap file.
+//
+// Returns (nil, nil) when allowInsecure is true — auth is fully disabled,
+// matching the --allow-insecure development escape hatch.
+func setupEngineAuth(ctx context.Context, store storage.StateStore, configDir string, allowInsecure bool) (*auth.AuthDeps, error) {
+	if allowInsecure {
+		return nil, nil
+	}
+
+	jwtKey, err := loadOrCreateJWTKey(ctx, store)
+	if err != nil {
+		return nil, err
+	}
+
+	users := auth.NewEtcdUserStore(store)
+	if err := consumeAuthBootstrap(ctx, users, filepath.Join(configDir, "auth-bootstrap.json")); err != nil {
+		return nil, err
+	}
+
+	return &auth.AuthDeps{
+		JWT:        auth.NewJWTManager(jwtKey, store),
+		Users:      users,
+		Authorizer: auth.NewRoleAuthorizer(),
+	}, nil
 }

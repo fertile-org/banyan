@@ -111,3 +111,36 @@ func TestConsumeAuthBootstrap_NoFileIsNoOp(t *testing.T) {
 		t.Errorf("missing bootstrap file should be a no-op, got: %v", err)
 	}
 }
+
+func TestSetupEngineAuth_InsecureReturnsNil(t *testing.T) {
+	store := storage.NewMemoryStore()
+	deps, err := setupEngineAuth(context.Background(), store, t.TempDir(), true)
+	if err != nil {
+		t.Fatalf("setupEngineAuth: %v", err)
+	}
+	if deps != nil {
+		t.Error("allowInsecure=true should disable auth (nil AuthDeps)")
+	}
+}
+
+func TestSetupEngineAuth_BuildsDepsAndCreatesAdmin(t *testing.T) {
+	store := storage.NewMemoryStore()
+	dir := t.TempDir()
+	writeBootstrap(t, dir)
+
+	deps, err := setupEngineAuth(context.Background(), store, dir, false)
+	if err != nil {
+		t.Fatalf("setupEngineAuth: %v", err)
+	}
+	if deps == nil {
+		t.Fatal("expected non-nil AuthDeps when auth is enabled")
+	}
+	if deps.JWT == nil || deps.Users == nil || deps.Authorizer == nil {
+		t.Error("AuthDeps fields must all be populated")
+	}
+
+	// The bootstrap admin should now exist via the constructed UserStore
+	if _, err := deps.Users.Get(context.Background(), "admin"); err != nil {
+		t.Errorf("bootstrap admin not created: %v", err)
+	}
+}

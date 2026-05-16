@@ -338,7 +338,7 @@ func TestCORSMiddleware(t *testing.T) {
 	inner := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
-	handler := corsMiddleware(inner)
+	handler := corsMiddleware(inner, nil)
 
 	t.Run("preflight request", func(t *testing.T) {
 		req := httptest.NewRequest("OPTIONS", "/test", nil)
@@ -383,7 +383,7 @@ func TestStartConnectAPI(t *testing.T) {
 	// Use port 0 will fail (startConnectAPI uses a fixed addr format), so we test
 	// with a real ephemeral port by checking it doesn't return an error.
 	// We pick a high random port unlikely to conflict.
-	err := startConnectAPI(ctx, srv, "0")
+	err := startConnectAPI(ctx, srv, "0", nil)
 	if err != nil {
 		t.Fatalf("startConnectAPI failed: %v", err)
 	}

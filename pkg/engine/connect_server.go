@@ -15,6 +15,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/fertile-org/banyan/pkg/engine/auth"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb/banyanpbconnect"
 )
@@ -288,11 +289,26 @@ func (a *connectAdapter) DeleteSecret(ctx context.Context, req *connect.Request[
 }
 
 // corsMiddleware adds CORS headers for browser-based dashboard access.
-func corsMiddleware(next http.Handler) http.Handler {
+// allowedOrigins controls which origins can make requests. If empty, allows all ("*").
+func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := "*"
+		if len(allowedOrigins) > 0 {
+			reqOrigin := r.Header.Get("Origin")
+			origin = "" // deny by default
+			for _, ao := range allowedOrigins {
+				if ao == reqOrigin || ao == "*" {
+					origin = reqOrigin
+					break
+				}
+			}
+		}
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+		}
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Connect-Protocol-Version, Connect-Timeout-Ms, Grpc-Timeout, X-Grpc-Web, X-User-Agent")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		w.Header().Set("Access-Control-Expose-Headers", "Grpc-Status, Grpc-Message, Grpc-Status-Details-Bin")
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusNoContent)
@@ -304,13 +320,19 @@ func corsMiddleware(next http.Handler) http.Handler {
 
 // startConnectAPI starts the connect-go HTTP API server alongside the existing gRPC server.
 // It provides an HTTP/JSON API for the web dashboard.
-func startConnectAPI(ctx context.Context, srv *engineGRPCServer, port string) error {
+func startConnectAPI(ctx context.Context, srv *engineGRPCServer, port string, allowedOrigins []string) error {
 	adapter := &connectAdapter{srv: srv}
 	mux := http.NewServeMux()
 	path, handler := banyanpbconnect.NewEngineServiceHandler(adapter,
 		connect.WithCodec(&dashboardJSONCodec{}),
 	)
-	mux.Handle(path, corsMiddleware(handler))
+
+	// Middleware chain: CORS → Auth → Handler
+	var finalHandler http.Handler = handler
+	if srv.authDeps != nil {
+		finalHandler = auth.ConnectAuthMiddleware(srv.authDeps)(finalHandler)
+	}
+	mux.Handle(path, corsMiddleware(finalHandler, allowedOrigins))
 
 	httpServer := &http.Server{
 		Addr:              "0.0.0.0:" + port,

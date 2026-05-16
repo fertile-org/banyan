@@ -350,4 +350,3 @@ func matchPlacement(agentName, pattern string) bool {
 	ok, _ := path.Match(pattern, agentName)
 	return ok
 }
-

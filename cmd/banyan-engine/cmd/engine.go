@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/engine"
+	"github.com/fertile-org/banyan/pkg/engine/auth"
 	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -490,6 +492,75 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		fmt.Printf("  %s Secrets encryption key already exists\n", styleOK.Render("[OK]"))
 	}
 
+	// --- TLS setup ---
+	tlsDir := filepath.Join(filepath.Dir(configPath), "tls")
+	if !auth.TLSBundleExists(tlsDir) {
+		fmt.Println()
+		fmt.Println(styleTitle.Render("=== TLS Setup ==="))
+		var extraIPs []net.IP
+		if existingCfg.Engine.WGPublicKey != "" {
+			tunnelIP := types.TunnelIPFromPublicKey(existingCfg.Engine.WGPublicKey)
+			extraIPs = append(extraIPs, tunnelIP)
+		}
+		bundle, tlsErr := auth.GenerateTLSBundle(extraIPs...)
+		if tlsErr != nil {
+			return fmt.Errorf("failed to generate TLS certificates: %w", tlsErr)
+		}
+		if tlsErr := auth.SaveTLSBundle(tlsDir, bundle); tlsErr != nil {
+			return fmt.Errorf("failed to save TLS certificates: %w", tlsErr)
+		}
+		fmt.Printf("  %s TLS certificates generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s CA fingerprint (share with CLI/agents for verification):\n", styleInfo.Render("[.."))
+		fmt.Printf("       %s\n", bundle.CAFingerprint)
+	} else {
+		fmt.Printf("  %s TLS certificates already exist\n", styleOK.Render("[OK]"))
+	}
+
+	// --- Auth setup (admin user) ---
+	fmt.Println()
+	fmt.Println(styleTitle.Render("=== Authentication Setup ==="))
+	fmt.Println(styleDim.Render("  Create an admin user for Banyan."))
+	fmt.Println(styleDim.Render("  All CLI and dashboard access requires authentication."))
+	fmt.Println()
+
+	var adminUsername, adminPassword string
+	adminForm := huh.NewForm(
+		huh.NewGroup(
+			huh.NewInput().Title("Admin username").Value(&adminUsername).Validate(func(s string) error {
+				if s == "" {
+					return fmt.Errorf("username cannot be empty")
+				}
+				return nil
+			}),
+			huh.NewInput().Title("Admin password").EchoMode(huh.EchoModePassword).Value(&adminPassword).Validate(func(s string) error {
+				if len(s) < 8 {
+					return fmt.Errorf("password must be at least 8 characters")
+				}
+				return nil
+			}),
+		),
+	)
+	if err := adminForm.Run(); err != nil {
+		if errors.Is(err, huh.ErrUserAborted) {
+			fmt.Println(styleWarn.Render("  Skipped admin user setup. You can create users later with: banyan user add"))
+		} else {
+			return fmt.Errorf("admin user form error: %w", err)
+		}
+	} else {
+		hash, hashErr := auth.HashPassword(adminPassword)
+		if hashErr != nil {
+			return fmt.Errorf("failed to hash password: %w", hashErr)
+		}
+		// Store admin credentials in a bootstrap file for engine to read on first start
+		bootstrapPath := filepath.Join(filepath.Dir(configPath), "auth-bootstrap.json")
+		bootstrapData := fmt.Sprintf(`{"username":%q,"password_hash":%q,"role":"admin"}`, adminUsername, hash)
+		if writeErr := os.WriteFile(bootstrapPath, []byte(bootstrapData), 0o600); writeErr != nil {
+			return fmt.Errorf("failed to write auth bootstrap: %w", writeErr)
+		}
+		fmt.Printf("  %s Admin user %q configured\n", styleOK.Render("[OK]"), adminUsername)
+		fmt.Println(styleDim.Render("  The admin account will be created when the engine starts."))
+	}
+
 	// --- Save config ---
 	fmt.Println()
 	if err := types.SaveConfig(configPath, &existingCfg); err != nil {
@@ -734,6 +805,7 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		ExternalRegistryURL: registryURL,
 		EngineID:            cfg.Engine.EngineID,
 		MultiEngine:         cfg.Engine.MultiEngine,
+		ConfigDir:           filepath.Dir(configPath),
 	})
 	if err != nil {
 		return err

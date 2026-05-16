@@ -163,6 +163,19 @@ sleep 15
 log_info "Checking engine status..."
 docker exec banyan-engine banyan-engine status || log_warn "Engine status check failed"
 
+# Step 6b: Verify CLI authentication works (fail fast if auth is broken)
+log_info "Verifying CLI authentication..."
+WHOAMI_OUT=$(docker exec banyan-engine banyan-cli whoami 2>&1) || true
+if echo "$WHOAMI_OUT" | grep -qi "role:"; then
+    log_test_pass "Auth: CLI authenticated ($(echo "$WHOAMI_OUT" | tr '\n' ' '))"
+else
+    log_test_fail "Auth: CLI not authenticated — login failed in entrypoint"
+    echo "  whoami output: $WHOAMI_OUT"
+    echo "  engine entrypoint log (last 30 lines):"
+    docker logs banyan-engine 2>&1 | tail -30
+    exit 1
+fi
+
 # =================================================================
 # Phase 2: Deploy and Verify Basic Operation
 # =================================================================

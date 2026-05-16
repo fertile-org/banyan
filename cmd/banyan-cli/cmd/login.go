@@ -50,30 +50,42 @@ var whoamiCmd = &cobra.Command{
 }
 
 func init() {
+	loginCmd.Flags().String("username", "", "Username (non-interactive login)")
+	loginCmd.Flags().String("password", "", "Password (non-interactive login)")
 	rootCmd.AddCommand(loginCmd)
 	rootCmd.AddCommand(logoutCmd)
 	rootCmd.AddCommand(whoamiCmd)
 }
 
 func runAuthLogin(cmd *cobra.Command, args []string) error {
-	fmt.Print("Username: ")
-	var username string
-	if _, err := fmt.Scanln(&username); err != nil {
-		return fmt.Errorf("failed to read username: %w", err)
-	}
-	if username == "" {
-		return fmt.Errorf("username cannot be empty")
-	}
+	flagUser, _ := cmd.Flags().GetString("username")
+	flagPass, _ := cmd.Flags().GetString("password")
 
-	fmt.Print("Password: ")
-	passwordBytes, err := term.ReadPassword(syscall.Stdin)
-	fmt.Println() // newline after hidden input
-	if err != nil {
-		return fmt.Errorf("failed to read password: %w", err)
-	}
-	password := string(passwordBytes)
-	if password == "" {
-		return fmt.Errorf("password cannot be empty")
+	var username, password string
+
+	if flagUser != "" && flagPass != "" {
+		// Non-interactive: both flags supplied
+		username = flagUser
+		password = flagPass
+	} else {
+		fmt.Print("Username: ")
+		if _, err := fmt.Scanln(&username); err != nil {
+			return fmt.Errorf("failed to read username: %w", err)
+		}
+		if username == "" {
+			return fmt.Errorf("username cannot be empty")
+		}
+
+		fmt.Print("Password: ")
+		passwordBytes, err := term.ReadPassword(syscall.Stdin)
+		fmt.Println() // newline after hidden input
+		if err != nil {
+			return fmt.Errorf("failed to read password: %w", err)
+		}
+		password = string(passwordBytes)
+		if password == "" {
+			return fmt.Errorf("password cannot be empty")
+		}
 	}
 
 	client, err := NewAutoEngineClient("")

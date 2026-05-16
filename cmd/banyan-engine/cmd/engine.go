@@ -117,6 +117,10 @@ func init() {
 	startCmd.Flags().StringVar(&engineGRPCPort, "grpc-port", "50051", "Engine gRPC port")
 	startCmd.Flags().BoolVar(&engineAllowInsecure, "allow-insecure", false, "Allow running without authentication (development only, NOT for production)")
 
+	initCmd.Flags().Bool("non-interactive", false, "Run init without interactive prompts (requires --admin-user and --admin-password)")
+	initCmd.Flags().String("admin-user", "", "Admin username (non-interactive mode)")
+	initCmd.Flags().String("admin-password", "", "Admin password (non-interactive mode, min 8 chars)")
+
 	// Status flags
 	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
 	statusCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
@@ -523,30 +527,50 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("  All CLI and dashboard access requires authentication."))
 	fmt.Println()
 
+	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
+	flagAdminUser, _ := cmd.Flags().GetString("admin-user")
+	flagAdminPass, _ := cmd.Flags().GetString("admin-password")
+
 	var adminUsername, adminPassword string
-	adminForm := huh.NewForm(
-		huh.NewGroup(
-			huh.NewInput().Title("Admin username").Value(&adminUsername).Validate(func(s string) error {
-				if s == "" {
-					return fmt.Errorf("username cannot be empty")
-				}
-				return nil
-			}),
-			huh.NewInput().Title("Admin password").EchoMode(huh.EchoModePassword).Value(&adminPassword).Validate(func(s string) error {
-				if len(s) < 8 {
-					return fmt.Errorf("password must be at least 8 characters")
-				}
-				return nil
-			}),
-		),
-	)
-	if err := adminForm.Run(); err != nil {
-		if errors.Is(err, huh.ErrUserAborted) {
-			fmt.Println(styleWarn.Render("  Skipped admin user setup. You can create users later with: banyan user add"))
-		} else {
-			return fmt.Errorf("admin user form error: %w", err)
+	skipAdmin := false
+
+	if nonInteractive {
+		if flagAdminUser == "" || flagAdminPass == "" {
+			return fmt.Errorf("--non-interactive requires --admin-user and --admin-password")
 		}
+		if len(flagAdminPass) < 8 {
+			return fmt.Errorf("--admin-password must be at least 8 characters")
+		}
+		adminUsername = flagAdminUser
+		adminPassword = flagAdminPass
 	} else {
+		adminForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Admin username").Value(&adminUsername).Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("username cannot be empty")
+					}
+					return nil
+				}),
+				huh.NewInput().Title("Admin password").EchoMode(huh.EchoModePassword).Value(&adminPassword).Validate(func(s string) error {
+					if len(s) < 8 {
+						return fmt.Errorf("password must be at least 8 characters")
+					}
+					return nil
+				}),
+			),
+		)
+		if err := adminForm.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println(styleWarn.Render("  Skipped admin user setup. You can create users later with: banyan user add"))
+				skipAdmin = true
+			} else {
+				return fmt.Errorf("admin user form error: %w", err)
+			}
+		}
+	}
+
+	if !skipAdmin {
 		hash, hashErr := auth.HashPassword(adminPassword)
 		if hashErr != nil {
 			return fmt.Errorf("failed to hash password: %w", hashErr)

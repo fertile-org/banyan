@@ -93,6 +93,12 @@ func init() {
 
 	statusCmd.Flags().StringVar(&agentEngineEndpoint, "engine", "localhost:50051", "Engine gRPC endpoint")
 	statusCmd.Flags().StringVar(&agentPidFile, "pid-file", "/var/run/banyan-agent.pid", "Agent PID file")
+
+	initCmd.Flags().Bool("non-interactive", false, "Run init without interactive prompts")
+	initCmd.Flags().String("engine-host", "localhost", "Engine host (non-interactive mode)")
+	initCmd.Flags().String("engine-port", "50051", "Engine gRPC port (non-interactive mode)")
+	initCmd.Flags().String("agent-name", "", "Agent name (non-interactive mode, defaults to hostname)")
+	initCmd.Flags().String("engine-wg-pubkey", "", "Engine WireGuard public key (non-interactive mode)")
 }
 
 func runAgentInit(cmd *cobra.Command, args []string) error {
@@ -186,6 +192,56 @@ func runAgentInit(cmd *cobra.Command, args []string) error {
 		existingCfg.Agent.AgentName = ""
 		existingCfg.Agent.EngineWGPublicKey = ""
 		existingCfg.Agent.Tags = nil
+	}
+
+	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
+	if nonInteractive {
+		flagEngineHost, _ := cmd.Flags().GetString("engine-host")
+		flagEnginePort, _ := cmd.Flags().GetString("engine-port")
+		flagAgentName, _ := cmd.Flags().GetString("agent-name")
+		flagEngineWGPubKey, _ := cmd.Flags().GetString("engine-wg-pubkey")
+
+		if flagEngineWGPubKey == "" {
+			return fmt.Errorf("--non-interactive requires --engine-wg-pubkey")
+		}
+		if flagAgentName == "" {
+			hostname, _ := os.Hostname()
+			flagAgentName = hostname
+		}
+
+		if existingCfg.Agent.WGPrivateKeyFile == "" || existingCfg.Agent.WGPublicKey == "" {
+			privKey, pubKey, genErr := overlay.GenerateKeyPair()
+			if genErr != nil {
+				return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
+			}
+			keyPath, writeErr := types.WritePrivateKeyFile(types.DefaultKeysDir, "agent", privKey)
+			if writeErr != nil {
+				return fmt.Errorf("failed to write private key: %w", writeErr)
+			}
+			existingCfg.Agent.WGPrivateKeyFile = keyPath
+			existingCfg.Agent.WGPublicKey = pubKey
+			fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+			fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
+		}
+
+		existingCfg.Agent.EngineHost = flagEngineHost
+		existingCfg.Agent.EnginePort = flagEnginePort
+		existingCfg.Agent.AgentName = flagAgentName
+		existingCfg.Agent.EngineWGPublicKey = flagEngineWGPubKey
+
+		existingCfg.Agent.Engines = nil
+
+		if err := types.SaveConfig(configPath, &existingCfg); err != nil {
+			return fmt.Errorf("failed to save config: %w", err)
+		}
+		fmt.Printf("  %s Config saved to %s\n", styleOK.Render("[OK]"), configPath)
+		fmt.Printf("  %s Agent %q configured for engine %s:%s\n",
+			styleOK.Render("[OK]"), flagAgentName, flagEngineHost, flagEnginePort)
+		fmt.Println()
+		fmt.Println(styleInfo.Render("To whitelist this agent on the engine:"))
+		fmt.Printf("  sudo banyan-engine add-client --name %s --pubkey '%s'\n",
+			flagAgentName, existingCfg.Agent.WGPublicKey)
+		return nil
 	}
 
 	// --- WireGuard keypair generation ---

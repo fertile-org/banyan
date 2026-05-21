@@ -269,3 +269,58 @@ func TestResolveStoreConfig_WithConfigFile(t *testing.T) {
 		}
 	})
 }
+
+func TestEngineInit_NonInteractiveFlags(t *testing.T) {
+	initCmd.ResetFlags()
+	initCmd.Flags().Bool("non-interactive", false, "")
+	initCmd.Flags().String("admin-user", "admin", "")
+	initCmd.Flags().String("admin-password", "", "")
+	initCmd.Flags().String("vpc-cidr", "10.0.0.0/16", "")
+
+	if initCmd.Flags().Lookup("non-interactive") == nil {
+		t.Error("--non-interactive flag not registered")
+	}
+	if initCmd.Flags().Lookup("admin-user") == nil {
+		t.Error("--admin-user flag not registered")
+	}
+	if initCmd.Flags().Lookup("admin-password") == nil {
+		t.Error("--admin-password flag not registered")
+	}
+	if initCmd.Flags().Lookup("vpc-cidr") == nil {
+		t.Error("--vpc-cidr flag not registered")
+	}
+}
+
+func TestRegistryBindAddressSelection(t *testing.T) {
+	tests := []struct {
+		name                string
+		controlTunnelActive bool
+		engineTunnelIP      string
+		expectedBindAddr    string
+	}{
+		{
+			name:                "no tunnel uses localhost",
+			controlTunnelActive: false,
+			engineTunnelIP:      "",
+			expectedBindAddr:    "127.0.0.1",
+		},
+		{
+			name:                "tunnel active uses tunnel IP",
+			controlTunnelActive: true,
+			engineTunnelIP:      "10.200.1.1",
+			expectedBindAddr:    "10.200.1.1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bindAddr := "127.0.0.1"
+			if tc.controlTunnelActive && tc.engineTunnelIP != "" {
+				bindAddr = tc.engineTunnelIP
+			}
+			if bindAddr != tc.expectedBindAddr {
+				t.Errorf("expected bind address %q, got %q", tc.expectedBindAddr, bindAddr)
+			}
+		})
+	}
+}

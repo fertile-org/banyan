@@ -113,12 +113,6 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&engineDataDir, "data-dir", "/var/lib/banyan", "Data directory")
 
-	// Init non-interactive flags
-	initCmd.Flags().Bool("non-interactive", false, "Run init without interactive prompts")
-	initCmd.Flags().String("admin-user", "admin", "Admin username (non-interactive mode)")
-	initCmd.Flags().String("admin-password", "", "Admin password (non-interactive mode)")
-	initCmd.Flags().String("vpc-cidr", "10.0.0.0/16", "VPC CIDR range (non-interactive mode)")
-
 	// Store backend flags (for external etcd override)
 	startCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
 	startCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
@@ -132,6 +126,9 @@ func init() {
 	initCmd.Flags().Bool("non-interactive", false, "Run init without interactive prompts (requires --admin-user and --admin-password)")
 	initCmd.Flags().String("admin-user", "", "Admin username (non-interactive mode)")
 	initCmd.Flags().String("admin-password", "", "Admin password (non-interactive mode, min 8 chars)")
+
+	// Init non-interactive flags
+	initCmd.Flags().String("vpc-cidr", "10.0.0.0/16", "VPC CIDR range (non-interactive mode)")
 
 	// Status flags
 	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
@@ -592,7 +589,7 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	fmt.Println(styleDim.Render("  All CLI and dashboard access requires authentication."))
 	fmt.Println()
 
-	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
+	nonInteractive, _ = cmd.Flags().GetBool("non-interactive")
 	flagAdminUser, _ := cmd.Flags().GetString("admin-user")
 	flagAdminPass, _ := cmd.Flags().GetString("admin-password")
 

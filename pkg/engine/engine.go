@@ -23,19 +23,19 @@ import (
 
 // Options configures the Engine.
 type Options struct {
-	StoreBackend    string // "etcd" only
-	StoreAddress    string // resolved address for the store backend
-	VPCCIDR         string
-	RegistryPort    string
-	GRPCPort        string
-	MetricsPort     string // Prometheus /metrics HTTP port (default "9090")
-	APIPort         string // Connect HTTP API port for web dashboard (default "9091")
-	DataDir         string
-	EtcdUsername    string            // etcd RBAC username
-	EtcdPassword    string            // etcd RBAC password
-	EtcdCertFile    string            // client certificate for mTLS
-	EtcdKeyFile     string            // client key for mTLS
-	EtcdCAFile      string            // CA certificate for server verification
+	StoreBackend        string // "etcd" only
+	StoreAddress        string // resolved address for the store backend
+	VPCCIDR             string
+	RegistryPort        string
+	GRPCPort            string
+	MetricsPort         string // Prometheus /metrics HTTP port (default "9090")
+	APIPort             string // Connect HTTP API port for web dashboard (default "9091")
+	DataDir             string
+	EtcdUsername        string            // etcd RBAC username
+	EtcdPassword        string            // etcd RBAC password
+	EtcdCertFile        string            // client certificate for mTLS
+	EtcdKeyFile         string            // client key for mTLS
+	EtcdCAFile          string            // CA certificate for server verification
 	WhitelistedKeys     map[string]string // publicKey → agentName
 	AllowInsecure       bool              // allow running without authentication (development only)
 	ControlTunnelActive bool              // WireGuard control tunnel is set up and active
@@ -43,6 +43,7 @@ type Options struct {
 	ExternalRegistryURL string            // external registry URL (skips embedded registry when set)
 	EngineID            string            // unique engine identifier (auto-generated if empty)
 	MultiEngine         bool              // enable multi-engine coordination
+	ConfigDir           string            // directory holding banyan.yaml + auth-bootstrap.json (default /etc/banyan)
 }
 
 // Engine is the Banyan control plane.
@@ -223,6 +224,22 @@ func (e *Engine) Run(ctx context.Context) error {
 		return fmt.Errorf("failed to save registry URL: %w", saveErr)
 	}
 
+	// Set up application-layer authentication (JWT + RBAC).
+	// Returns nil AuthDeps in --allow-insecure mode.
+	configDir := e.opts.ConfigDir
+	if configDir == "" {
+		configDir = "/etc/banyan"
+	}
+	authDeps, authErr := setupEngineAuth(ctx, e.store, configDir, e.opts.AllowInsecure)
+	if authErr != nil {
+		return fmt.Errorf("failed to set up authentication: %w", authErr)
+	}
+	if authDeps != nil {
+		e.logger().Info("Application-layer authentication enabled (JWT + RBAC)")
+	} else {
+		e.logger().Warn("Application-layer authentication DISABLED (--allow-insecure)")
+	}
+
 	// Start Engine gRPC server — bind to control tunnel IP when authenticated,
 	// localhost in insecure mode. In multi-engine mode with insecure, bind to
 	// all interfaces so agents on other hosts can connect.
@@ -246,6 +263,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		MetricsRegistry: e.metricsRegistry,
 		Events:          e.events,
 		Secrets:         e.secrets,
+		AuthDeps:        authDeps,
 		StartedAt:       e.startedAt,
 	})
 	if err != nil {
@@ -267,7 +285,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	if apiPort == "" {
 		apiPort = "9091"
 	}
-	if startErr := startConnectAPI(ctx, grpcSrv, apiPort); startErr != nil {
+	if startErr := startConnectAPI(ctx, grpcSrv, apiPort, nil); startErr != nil {
 		return fmt.Errorf("failed to start Connect API server: %w", startErr)
 	}
 

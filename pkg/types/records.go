@@ -14,6 +14,9 @@ const (
 	KeyRegistry    = "config/registry"
 	KeyEngines     = "engines/"
 	KeySecrets     = "secrets/"
+	KeyAuthUsers   = "auth/users/"
+	KeyAuthJWTKey  = "auth/jwt-key"
+	KeyAuthRefresh = "auth/refresh/"
 )
 
 // Deployment statuses.

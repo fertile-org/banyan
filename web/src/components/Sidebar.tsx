@@ -11,11 +11,15 @@ import {
   Settings,
   CircleDot,
   Search,
+  LogOut,
 } from "lucide-react";
 import { useEngineHealth } from "@/hooks/use-api";
 
 interface SidebarProps {
   onOpenPalette: () => void;
+  username: string | null;
+  role: string | null;
+  onLogout: () => void;
 }
 
 const clusterNav = [
@@ -36,7 +40,7 @@ const settingsNav = [
   { to: "/settings", icon: Settings, label: "Configuration" },
 ];
 
-export function Sidebar({ onOpenPalette }: SidebarProps) {
+export function Sidebar({ onOpenPalette, username, role, onLogout }: SidebarProps) {
   const { connected } = useEngineHealth();
 
   return (
@@ -98,6 +102,22 @@ export function Sidebar({ onOpenPalette }: SidebarProps) {
           {item.label}
         </NavLink>
       ))}
+
+      {username && (
+        <div className="sidebar-footer" style={{ borderBottom: "1px solid var(--border)", paddingBottom: 8, marginBottom: 8 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="sidebar-footer-text" style={{ fontWeight: 500 }}>{username}</div>
+            <div className="sidebar-footer-text" style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-muted)" }}>{role}</div>
+          </div>
+          <button
+            onClick={onLogout}
+            title="Sign out"
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 4, color: "var(--text-muted)" }}
+          >
+            <LogOut size={14} />
+          </button>
+        </div>
+      )}
 
       <div className="sidebar-footer">
         <CircleDot

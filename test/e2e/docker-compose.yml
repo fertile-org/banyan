@@ -17,6 +17,8 @@ services:
     hostname: engine
     privileged: true
     command: ["/entrypoint-engine.sh"]
+    environment:
+      - HOME=/root
     ports:
       - "50051:50051"
     networks:
@@ -30,8 +32,8 @@ services:
       test: ["CMD", "banyan-cli", "engine"]
       interval: 5s
       timeout: 5s
-      retries: 15
-      start_period: 45s
+      retries: 20
+      start_period: 60s
 
   worker-1:
     build:

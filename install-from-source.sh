@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Ensure Go is in PATH for sudo environments
+export PATH="/usr/local/go/bin:$PATH"
+
 # Banyan installer (build from source)
 #
 # Builds banyan binaries from the current directory and installs dependencies.

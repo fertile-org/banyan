@@ -34,7 +34,10 @@ func NewEngineClient(engineAddr string) (*EngineClient, error) {
 	// Attach JWT bearer token if credentials exist
 	creds, _ := loadCredentials()
 	if creds != nil && creds.AccessToken != "" {
-		dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(authClientInterceptor(creds)))
+		dialOpts = append(dialOpts,
+			grpc.WithUnaryInterceptor(authClientInterceptor(creds)),
+			grpc.WithStreamInterceptor(authStreamClientInterceptor(creds)),
+		)
 	}
 
 	conn, err := grpc.NewClient(engineAddr, dialOpts...)
@@ -84,6 +87,16 @@ func authClientInterceptor(creds *credentials) grpc.UnaryClientInterceptor {
 		}
 
 		return err
+	}
+}
+
+// authStreamClientInterceptor returns a gRPC client stream interceptor that attaches
+// the JWT bearer token to outgoing streaming requests (e.g., GetLogs).
+func authStreamClientInterceptor(creds *credentials) grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		// Attach bearer token
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+creds.AccessToken)
+		return streamer(ctx, desc, cc, method, opts...)
 	}
 }
 

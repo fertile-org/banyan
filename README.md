@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="website/public/banner.png" alt="Banyan — container orchestration you already know" width="100%">
+  <img src="website/public/banner-new.png" alt="Banyan — container orchestration you already know" width="100%">
 </div>
 
 <h1 align="center">Banyan</h1>

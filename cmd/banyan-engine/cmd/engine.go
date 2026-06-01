@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -18,6 +19,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/fertile-org/banyan/pkg/engine"
+	"github.com/fertile-org/banyan/pkg/engine/auth"
 	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/storage"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -33,6 +35,12 @@ var (
 	engineStoreBackend  string
 	engineStoreAddress  string
 	engineAllowInsecure bool
+)
+
+// Non-interactive init flags
+var (
+	adminUser     string
+	adminPassword string
 )
 
 // configPath is the default path to the Banyan config file.
@@ -115,6 +123,13 @@ func init() {
 	startCmd.Flags().StringVar(&engineGRPCPort, "grpc-port", "50051", "Engine gRPC port")
 	startCmd.Flags().BoolVar(&engineAllowInsecure, "allow-insecure", false, "Allow running without authentication (development only, NOT for production)")
 
+	initCmd.Flags().Bool("non-interactive", false, "Run init without interactive prompts (requires --admin-user and --admin-password)")
+	initCmd.Flags().String("admin-user", "", "Admin username (non-interactive mode)")
+	initCmd.Flags().String("admin-password", "", "Admin password (non-interactive mode, min 8 chars)")
+
+	// Init non-interactive flags
+	initCmd.Flags().String("vpc-cidr", "10.0.0.0/16", "VPC CIDR range (non-interactive mode)")
+
 	// Status flags
 	statusCmd.Flags().StringVar(&engineStoreBackend, "store-backend", "", "Store backend (etcd only)")
 	statusCmd.Flags().StringVar(&engineStoreAddress, "store-address", "", "Etcd endpoints (for external etcd)")
@@ -154,6 +169,39 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 
 	existingCfg, _ := types.LoadConfig(configPath)
 
+	// --- Non-interactive mode ---
+	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
+	if nonInteractive {
+		adminUser, _ = cmd.Flags().GetString("admin-user")
+		adminPassword, _ = cmd.Flags().GetString("admin-password")
+
+		if adminUser == "" {
+			return fmt.Errorf("--non-interactive requires --admin-user")
+		}
+		if adminPassword == "" {
+			return fmt.Errorf("--non-interactive requires --admin-password")
+		}
+
+		if existingCfg.Engine.WGPrivateKeyFile != "" && existingCfg.Engine.WGPublicKey != "" && existingCfg.Engine.StoreBackend != "" {
+			log_info := func(s string) { fmt.Printf("  %s %s\n", styleOK.Render("[OK]"), s) }
+			log_info("Config already exists at " + configPath)
+			log_info("Overwriting in non-interactive mode")
+		}
+
+		existingCfg.Engine.WGPrivateKeyFile = ""
+		existingCfg.Engine.WGPublicKey = ""
+		existingCfg.Engine.StoreBackend = ""
+		existingCfg.Engine.StoreAddress = ""
+		existingCfg.Engine.ManagedEtcd = false
+		existingCfg.Engine.EtcdUsername = ""
+		existingCfg.Engine.EtcdPassword = ""
+		existingCfg.Engine.EtcdCertFile = ""
+		existingCfg.Engine.EtcdKeyFile = ""
+		existingCfg.Engine.EtcdCAFile = ""
+		existingCfg.Engine.ManagedRegistry = false
+		existingCfg.Engine.ExternalRegistryURL = ""
+	}
+
 	// --- Check for existing config ---
 	if existingCfg.Engine.WGPrivateKeyFile != "" && existingCfg.Engine.WGPublicKey != "" && existingCfg.Engine.StoreBackend != "" {
 		fmt.Printf("  %s Config already exists at %s\n", styleOK.Render("[OK]"), configPath)
@@ -163,24 +211,26 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 			fmt.Printf("         Store: %s at %s\n", existingCfg.Engine.StoreBackend, existingCfg.Engine.StoreAddress)
 		}
 
-		var overwrite bool
-		overwriteForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewConfirm().
-					Title("Overwrite existing configuration?").
-					Value(&overwrite),
-			),
-		)
-		if err := overwriteForm.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println("\nInitialization cancelled.")
+		if !nonInteractive {
+			var overwrite bool
+			overwriteForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewConfirm().
+						Title("Overwrite existing configuration?").
+						Value(&overwrite),
+				),
+			)
+			if err := overwriteForm.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println("\nInitialization cancelled.")
+					return nil
+				}
+				return fmt.Errorf("confirm prompt: %w", err)
+			}
+			if !overwrite {
+				fmt.Println("Aborted.")
 				return nil
 			}
-			return fmt.Errorf("confirm prompt: %w", err)
-		}
-		if !overwrite {
-			fmt.Println("Aborted.")
-			return nil
 		}
 
 		// Clear config sections so all prompts run fresh
@@ -237,28 +287,31 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 	multiEngine := existingCfg.Engine.MultiEngine
 	if existingCfg.Engine.StoreBackend == "" {
-		// Fresh config — ask deployment mode
-		var modeChoice string
-		modeForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Deployment mode").
-					Description("How many engines will run in your cluster?").
-					Options(
-						huh.NewOption("Single engine — zero config, everything managed for you (recommended)", "single"),
-						huh.NewOption("Multi-engine HA — 2+ engines for high availability (requires your own etcd and registry)", "multi"),
-					).
-					Value(&modeChoice),
-			),
-		)
-		if err := modeForm.Run(); err != nil {
-			if errors.Is(err, huh.ErrUserAborted) {
-				fmt.Println("\nInitialization cancelled.")
-				return nil
+		if nonInteractive {
+			multiEngine = false
+		} else {
+			var modeChoice string
+			modeForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Deployment mode").
+						Description("How many engines will run in your cluster?").
+						Options(
+							huh.NewOption("Single engine — zero config, everything managed for you (recommended)", "single"),
+							huh.NewOption("Multi-engine HA — 2+ engines for high availability (requires your own etcd and registry)", "multi"),
+						).
+						Value(&modeChoice),
+				),
+			)
+			if err := modeForm.Run(); err != nil {
+				if errors.Is(err, huh.ErrUserAborted) {
+					fmt.Println("\nInitialization cancelled.")
+					return nil
+				}
+				return fmt.Errorf("deployment mode: %w", err)
 			}
-			return fmt.Errorf("deployment mode: %w", err)
+			multiEngine = modeChoice == "multi"
 		}
-		multiEngine = modeChoice == "multi"
 	}
 
 	if multiEngine {
@@ -333,51 +386,21 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s External etcd already configured: %s\n", styleOK.Render("[OK]"), existingCfg.Engine.StoreAddress)
 			}
 		} else {
-			var etcdChoice string
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewSelect[string]().
-						Title("Etcd setup").
-						Description("Banyan requires etcd for distributed state storage").
-						Options(
-							huh.NewOption("Managed - Banyan runs etcd for you (recommended)", "managed"),
-							huh.NewOption("External - Connect to your own etcd cluster", "external"),
-						).
-						Value(&etcdChoice),
-				),
-			)
-			if err := form.Run(); err != nil {
-				if errors.Is(err, huh.ErrUserAborted) {
-					fmt.Println("\nInitialization cancelled.")
-					return nil
-				}
-				return fmt.Errorf("etcd setup: %w", err)
-			}
-
-			existingCfg.Engine.StoreBackend = "etcd"
-
-			if etcdChoice == "managed" {
+			if nonInteractive {
+				existingCfg.Engine.StoreBackend = "etcd"
 				existingCfg.Engine.ManagedEtcd = true
 			} else {
-				existingCfg.Engine.ManagedEtcd = false
-				var endpoints string
-				var authMethod string
-				endpoints = "http://localhost:2379"
+				var etcdChoice string
 				form := huh.NewForm(
 					huh.NewGroup(
-						huh.NewInput().
-							Title("Etcd endpoints").
-							Description("Comma-separated list of etcd endpoints").
-							Value(&endpoints),
 						huh.NewSelect[string]().
-							Title("Connection security").
+							Title("Etcd setup").
+							Description("Banyan requires etcd for distributed state storage").
 							Options(
-								huh.NewOption("None", "none"),
-								huh.NewOption("Username & Password", "password"),
-								huh.NewOption("TLS (CA certificate)", "tls"),
-								huh.NewOption("mTLS (client certificates)", "mtls"),
+								huh.NewOption("Managed - Banyan runs etcd for you (recommended)", "managed"),
+								huh.NewOption("External - Connect to your own etcd cluster", "external"),
 							).
-							Value(&authMethod),
+							Value(&etcdChoice),
 					),
 				)
 				if err := form.Run(); err != nil {
@@ -385,11 +408,46 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 						fmt.Println("\nInitialization cancelled.")
 						return nil
 					}
-					return fmt.Errorf("etcd endpoints: %w", err)
+					return fmt.Errorf("etcd setup: %w", err)
 				}
-				existingCfg.Engine.StoreAddress = endpoints
-				if err := collectEtcdAuth(&existingCfg, authMethod); err != nil {
-					return err
+
+				existingCfg.Engine.StoreBackend = "etcd"
+
+				if etcdChoice == "managed" {
+					existingCfg.Engine.ManagedEtcd = true
+				} else {
+					existingCfg.Engine.ManagedEtcd = false
+					var endpoints string
+					var authMethod string
+					endpoints = "http://localhost:2379"
+					form := huh.NewForm(
+						huh.NewGroup(
+							huh.NewInput().
+								Title("Etcd endpoints").
+								Description("Comma-separated list of etcd endpoints").
+								Value(&endpoints),
+							huh.NewSelect[string]().
+								Title("Connection security").
+								Options(
+									huh.NewOption("None", "none"),
+									huh.NewOption("Username & Password", "password"),
+									huh.NewOption("TLS (CA certificate)", "tls"),
+									huh.NewOption("mTLS (client certificates)", "mtls"),
+								).
+								Value(&authMethod),
+						),
+					)
+					if err := form.Run(); err != nil {
+						if errors.Is(err, huh.ErrUserAborted) {
+							fmt.Println("\nInitialization cancelled.")
+							return nil
+						}
+						return fmt.Errorf("etcd endpoints: %w", err)
+					}
+					existingCfg.Engine.StoreAddress = endpoints
+					if err := collectEtcdAuth(&existingCfg, authMethod); err != nil {
+						return err
+					}
 				}
 			}
 		}
@@ -402,39 +460,21 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 				fmt.Printf("  %s External registry already configured: %s\n", styleOK.Render("[OK]"), existingCfg.Engine.ExternalRegistryURL)
 			}
 		} else {
-			var registryChoice string
-			form := huh.NewForm(
-				huh.NewGroup(
-					huh.NewSelect[string]().
-						Title("OCI Registry setup").
-						Description("Banyan requires an OCI registry for container image storage").
-						Options(
-							huh.NewOption("Managed - Banyan runs a registry for you (recommended)", "managed"),
-							huh.NewOption("External - Use your own registry (Harbor, Docker Hub, etc.)", "external"),
-						).
-						Value(&registryChoice),
-				),
-			)
-			if err := form.Run(); err != nil {
-				if errors.Is(err, huh.ErrUserAborted) {
-					fmt.Println("\nInitialization cancelled.")
-					return nil
-				}
-				return fmt.Errorf("registry setup: %w", err)
-			}
-
-			if registryChoice == "managed" {
+			if nonInteractive {
 				existingCfg.Engine.ManagedRegistry = true
 				fmt.Printf("  %s Managed registry will be started with the engine\n", styleOK.Render("[OK]"))
 			} else {
-				existingCfg.Engine.ManagedRegistry = false
-				var registryURL string
+				var registryChoice string
 				form := huh.NewForm(
 					huh.NewGroup(
-						huh.NewInput().
-							Title("External registry URL").
-							Description("e.g. myregistry.example.com:5000 or registry.example.com/banyan").
-							Value(&registryURL),
+						huh.NewSelect[string]().
+							Title("OCI Registry setup").
+							Description("Banyan requires an OCI registry for container image storage").
+							Options(
+								huh.NewOption("Managed - Banyan runs a registry for you (recommended)", "managed"),
+								huh.NewOption("External - Use your own registry (Harbor, Docker Hub, etc.)", "external"),
+							).
+							Value(&registryChoice),
 					),
 				)
 				if err := form.Run(); err != nil {
@@ -442,10 +482,33 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 						fmt.Println("\nInitialization cancelled.")
 						return nil
 					}
-					return fmt.Errorf("registry URL: %w", err)
+					return fmt.Errorf("registry setup: %w", err)
 				}
-				existingCfg.Engine.ExternalRegistryURL = registryURL
-				fmt.Printf("  %s External registry: %s\n", styleOK.Render("[OK]"), registryURL)
+
+				if registryChoice == "managed" {
+					existingCfg.Engine.ManagedRegistry = true
+					fmt.Printf("  %s Managed registry will be started with the engine\n", styleOK.Render("[OK]"))
+				} else {
+					existingCfg.Engine.ManagedRegistry = false
+					var registryURL string
+					form := huh.NewForm(
+						huh.NewGroup(
+							huh.NewInput().
+								Title("External registry URL").
+								Description("e.g. myregistry.example.com:5000 or registry.example.com/banyan").
+								Value(&registryURL),
+						),
+					)
+					if err := form.Run(); err != nil {
+						if errors.Is(err, huh.ErrUserAborted) {
+							fmt.Println("\nInitialization cancelled.")
+							return nil
+						}
+						return fmt.Errorf("registry setup: %w", err)
+					}
+					existingCfg.Engine.ExternalRegistryURL = registryURL
+					fmt.Printf("  %s External registry: %s\n", styleOK.Render("[OK]"), registryURL)
+				}
 			}
 		}
 	}
@@ -458,36 +521,130 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 	// --- Secrets encryption key ---
 	secretsKeyPath := filepath.Join(types.DefaultKeysDir, "secrets.key")
 	if _, err := os.Stat(secretsKeyPath); os.IsNotExist(err) {
-		var keyChoice string
-		desc := "Used to encrypt secrets at rest."
-		if multiEngine {
-			desc = "All engines must use the same key. Generate on the first engine, provide existing on others."
-		}
-		keyForm := huh.NewForm(
-			huh.NewGroup(
-				huh.NewSelect[string]().
-					Title("Secrets encryption key").
-					Description(desc).
-					Options(
-						huh.NewOption("Generate new key", "generate"),
-						huh.NewOption("Provide existing key file", "file"),
-					).
-					Value(&keyChoice),
-			),
-		)
-		if formErr := keyForm.Run(); formErr != nil {
-			if errors.Is(formErr, huh.ErrUserAborted) {
-				fmt.Println("\nInitialization cancelled.")
-				return nil
+		if nonInteractive {
+			if writeErr := handleSecretsKeyChoice("generate", secretsKeyPath, multiEngine, styleOK, styleInfo); writeErr != nil {
+				return writeErr
 			}
-			// No TTY (e.g., Docker, CI) — auto-generate
-			keyChoice = "generate"
-		}
-		if writeErr := handleSecretsKeyChoice(keyChoice, secretsKeyPath, multiEngine, styleOK, styleInfo); writeErr != nil {
-			return writeErr
+		} else {
+			var keyChoice string
+			desc := "Used to encrypt secrets at rest."
+			if multiEngine {
+				desc = "All engines must use the same key. Generate on the first engine, provide existing on others."
+			}
+			keyForm := huh.NewForm(
+				huh.NewGroup(
+					huh.NewSelect[string]().
+						Title("Secrets encryption key").
+						Description(desc).
+						Options(
+							huh.NewOption("Generate new key", "generate"),
+							huh.NewOption("Provide existing key file", "file"),
+						).
+						Value(&keyChoice),
+				),
+			)
+			if formErr := keyForm.Run(); formErr != nil {
+				if errors.Is(formErr, huh.ErrUserAborted) {
+					fmt.Println("\nInitialization cancelled.")
+					return nil
+				}
+				keyChoice = "generate"
+			}
+			if writeErr := handleSecretsKeyChoice(keyChoice, secretsKeyPath, multiEngine, styleOK, styleInfo); writeErr != nil {
+				return writeErr
+			}
 		}
 	} else {
 		fmt.Printf("  %s Secrets encryption key already exists\n", styleOK.Render("[OK]"))
+	}
+
+	// --- TLS setup ---
+	tlsDir := filepath.Join(filepath.Dir(configPath), "tls")
+	if !auth.TLSBundleExists(tlsDir) {
+		fmt.Println()
+		fmt.Println(styleTitle.Render("=== TLS Setup ==="))
+		var extraIPs []net.IP
+		if existingCfg.Engine.WGPublicKey != "" {
+			tunnelIP := types.TunnelIPFromPublicKey(existingCfg.Engine.WGPublicKey)
+			extraIPs = append(extraIPs, tunnelIP)
+		}
+		bundle, tlsErr := auth.GenerateTLSBundle(extraIPs...)
+		if tlsErr != nil {
+			return fmt.Errorf("failed to generate TLS certificates: %w", tlsErr)
+		}
+		if tlsErr := auth.SaveTLSBundle(tlsDir, bundle); tlsErr != nil {
+			return fmt.Errorf("failed to save TLS certificates: %w", tlsErr)
+		}
+		fmt.Printf("  %s TLS certificates generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s CA fingerprint (share with CLI/agents for verification):\n", styleInfo.Render("[.."))
+		fmt.Printf("       %s\n", bundle.CAFingerprint)
+	} else {
+		fmt.Printf("  %s TLS certificates already exist\n", styleOK.Render("[OK]"))
+	}
+
+	// --- Auth setup (admin user) ---
+	fmt.Println()
+	fmt.Println(styleTitle.Render("=== Authentication Setup ==="))
+	fmt.Println(styleDim.Render("  Create an admin user for Banyan."))
+	fmt.Println(styleDim.Render("  All CLI and dashboard access requires authentication."))
+	fmt.Println()
+
+	nonInteractive, _ = cmd.Flags().GetBool("non-interactive")
+	flagAdminUser, _ := cmd.Flags().GetString("admin-user")
+	flagAdminPass, _ := cmd.Flags().GetString("admin-password")
+
+	var adminUsername, adminPassword string
+	skipAdmin := false
+
+	if nonInteractive {
+		if flagAdminUser == "" || flagAdminPass == "" {
+			return fmt.Errorf("--non-interactive requires --admin-user and --admin-password")
+		}
+		if len(flagAdminPass) < 8 {
+			return fmt.Errorf("--admin-password must be at least 8 characters")
+		}
+		adminUsername = flagAdminUser
+		adminPassword = flagAdminPass
+	} else {
+		adminForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().Title("Admin username").Value(&adminUsername).Validate(func(s string) error {
+					if s == "" {
+						return fmt.Errorf("username cannot be empty")
+					}
+					return nil
+				}),
+				huh.NewInput().Title("Admin password").EchoMode(huh.EchoModePassword).Value(&adminPassword).Validate(func(s string) error {
+					if len(s) < 8 {
+						return fmt.Errorf("password must be at least 8 characters")
+					}
+					return nil
+				}),
+			),
+		)
+		if err := adminForm.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println(styleWarn.Render("  Skipped admin user setup. You can create users later with: banyan user add"))
+				skipAdmin = true
+			} else {
+				return fmt.Errorf("admin user form error: %w", err)
+			}
+		}
+	}
+
+	if !skipAdmin {
+		hash, hashErr := auth.HashPassword(adminPassword)
+		if hashErr != nil {
+			return fmt.Errorf("failed to hash password: %w", hashErr)
+		}
+		// Store admin credentials in a bootstrap file for engine to read on first start
+		bootstrapPath := filepath.Join(filepath.Dir(configPath), "auth-bootstrap.json")
+		bootstrapData := fmt.Sprintf(`{"username":%q,"password_hash":%q,"role":"admin"}`, adminUsername, hash)
+		if writeErr := os.WriteFile(bootstrapPath, []byte(bootstrapData), 0o600); writeErr != nil {
+			return fmt.Errorf("failed to write auth bootstrap: %w", writeErr)
+		}
+		fmt.Printf("  %s Admin user %q configured\n", styleOK.Render("[OK]"), adminUsername)
+		fmt.Println(styleDim.Render("  The admin account will be created when the engine starts."))
 	}
 
 	// --- Save config ---
@@ -689,6 +846,12 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 			registryBindAddr = engineTunnelIP
 		}
 		registryCmd, regErr := startManagedRegistry(registryDataDir, registryBindAddr, managedRegistryPort)
+		if regErr != nil && registryBindAddr != "127.0.0.1" {
+			// Tunnel IP binding failed (common on WSL) — fallback to localhost
+			log.Warn("Failed to start managed registry on tunnel IP, falling back to localhost", "error", regErr)
+			registryBindAddr = "127.0.0.1"
+			registryCmd, regErr = startManagedRegistry(registryDataDir, registryBindAddr, managedRegistryPort)
+		}
 		if regErr != nil {
 			return fmt.Errorf("failed to start managed registry: %w\n"+
 				"  Install the registry binary: sudo bash install.sh --role engine\n"+
@@ -734,6 +897,7 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 		ExternalRegistryURL: registryURL,
 		EngineID:            cfg.Engine.EngineID,
 		MultiEngine:         cfg.Engine.MultiEngine,
+		ConfigDir:           filepath.Dir(configPath),
 	})
 	if err != nil {
 		return err
@@ -861,7 +1025,7 @@ http:
 	}
 
 	registryURL := fmt.Sprintf("http://%s:%s", bindAddr, port)
-	if err := waitForRegistry(registryURL, 10*time.Second); err != nil {
+	if err := waitForRegistry(registryURL, 30*time.Second); err != nil {
 		_ = registryCmd.Process.Kill()
 		return nil, fmt.Errorf("registry did not become healthy: %w", err)
 	}

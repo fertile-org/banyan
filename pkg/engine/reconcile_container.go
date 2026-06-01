@@ -170,17 +170,17 @@ func (c *ContainerReconciler) createRestartTask(ctx context.Context, task *types
 
 	// Stop-and-remove cleanup (idempotent).
 	stopTask := &types.TaskRecord{
-		ID:            restartID + "-cleanup",
-		DeploymentID:  dep.ID,
+		ID:             restartID + "-cleanup",
+		DeploymentID:   dep.ID,
 		DeploymentName: dep.Name,
-		ServiceName:   task.ServiceName,
-		ReplicaIndex:  task.ReplicaIndex,
-		AgentID:       task.AgentID,
-		Type:          types.TaskTypeStopAndRemove,
-		Status:        types.StatusPending,
-		ContainerName: task.ContainerName,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ServiceName:    task.ServiceName,
+		ReplicaIndex:   task.ReplicaIndex,
+		AgentID:        task.AgentID,
+		Type:           types.TaskTypeStopAndRemove,
+		Status:         types.StatusPending,
+		ContainerName:  task.ContainerName,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	stopKey := types.KeyTasks + task.AgentID + "/" + stopTask.ID
 	if err := c.deps.Store.Save(ctx, stopKey, stopTask); err != nil {

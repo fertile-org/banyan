@@ -1,92 +1,175 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
-	"net"
+	"os"
+	"path/filepath"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
-	"github.com/fertile-org/banyan/pkg/types"
+	banyanpb "github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 )
+
+// credentials stores JWT tokens on disk for the CLI.
+type credentials struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	EngineAddr   string `json:"engine_addr"`
+	Username     string `json:"username"`
+	Role         string `json:"role"`
+}
+
+var credentialsPath = filepath.Join(os.Getenv("HOME"), ".config", "banyan", "credentials.json")
 
 var loginCmd = &cobra.Command{
 	Use:   "login",
-	Short: "Re-establish WireGuard control tunnel",
-	Long: `Re-establish the WireGuard control tunnel to the engine.
+	Short: "Authenticate with the Banyan engine",
+	Long: `Authenticate with the Banyan engine using username and password.
 
-Use this command after a machine restart to reconnect without
-re-running 'init'. It reads the existing configuration and
-private key from /etc/banyan/banyan.yaml.
-
-Requires sudo. Run 'banyan-cli init' first if no config exists.
+Stores a session token locally so subsequent commands work without re-authenticating.
+The token auto-refreshes when it expires (7-day session lifetime).
 
 Example:
-  sudo banyan-cli login`,
-	RunE: runLogin,
+  banyan login`,
+	RunE: runAuthLogin,
+}
+
+var logoutCmd = &cobra.Command{
+	Use:   "logout",
+	Short: "Clear stored credentials",
+	RunE:  runLogout,
+}
+
+var whoamiCmd = &cobra.Command{
+	Use:   "whoami",
+	Short: "Show current identity and role",
+	RunE:  runWhoami,
 }
 
 func init() {
+	loginCmd.Flags().String("username", "", "Username (non-interactive login)")
+	loginCmd.Flags().String("password", "", "Password (non-interactive login)")
 	rootCmd.AddCommand(loginCmd)
+	rootCmd.AddCommand(logoutCmd)
+	rootCmd.AddCommand(whoamiCmd)
 }
 
-func runLogin(cmd *cobra.Command, args []string) error {
-	cfg, err := types.LoadConfig(configPath)
+func runAuthLogin(cmd *cobra.Command, args []string) error {
+	flagUser, _ := cmd.Flags().GetString("username")
+	flagPass, _ := cmd.Flags().GetString("password")
+
+	var username, password string
+
+	if flagUser != "" && flagPass != "" {
+		// Non-interactive: both flags supplied
+		username = flagUser
+		password = flagPass
+	} else {
+		fmt.Print("Username: ")
+		if _, err := fmt.Scanln(&username); err != nil {
+			return fmt.Errorf("failed to read username: %w", err)
+		}
+		if username == "" {
+			return fmt.Errorf("username cannot be empty")
+		}
+
+		fmt.Print("Password: ")
+		passwordBytes, err := term.ReadPassword(syscall.Stdin)
+		fmt.Println() // newline after hidden input
+		if err != nil {
+			return fmt.Errorf("failed to read password: %w", err)
+		}
+		password = string(passwordBytes)
+		if password == "" {
+			return fmt.Errorf("password cannot be empty")
+		}
+	}
+
+	client, err := NewAutoEngineClient("")
 	if err != nil {
-		return fmt.Errorf("failed to load config: %w (run 'sudo banyan-cli init' first)", err)
+		return fmt.Errorf("failed to connect to engine: %w", err)
+	}
+	defer client.Close()
+
+	resp, err := client.GRPCClient().Login(cmd.Context(), &banyanpb.LoginRequest{
+		Username: username,
+		Password: password,
+	})
+	if err != nil {
+		return fmt.Errorf("login failed: %v", err)
 	}
 
-	if cfg.CLI.WGPublicKey == "" || cfg.CLI.EngineWGPublicKey == "" || cfg.CLI.WGPrivateKeyFile == "" {
-		return fmt.Errorf("incomplete CLI configuration. Run 'sudo banyan-cli init' first")
+	creds := credentials{
+		AccessToken:  resp.AccessToken,
+		RefreshToken: resp.RefreshToken,
+		Username:     resp.Username,
+		Role:         resp.Role,
 	}
 
-	if controlTunnelExistsFn(types.ControlIfaceCLI) {
-		fmt.Printf("  %s Control tunnel already active\n", styleOK.Render("[OK]"))
+	if err := saveCredentials(&creds); err != nil {
+		return fmt.Errorf("login succeeded but failed to save credentials: %w", err)
+	}
+
+	fmt.Printf("Logged in as %s (role: %s)\n", resp.Username, resp.Role)
+	return nil
+}
+
+func runLogout(cmd *cobra.Command, args []string) error {
+	creds, err := loadCredentials()
+	if err != nil {
+		// No credentials to clear
+		fmt.Println("Not logged in.")
 		return nil
 	}
 
-	privKey, err := types.ReadPrivateKeyFile(cfg.CLI.WGPrivateKeyFile)
-	if err != nil {
-		return fmt.Errorf("failed to read private key from %s: %w", cfg.CLI.WGPrivateKeyFile, err)
+	// Revoke refresh token on engine
+	if creds.RefreshToken != "" {
+		client, err := NewAutoEngineClient("")
+		if err == nil {
+			_, _ = client.GRPCClient().RefreshToken(cmd.Context(), &banyanpb.RefreshTokenRequest{
+				RefreshToken: creds.RefreshToken,
+			})
+			client.Close()
+		}
 	}
 
-	return loginSetupTunnel(&cfg, privKey)
+	_ = os.Remove(credentialsPath)
+	fmt.Println("Logged out.")
+	return nil
 }
 
-func loginSetupTunnel(cfg *types.BanyanConfig, privKey string) error {
-	// Build engine list — same as NewAutoEngineClient
-	engines := cfg.CLI.Engines
-	if len(engines) == 0 && cfg.CLI.EngineWGPublicKey != "" {
-		port := cfg.CLI.EnginePort
-		if port == "" {
-			port = "50051"
-		}
-		host := cfg.CLI.EngineHost
-		if host == "" {
-			host = "localhost"
-		}
-		engines = []types.EngineEndpoint{
-			{Address: host + ":" + port, WGPublicKey: cfg.CLI.EngineWGPublicKey},
-		}
+func runWhoami(cmd *cobra.Command, args []string) error {
+	creds, err := loadCredentials()
+	if err != nil {
+		return fmt.Errorf("not logged in. Run: banyan login")
 	}
-
-	myTunnelIP := types.TunnelIPFromPublicKey(cfg.CLI.WGPublicKey)
-	fmt.Printf("  %s Setting up WireGuard control tunnel (%s)...\n", styleInfo.Render("[..]"), myTunnelIP)
-
-	if err := setupControlTunnelFn(types.ControlIfaceCLI, privKey, myTunnelIP, 0); err != nil {
-		return fmt.Errorf("WireGuard control tunnel setup failed: %w (ensure this runs with sudo and wireguard kernel module is loaded)", err)
-	}
-
-	// Add all engine peers — each engine has its own WG key and derived tunnel IP
-	for _, eng := range engines {
-		engineHost, _, _ := net.SplitHostPort(eng.Address)
-		engineEndpointWG := engineHost + ":" + fmt.Sprintf("%d", types.ControlTunnelPort)
-		engineTunnelIP := types.TunnelIPFromPublicKey(eng.WGPublicKey)
-		if err := addControlPeerFn(types.ControlIfaceCLI, eng.WGPublicKey, engineEndpointWG, engineTunnelIP); err != nil {
-			_ = cleanupControlTunnelFn(types.ControlIfaceCLI)
-			return fmt.Errorf("failed to add engine peer to control tunnel: %w", err)
-		}
-	}
-
-	fmt.Printf("  %s Control tunnel ready\n", styleOK.Render("[OK]"))
+	fmt.Printf("Username: %s\nRole:     %s\n", creds.Username, creds.Role)
 	return nil
+}
+
+func saveCredentials(creds *credentials) error {
+	dir := filepath.Dir(credentialsPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(creds, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(credentialsPath, data, 0o600)
+}
+
+func loadCredentials() (*credentials, error) {
+	data, err := os.ReadFile(credentialsPath)
+	if err != nil {
+		return nil, err
+	}
+	var creds credentials
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return nil, err
+	}
+	return &creds, nil
 }

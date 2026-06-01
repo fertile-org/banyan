@@ -209,8 +209,8 @@ func parseDuration(s string, defaultVal time.Duration) time.Duration {
 // Key: container name, value: time of last migration.
 // Protected by rebalanceMu.
 var (
-	rebalanceMigrationCooldown   = make(map[string]time.Time)
-	rebalanceMu                  sync.Mutex
+	rebalanceMigrationCooldown = make(map[string]time.Time)
+	rebalanceMu                sync.Mutex
 )
 
 // agentStalenessThreshold is how long since last heartbeat before an agent is considered stale.

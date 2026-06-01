@@ -182,6 +182,22 @@ func TestRunAgentStatus_NotRunning_WithToken(t *testing.T) {
 	}
 }
 
+func TestAgentInit_NonInteractiveFlags(t *testing.T) {
+	initCmd.ResetFlags()
+	initCmd.Flags().Bool("non-interactive", false, "")
+	initCmd.Flags().String("engine-host", "localhost", "")
+	initCmd.Flags().String("engine-port", "50051", "")
+	initCmd.Flags().String("agent-name", "", "")
+	initCmd.Flags().String("engine-wg-pubkey", "", "")
+
+	if initCmd.Flags().Lookup("non-interactive") == nil {
+		t.Error("--non-interactive flag not registered")
+	}
+	if initCmd.Flags().Lookup("engine-wg-pubkey") == nil {
+		t.Error("--engine-wg-pubkey flag not registered")
+	}
+}
+
 func TestRunAgentStatus_Running(t *testing.T) {
 	origPidFile := agentPidFile
 	origConfig := configPath

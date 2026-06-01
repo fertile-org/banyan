@@ -17,6 +17,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/fertile-org/banyan/pkg/engine/auth"
 	"github.com/fertile-org/banyan/pkg/logging"
 	"github.com/fertile-org/banyan/pkg/metrics"
 	banyanrpc "github.com/fertile-org/banyan/pkg/rpc"
@@ -77,11 +78,13 @@ type engineGRPCServer struct {
 	allocator       overlay.SubnetAllocatorInterface // VPC subnet allocator (nil if VPC disabled)
 	peerTracker     overlay.PeerTrackerInterface     // VPC peer tracker (nil if VPC disabled)
 	vpcCIDR         string                           // VPC network CIDR (e.g., "10.0.0.0/16")
-	scheduleCh      chan<- struct{}                   // triggers immediate scheduling (nil-safe)
+	scheduleCh      chan<- struct{}                  // triggers immediate scheduling (nil-safe)
 	metricsRegistry *metrics.EngineMetricsRegistry
 	events          EventLog
 	secrets         *SecretsManager // nil if secrets.key not present
 	limiter         *rateLimiter
+	loginLimiter    *rateLimiter   // stricter rate limit for login attempts (10/min per IP)
+	authDeps        *auth.AuthDeps // nil if auth not configured (--allow-insecure)
 	startedAt       time.Time
 	log             *logging.Logger
 }
@@ -97,10 +100,11 @@ type grpcServerOptions struct {
 	VPCCIDR         string
 	WhitelistedKeys map[string]string // publicKey → agentName
 	AllowInsecure   bool              // allow running without authentication
-	ScheduleCh      chan<- struct{}    // triggers immediate scheduling
+	ScheduleCh      chan<- struct{}   // triggers immediate scheduling
 	MetricsRegistry *metrics.EngineMetricsRegistry
 	Events          EventLog
 	Secrets         *SecretsManager // nil if secrets.key not present
+	AuthDeps        *auth.AuthDeps  // nil if auth not configured
 	StartedAt       time.Time
 }
 
@@ -155,25 +159,32 @@ func startEngineGRPC(ctx context.Context, opts *grpcServerOptions) (*engineGRPCS
 		events:          opts.Events,
 		secrets:         opts.Secrets,
 		limiter:         newRateLimiter(100, time.Minute), // 100 requests/min per IP
+		loginLimiter:    newRateLimiter(10, time.Minute),  // 10 login attempts/min per IP
+		authDeps:        opts.AuthDeps,
 		startedAt:       opts.StartedAt,
 		log:             logging.New("engine"),
 	}
 
-	// WireGuard provides authentication at the network layer.
-	// No application-layer auth interceptors needed — only peers with
-	// whitelisted WireGuard keys can reach the tunnel IP.
-	// Add audit logging, rate limiting, and panic recovery interceptors.
+	// Interceptor chain: panic recovery → rate limit → auth → audit log
+	// Auth interceptor is added only when auth is configured (non-insecure mode).
+	unaryInterceptors := []grpc.UnaryServerInterceptor{
+		engineSrv.panicRecoveryInterceptor(),
+		engineSrv.rateLimitInterceptor(),
+	}
+	streamInterceptors := []grpc.StreamServerInterceptor{
+		engineSrv.panicRecoveryStreamInterceptor(),
+		engineSrv.rateLimitStreamInterceptor(),
+	}
+	if opts.AuthDeps != nil {
+		unaryInterceptors = append(unaryInterceptors, auth.UnaryAuthInterceptor(opts.AuthDeps))
+		streamInterceptors = append(streamInterceptors, auth.StreamAuthInterceptor(opts.AuthDeps))
+	}
+	unaryInterceptors = append(unaryInterceptors, engineSrv.auditLogInterceptor())
+	streamInterceptors = append(streamInterceptors, engineSrv.auditLogStreamInterceptor())
+
 	srv := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			engineSrv.panicRecoveryInterceptor(),
-			engineSrv.rateLimitInterceptor(),
-			engineSrv.auditLogInterceptor(),
-		),
-		grpc.ChainStreamInterceptor(
-			engineSrv.panicRecoveryStreamInterceptor(),
-			engineSrv.rateLimitStreamInterceptor(),
-			engineSrv.auditLogStreamInterceptor(),
-		),
+		grpc.ChainUnaryInterceptor(unaryInterceptors...),
+		grpc.ChainStreamInterceptor(streamInterceptors...),
 	)
 	if opts.AllowInsecure {
 		engineSrv.logger().Warn("gRPC server running WITHOUT authentication (--allow-insecure)")

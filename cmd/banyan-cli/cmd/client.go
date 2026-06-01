@@ -7,7 +7,10 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/fertile-org/banyan/pkg/rpc/banyanpb"
 	"github.com/fertile-org/banyan/pkg/types"
@@ -21,11 +24,23 @@ type EngineClient struct {
 }
 
 // NewEngineClient creates a new engine gRPC client.
-// Authentication is handled by WireGuard at the network layer.
+// WireGuard provides network-layer encryption.
+// JWT bearer tokens are attached automatically if credentials exist.
 func NewEngineClient(engineAddr string) (*EngineClient, error) {
-	conn, err := grpc.NewClient(engineAddr,
+	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	}
+
+	// Attach JWT bearer token if credentials exist
+	creds, _ := loadCredentials()
+	if creds != nil && creds.AccessToken != "" {
+		dialOpts = append(dialOpts,
+			grpc.WithUnaryInterceptor(authClientInterceptor(creds)),
+			grpc.WithStreamInterceptor(authStreamClientInterceptor(creds)),
+		)
+	}
+
+	conn, err := grpc.NewClient(engineAddr, dialOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to engine at %s: %w", engineAddr, err)
 	}
@@ -34,6 +49,55 @@ func NewEngineClient(engineAddr string) (*EngineClient, error) {
 		conn:   conn,
 		client: banyanpb.NewEngineServiceClient(conn),
 	}, nil
+}
+
+// authClientInterceptor returns a gRPC client unary interceptor that attaches
+// the JWT bearer token to outgoing requests and handles auto-refresh.
+func authClientInterceptor(creds *credentials) grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		// Attach bearer token
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+creds.AccessToken)
+		err := invoker(ctx, method, req, reply, cc, opts...)
+
+		// If Unauthenticated, try to refresh the token
+		if err != nil && status.Code(err) == codes.Unauthenticated && creds.RefreshToken != "" {
+			// Create a fresh client for the refresh call (no interceptor, to avoid loop)
+			rawConn, dialErr := grpc.NewClient(cc.Target(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+			if dialErr != nil {
+				return fmt.Errorf("session expired. Run: banyan login")
+			}
+			defer rawConn.Close()
+
+			rawClient := banyanpb.NewEngineServiceClient(rawConn)
+			refreshResp, refreshErr := rawClient.RefreshToken(ctx, &banyanpb.RefreshTokenRequest{
+				RefreshToken: creds.RefreshToken,
+			})
+			if refreshErr != nil {
+				return fmt.Errorf("session expired. Run: banyan login")
+			}
+
+			// Update credentials in memory and on disk
+			creds.AccessToken = refreshResp.AccessToken
+			creds.RefreshToken = refreshResp.RefreshToken
+			_ = saveCredentials(creds)
+
+			// Retry the original request with the new token
+			ctx = metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer "+creds.AccessToken)
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+
+		return err
+	}
+}
+
+// authStreamClientInterceptor returns a gRPC client stream interceptor that attaches
+// the JWT bearer token to outgoing streaming requests (e.g., GetLogs).
+func authStreamClientInterceptor(creds *credentials) grpc.StreamClientInterceptor {
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		// Attach bearer token
+		ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+creds.AccessToken)
+		return streamer(ctx, desc, cc, method, opts...)
+	}
 }
 
 // controlTunnelExistsFn is the function used to check if the WireGuard control tunnel

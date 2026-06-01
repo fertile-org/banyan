@@ -18,9 +18,14 @@ engine:
 EOF
 chmod 600 /etc/banyan/banyan.yaml
 
-# 2. Init engine (generates WireGuard keypair, no --password)
+# 2. Init engine (generates WireGuard keypair + auth bootstrap, non-interactive)
 echo "Initializing engine..."
-banyan-engine init
+E2E_ADMIN_USER="admin"
+E2E_ADMIN_PASS="banyan-e2e-admin"
+banyan-engine init \
+    --non-interactive \
+    --admin-user "$E2E_ADMIN_USER" \
+    --admin-password "$E2E_ADMIN_PASS"
 
 # 3. Export engine public key so workers and CLI can read it
 ENGINE_PUB_KEY=$(grep 'wg_public_key' /etc/banyan/banyan.yaml | head -1 | awk '{print $2}')
@@ -129,6 +134,24 @@ ip link set wg-ctl-cli up
 # Use engine's derived tunnel IP (not hardcoded 10.200.0.1)
 wg set wg-ctl-cli peer "$ENGINE_PUB_KEY" allowed-ips ${ENGINE_TUNNEL_IP}/32 endpoint 127.0.0.1:51821
 echo "CLI control tunnel ready."
+
+# 8c. Authenticate the CLI — every banyan-cli command needs a JWT session.
+# Retry because the engine consumes the admin bootstrap shortly after start.
+echo "Logging in CLI..."
+LOGIN_OK=false
+for i in $(seq 1 15); do
+    if banyan-cli login --username "$E2E_ADMIN_USER" --password "$E2E_ADMIN_PASS" 2>/dev/null; then
+        LOGIN_OK=true
+        break
+    fi
+    echo "  login attempt $i failed, retrying..."
+    sleep 2
+done
+if [ "$LOGIN_OK" = true ]; then
+    echo "CLI authenticated."
+else
+    echo "ERROR: CLI login failed after 15 attempts" >&2
+fi
 
 # Wait for the engine process (keeps the container running)
 wait $ENGINE_PID

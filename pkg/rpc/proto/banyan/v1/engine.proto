@@ -40,6 +40,17 @@ service EngineService {
   rpc ListSecrets(ListSecretsRequest) returns (ListSecretsResponse);
   rpc GetSecret(GetSecretRequest) returns (GetSecretResponse);
   rpc DeleteSecret(DeleteSecretRequest) returns (DeleteSecretResponse);
+
+  // Auth RPCs (unauthenticated — bypass JWT middleware)
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc RefreshToken(RefreshTokenRequest) returns (RefreshTokenResponse);
+
+  // User management RPCs (admin only)
+  rpc CreateUser(CreateUserRequest) returns (CreateUserResponse);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc DeleteUser(DeleteUserRequest) returns (DeleteUserResponse);
+  rpc UpdateUserRole(UpdateUserRoleRequest) returns (UpdateUserRoleResponse);
+  rpc ChangePassword(ChangePasswordRequest) returns (ChangePasswordResponse);
 }
 
 message ScaleRequest {
@@ -553,3 +564,65 @@ message GetRecentLogsResponse {
   repeated string lines = 1;
   string container_name = 2;
 }
+
+// --- Auth messages ---
+
+message LoginRequest {
+  string username = 1;
+  string password = 2;
+}
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  string username = 3;
+  string role = 4;
+  int64 expires_in_seconds = 5;  // access token lifetime
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+message RefreshTokenResponse {
+  string access_token = 1;
+  string refresh_token = 2;       // new refresh token (rotation)
+  int64 expires_in_seconds = 3;
+}
+
+// --- User management messages ---
+
+message CreateUserRequest {
+  string username = 1;
+  string password = 2;
+  string role = 3;               // "admin", "deployer", "viewer"
+}
+message CreateUserResponse {}
+
+message ListUsersRequest {}
+message ListUsersResponse {
+  repeated UserInfo users = 1;
+}
+
+message UserInfo {
+  string username = 1;
+  string role = 2;
+  string created_at = 3;
+  string created_by = 4;
+  bool disabled = 5;
+}
+
+message DeleteUserRequest {
+  string username = 1;
+}
+message DeleteUserResponse {}
+
+message UpdateUserRoleRequest {
+  string username = 1;
+  string role = 2;               // "admin", "deployer", "viewer"
+}
+message UpdateUserRoleResponse {}
+
+message ChangePasswordRequest {
+  string current_password = 1;
+  string new_password = 2;
+}
+message ChangePasswordResponse {}

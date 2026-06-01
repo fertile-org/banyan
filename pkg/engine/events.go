@@ -99,12 +99,7 @@ func (s *EventStore) load() error {
 	for scanner.Scan() {
 		var we walEvent
 		if json.Unmarshal(scanner.Bytes(), &we) == nil {
-			s.events = append(s.events, Event{
-				Timestamp: we.Timestamp,
-				Type:      we.Type,
-				Message:   we.Message,
-				Severity:  we.Severity,
-			})
+			s.events = append(s.events, Event(we))
 		}
 	}
 
@@ -126,12 +121,7 @@ func (s *EventStore) Add(e Event) {
 
 	// Write to WAL
 	if s.file != nil {
-		we := walEvent{
-			Timestamp: e.Timestamp,
-			Type:      e.Type,
-			Message:   e.Message,
-			Severity:  e.Severity,
-		}
+		we := walEvent(e)
 		if data, err := json.Marshal(we); err == nil {
 			if _, writeErr := s.file.Write(append(data, '\n')); writeErr != nil {
 				logging.New("events").Warn("Failed to write event to WAL", "error", writeErr)

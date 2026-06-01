@@ -51,6 +51,12 @@ Example:
 
 func init() {
 	rootCmd.AddCommand(initCmd)
+
+	initCmd.Flags().Bool("non-interactive", false, "Run init without interactive prompts")
+	initCmd.Flags().String("engine-host", "localhost", "Engine host (non-interactive mode)")
+	initCmd.Flags().String("engine-port", "50051", "Engine gRPC port (non-interactive mode)")
+	initCmd.Flags().String("cli-name", "", "CLI client name (non-interactive mode)")
+	initCmd.Flags().String("engine-wg-pubkey", "", "Engine WireGuard public key (non-interactive mode)")
 }
 
 // cliInitInputs holds the inputs collected from the init wizard.
@@ -94,6 +100,40 @@ func runInit(cmd *cobra.Command, args []string) error {
 			fmt.Println("Aborted.")
 			return nil
 		}
+	}
+
+	nonInteractive, _ := cmd.Flags().GetBool("non-interactive")
+	if nonInteractive {
+		flagEngineHost, _ := cmd.Flags().GetString("engine-host")
+		flagEnginePort, _ := cmd.Flags().GetString("engine-port")
+		flagCLIName, _ := cmd.Flags().GetString("cli-name")
+		flagEngineWGPubKey, _ := cmd.Flags().GetString("engine-wg-pubkey")
+
+		if flagEngineWGPubKey == "" {
+			return fmt.Errorf("--non-interactive requires --engine-wg-pubkey")
+		}
+		if flagCLIName == "" {
+			hostname, _ := os.Hostname()
+			flagCLIName = "cli-" + hostname
+		}
+
+		privKey, pubKey, genErr := overlay.GenerateKeyPair()
+		if genErr != nil {
+			return fmt.Errorf("failed to generate WireGuard keypair: %w", genErr)
+		}
+		fmt.Printf("  %s WireGuard keypair generated\n", styleOK.Render("[OK]"))
+		fmt.Printf("  %s Public key: %s\n", styleInfo.Render("[INFO]"), pubKey)
+
+		return applyCLIInit(&cliInitInputs{
+			EngineHost:     flagEngineHost,
+			EnginePort:     flagEnginePort,
+			CLIName:        flagCLIName,
+			EngineWGPubKey: flagEngineWGPubKey,
+			PrivKey:        privKey,
+			PubKey:         pubKey,
+			KeysDir:        types.DefaultKeysDir,
+			Engines:        nil,
+		})
 	}
 
 	// Generate WireGuard keypair

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v3.12.4
-// source: banyan/v1/engine.proto
+// source: engine.proto
 
 package banyanpb
 
@@ -44,6 +44,13 @@ const (
 	EngineService_ListSecrets_FullMethodName           = "/banyan.v1.EngineService/ListSecrets"
 	EngineService_GetSecret_FullMethodName             = "/banyan.v1.EngineService/GetSecret"
 	EngineService_DeleteSecret_FullMethodName          = "/banyan.v1.EngineService/DeleteSecret"
+	EngineService_Login_FullMethodName                 = "/banyan.v1.EngineService/Login"
+	EngineService_RefreshToken_FullMethodName          = "/banyan.v1.EngineService/RefreshToken"
+	EngineService_CreateUser_FullMethodName            = "/banyan.v1.EngineService/CreateUser"
+	EngineService_ListUsers_FullMethodName             = "/banyan.v1.EngineService/ListUsers"
+	EngineService_DeleteUser_FullMethodName            = "/banyan.v1.EngineService/DeleteUser"
+	EngineService_UpdateUserRole_FullMethodName        = "/banyan.v1.EngineService/UpdateUserRole"
+	EngineService_ChangePassword_FullMethodName        = "/banyan.v1.EngineService/ChangePassword"
 )
 
 // EngineServiceClient is the client API for EngineService service.
@@ -83,6 +90,15 @@ type EngineServiceClient interface {
 	ListSecrets(ctx context.Context, in *ListSecretsRequest, opts ...grpc.CallOption) (*ListSecretsResponse, error)
 	GetSecret(ctx context.Context, in *GetSecretRequest, opts ...grpc.CallOption) (*GetSecretResponse, error)
 	DeleteSecret(ctx context.Context, in *DeleteSecretRequest, opts ...grpc.CallOption) (*DeleteSecretResponse, error)
+	// Auth RPCs (unauthenticated — bypass JWT middleware)
+	Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error)
+	RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error)
+	// User management RPCs (admin only)
+	CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error)
+	ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error)
+	DeleteUser(ctx context.Context, in *DeleteUserRequest, opts ...grpc.CallOption) (*DeleteUserResponse, error)
+	UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, opts ...grpc.CallOption) (*UpdateUserRoleResponse, error)
+	ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error)
 }
 
 type engineServiceClient struct {
@@ -352,6 +368,76 @@ func (c *engineServiceClient) DeleteSecret(ctx context.Context, in *DeleteSecret
 	return out, nil
 }
 
+func (c *engineServiceClient) Login(ctx context.Context, in *LoginRequest, opts ...grpc.CallOption) (*LoginResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(LoginResponse)
+	err := c.cc.Invoke(ctx, EngineService_Login_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) RefreshToken(ctx context.Context, in *RefreshTokenRequest, opts ...grpc.CallOption) (*RefreshTokenResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshTokenResponse)
+	err := c.cc.Invoke(ctx, EngineService_RefreshToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) CreateUser(ctx context.Context, in *CreateUserRequest, opts ...grpc.CallOption) (*CreateUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CreateUserResponse)
+	err := c.cc.Invoke(ctx, EngineService_CreateUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ListUsers(ctx context.Context, in *ListUsersRequest, opts ...grpc.CallOption) (*ListUsersResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListUsersResponse)
+	err := c.cc.Invoke(ctx, EngineService_ListUsers_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) DeleteUser(ctx context.Context, in *DeleteUserRequest, opts ...grpc.CallOption) (*DeleteUserResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteUserResponse)
+	err := c.cc.Invoke(ctx, EngineService_DeleteUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) UpdateUserRole(ctx context.Context, in *UpdateUserRoleRequest, opts ...grpc.CallOption) (*UpdateUserRoleResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateUserRoleResponse)
+	err := c.cc.Invoke(ctx, EngineService_UpdateUserRole_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *engineServiceClient) ChangePassword(ctx context.Context, in *ChangePasswordRequest, opts ...grpc.CallOption) (*ChangePasswordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChangePasswordResponse)
+	err := c.cc.Invoke(ctx, EngineService_ChangePassword_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // EngineServiceServer is the server API for EngineService service.
 // All implementations must embed UnimplementedEngineServiceServer
 // for forward compatibility.
@@ -389,6 +475,15 @@ type EngineServiceServer interface {
 	ListSecrets(context.Context, *ListSecretsRequest) (*ListSecretsResponse, error)
 	GetSecret(context.Context, *GetSecretRequest) (*GetSecretResponse, error)
 	DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error)
+	// Auth RPCs (unauthenticated — bypass JWT middleware)
+	Login(context.Context, *LoginRequest) (*LoginResponse, error)
+	RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error)
+	// User management RPCs (admin only)
+	CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error)
+	ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error)
+	DeleteUser(context.Context, *DeleteUserRequest) (*DeleteUserResponse, error)
+	UpdateUserRole(context.Context, *UpdateUserRoleRequest) (*UpdateUserRoleResponse, error)
+	ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error)
 	mustEmbedUnimplementedEngineServiceServer()
 }
 
@@ -473,6 +568,27 @@ func (UnimplementedEngineServiceServer) GetSecret(context.Context, *GetSecretReq
 }
 func (UnimplementedEngineServiceServer) DeleteSecret(context.Context, *DeleteSecretRequest) (*DeleteSecretResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method DeleteSecret not implemented")
+}
+func (UnimplementedEngineServiceServer) Login(context.Context, *LoginRequest) (*LoginResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
+}
+func (UnimplementedEngineServiceServer) RefreshToken(context.Context, *RefreshTokenRequest) (*RefreshTokenResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshToken not implemented")
+}
+func (UnimplementedEngineServiceServer) CreateUser(context.Context, *CreateUserRequest) (*CreateUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateUser not implemented")
+}
+func (UnimplementedEngineServiceServer) ListUsers(context.Context, *ListUsersRequest) (*ListUsersResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListUsers not implemented")
+}
+func (UnimplementedEngineServiceServer) DeleteUser(context.Context, *DeleteUserRequest) (*DeleteUserResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteUser not implemented")
+}
+func (UnimplementedEngineServiceServer) UpdateUserRole(context.Context, *UpdateUserRoleRequest) (*UpdateUserRoleResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUserRole not implemented")
+}
+func (UnimplementedEngineServiceServer) ChangePassword(context.Context, *ChangePasswordRequest) (*ChangePasswordResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ChangePassword not implemented")
 }
 func (UnimplementedEngineServiceServer) mustEmbedUnimplementedEngineServiceServer() {}
 func (UnimplementedEngineServiceServer) testEmbeddedByValue()                       {}
@@ -938,6 +1054,132 @@ func _EngineService_DeleteSecret_Handler(srv interface{}, ctx context.Context, d
 	return interceptor(ctx, in, info, handler)
 }
 
+func _EngineService_Login_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(LoginRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).Login(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_Login_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).Login(ctx, req.(*LoginRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_RefreshToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshTokenRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).RefreshToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_RefreshToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).RefreshToken(ctx, req.(*RefreshTokenRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_CreateUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).CreateUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_CreateUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).CreateUser(ctx, req.(*CreateUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ListUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListUsersRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ListUsers(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ListUsers_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ListUsers(ctx, req.(*ListUsersRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_DeleteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteUserRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).DeleteUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_DeleteUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).DeleteUser(ctx, req.(*DeleteUserRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_UpdateUserRole_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateUserRoleRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).UpdateUserRole(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_UpdateUserRole_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).UpdateUserRole(ctx, req.(*UpdateUserRoleRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _EngineService_ChangePassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChangePasswordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(EngineServiceServer).ChangePassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: EngineService_ChangePassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(EngineServiceServer).ChangePassword(ctx, req.(*ChangePasswordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // EngineService_ServiceDesc is the grpc.ServiceDesc for EngineService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1041,6 +1283,34 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "DeleteSecret",
 			Handler:    _EngineService_DeleteSecret_Handler,
 		},
+		{
+			MethodName: "Login",
+			Handler:    _EngineService_Login_Handler,
+		},
+		{
+			MethodName: "RefreshToken",
+			Handler:    _EngineService_RefreshToken_Handler,
+		},
+		{
+			MethodName: "CreateUser",
+			Handler:    _EngineService_CreateUser_Handler,
+		},
+		{
+			MethodName: "ListUsers",
+			Handler:    _EngineService_ListUsers_Handler,
+		},
+		{
+			MethodName: "DeleteUser",
+			Handler:    _EngineService_DeleteUser_Handler,
+		},
+		{
+			MethodName: "UpdateUserRole",
+			Handler:    _EngineService_UpdateUserRole_Handler,
+		},
+		{
+			MethodName: "ChangePassword",
+			Handler:    _EngineService_ChangePassword_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
@@ -1049,5 +1319,5 @@ var EngineService_ServiceDesc = grpc.ServiceDesc{
 			ServerStreams: true,
 		},
 	},
-	Metadata: "banyan/v1/engine.proto",
+	Metadata: "engine.proto",
 }

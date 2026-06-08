@@ -1,33 +1,161 @@
 ---
-title: Security
-description: How Banyan authenticates engines, agents, and CLI clients.
+title: Authentication
+description: How Banyan authenticates components and users.
 sidebar:
   order: 1
 ---
 
-<div style="display: flex; align-items: center; gap: 1rem; margin: 1.5rem 0 2rem; padding: 1rem 1.5rem; border: 1px solid var(--sl-color-gray-5); border-radius: 12px;">
-  <img src="/wireguard.webp" alt="WireGuard" style="height: 48px;" />
-  <div>
-    <strong style="font-size: 1.1rem;">Secured by WireGuard&reg;</strong><br />
-    <span style="opacity: 0.7;">All control plane and container traffic encrypted end-to-end. No TLS certificates to manage — just keypairs.</span>
-  </div>
-</div>
+Banyan has two layers of authentication:
 
-Banyan authenticates all gRPC communication between components. Every RPC call carries credentials that the engine validates before processing the request.
-
-## Auth methods
-
-| Method | Status | How it works |
-|--------|--------|--------------|
-| **Public Key Whitelist** | Default | Each component generates a WireGuard keypair. The engine validates public keys against a whitelist directory. |
-| **mTLS** | Planned | Mutual TLS with client certificates |
-| **OIDC / SSO** | Planned | Delegate authentication to an identity provider |
+| Layer | Purpose | Method |
+|-------|---------|--------|
+| **Component Auth** | Engine ↔ Agent ↔ CLI | WireGuard public key whitelist |
+| **User Auth** | Human users via CLI | JWT tokens (username + password) |
 
 ---
 
-## Public Key Whitelist
+## User Authentication (JWT)
 
-This is Banyan's default authentication method. Each component generates an X25519 keypair during `init`. The same keypair is used for both authentication (control plane) and WireGuard overlay encryption (data plane).
+Banyan supports multi-user access with role-based permissions. Users authenticate with a username and password, receiving JWT tokens that authorize their CLI commands.
+
+### Quick start
+
+```bash
+# Login as admin (created during engine init)
+banyan login
+# Username: admin
+# Password: <your-admin-password>
+
+# Check your identity
+banyan whoami
+# Username: admin
+# Role:     admin
+```
+
+### Roles
+
+Banyan has three built-in roles. Each role grants a specific set of permissions:
+
+| Role | Permissions |
+|------|-------------|
+| **admin** | Full access — manage users, deploy, scale, secrets, everything |
+| **deployer** | Deploy and manage deployments, read logs/status, read secrets, change own password |
+| **viewer** | Read-only — view deployments, containers, logs, status, change own password |
+
+Roles are **not hierarchical** — a viewer does not inherit deployer permissions. Each role has explicit grants.
+
+### Login and session
+
+When you log in, Banyan issues two tokens:
+
+| Token | Lifetime | Purpose |
+|-------|----------|---------|
+| **Access token** | 1 hour | Attached to every CLI command for authorization |
+| **Refresh token** | 7 days | Used to get a new access token when it expires |
+
+Tokens are stored locally at `~/.config/banyan/credentials.json`. The CLI automatically refreshes your access token when it expires — you don't need to re-login for a week.
+
+```bash
+# Login
+banyan login
+
+# Login non-interactively (for scripts/CI)
+banyan login --username admin --password 'your-password'
+
+# Logout (revokes refresh token on the engine)
+banyan logout
+
+# Check current identity
+banyan whoami
+```
+
+### User management
+
+User management requires **admin** role.
+
+```bash
+# List all users
+banyan user list
+# USERNAME  ROLE      CREATED                    CREATED BY  STATUS
+# admin     admin     2026-05-25T17:24:26+07:00  init        active
+# alice     deployer  2026-05-28T09:00:00+07:00  admin       active
+
+# Create a new user (default role: viewer)
+banyan user add alice --role deployer
+# Password for alice: <hidden input>
+# User "alice" created with role "deployer"
+
+# Change a user's role
+banyan user set-role alice viewer
+
+# Delete a user
+banyan user remove alice
+
+# Change your own password
+banyan change-password
+```
+
+### Security properties
+
+| Property | How |
+|----------|-----|
+| Passwords hashed with bcrypt (cost 12) | Never stored or transmitted in plaintext |
+| Token rotation on refresh | Old refresh token is revoked when a new one is issued |
+| Instant role changes | Role is checked against the user store on every request, not cached in the token |
+| Account disable | Admins can disable a user — takes effect immediately |
+| Last-admin protection | Cannot delete or demote the last active admin |
+| Login rate limiting | 10 attempts per minute per IP to prevent brute force |
+
+### How it works
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as banyan-cli
+    participant Engine as banyan-engine
+    participant etcd
+
+    Note over User,etcd: Login flow
+    User->>CLI: banyan login
+    CLI->>Engine: POST /Login (username + password)
+    Engine->>Engine: Verify password (bcrypt)
+    Engine->>Engine: Create JWT access + refresh tokens
+    Engine->>etcd: Store refresh token JTI for revocation
+    Engine-->>CLI: Return tokens
+    CLI->>CLI: Save to ~/.config/banyan/credentials.json
+
+    Note over User,etcd: Command flow (every CLI command)
+    User->>CLI: banyan deploy --file app.yaml
+    CLI->>Engine: gRPC + Bearer <access-token>
+    Engine->>Engine: Validate JWT signature + expiry
+    Engine->>etcd: Check user exists and is not disabled
+    Engine->>Engine: Check role has permission for this RPC
+    Engine->>Engine: Execute command
+    Engine-->>CLI: Response
+```
+
+### Password storage
+
+Passwords are stored as bcrypt hashes in etcd. The hash is never exposed — `banyan user list` omits password fields entirely.
+
+### Token lifecycle
+
+1. **Login** → engine creates access token (1h) + refresh token (7d)
+2. **Every command** → CLI attaches access token as `Authorization: Bearer <token>`
+3. **Token expires** → CLI detects `Unauthenticated` error, calls `RefreshToken` with refresh token
+4. **Refresh** → engine validates refresh token, issues new token pair, revokes old refresh token
+5. **Logout** → CLI revokes refresh token on engine, deletes local credentials file
+
+---
+
+## Component Authentication (WireGuard)
+
+<span style="display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; border: 1px solid var(--sl-color-gray-5); border-radius: 8px; margin: 1rem 0;">
+  <img src="/wireguard.webp" alt="WireGuard" style="height: 24px;" />
+  <span><strong>Secured by WireGuard&reg;</strong> — All control plane and container traffic encrypted end-to-end.</span>
+</span>
+
+Each component (engine, agent, CLI) generates a WireGuard keypair during `init`. The engine validates public keys against a whitelist directory.
 
 ### How it works
 

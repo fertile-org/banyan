@@ -156,3 +156,16 @@ web-build:
 	rm -rf cmd/banyan-cli/webdist/static
 	mkdir -p cmd/banyan-cli/webdist/static
 	cp -r web/dist/* cmd/banyan-cli/webdist/static/
+
+# OS Compatibility Tests
+# Test install scripts against multiple OS containers
+# Requires: Docker
+# Usage: make test-os-compat                    # Test all OSes
+#        make test-os-compat OS=oraclelinux:9   # Test single OS
+.PHONY: test-os-compat
+test-os-compat:
+ifdef OS
+	./test/os-compat/test-os.sh $(OS)
+else
+	./test/os-compat/test-os.sh
+endif

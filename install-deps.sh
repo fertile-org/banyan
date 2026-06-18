@@ -26,6 +26,70 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 fatal() { error "$*"; exit 1; }
 
+# --- OS Family Registry ---
+
+# Map OS ID -> family
+declare -A OS_FAMILY=(
+    [ubuntu]="debian"       [debian]="debian"       [pop]="debian"
+    [linuxmint]="debian"    [zorin]="debian"        [elementary]="debian"
+    [neon]="debian"
+    [rhel]="rhel"           [centos]="rhel"         [fedora]="rhel"
+    [rocky]="rhel"          [almalinux]="rhel"      [ol]="rhel"
+    [amazon]="rhel"
+    [arch]="arch"
+    [sles]="suse"           [opensuse-leap]="suse"
+    [alpine]="alpine"
+)
+
+# Package name overrides: family -> package name
+# If an OS needs a different name than its family default, add OS-specific entry
+declare -A PKG_ETCD=(
+    [debian]="etcd-server"
+)
+
+declare -A PKG_CONTAINERD=(
+    [debian]="containerd"
+    [rhel]="containerd"
+)
+
+declare -A PKG_NFS=(
+    [debian]="nfs-common"
+    [rhel]="nfs-utils"
+)
+
+declare -A PKG_WIREGUARD=(
+    [debian]="wireguard-tools"
+    [rhel]="wireguard-tools"
+    [alpine]="wireguard-tools"
+)
+
+get_family() {
+    echo "${OS_FAMILY[$OS]:-unknown}"
+}
+
+# install_pkg <key>
+# Looks up PKG_<KEY>[$OS], then PKG_<KEY>[$FAMILY], then falls back to <key>
+install_pkg() {
+    local key=$1
+    local var_name="PKG_${key^^}"
+    local pkg_name=""
+
+    # OS-specific override
+    eval "pkg_name=\${${var_name}[$OS]:-}"
+
+    # Family default
+    if [ -z "$pkg_name" ]; then
+        local family
+        family=$(get_family)
+        eval "pkg_name=\${${var_name}[$family]:-}"
+    fi
+
+    # Fallback to key itself
+    pkg_name="${pkg_name:-$key}"
+
+    $PKG_INSTALL "$pkg_name"
+}
+
 # --- Detection ---
 
 detect_os() {
@@ -92,24 +156,23 @@ install_etcd() {
 
     info "Installing etcd..."
 
-    case "$OS" in
-        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-            $PKG_UPDATE
-            $PKG_INSTALL etcd-server
-            ;;
-        *)
-            info "Downloading etcd v${ETCD_VERSION} binary..."
-            local url="https://github.com/etcd-io/etcd/releases/download/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-${ARCH}.tar.gz"
-            local tmp
-            tmp=$(mktemp -d)
-            if ! curl -fsSL "$url" | tar -xz -C "$tmp" --strip-components=1; then
-                rm -rf "$tmp"
-                fatal "Failed to download etcd from ${url}"
-            fi
-            mv "$tmp/etcd" "$tmp/etcdctl" "${INSTALL_DIR}/"
+    local family
+    family=$(get_family)
+
+    if [ "$family" = "debian" ]; then
+        install_pkg "etcd"
+    else
+        info "Downloading etcd v${ETCD_VERSION} binary..."
+        local url="https://github.com/etcd-io/etcd/releases/download/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-${ARCH}.tar.gz"
+        local tmp
+        tmp=$(mktemp -d)
+        if ! curl -fsSL "$url" | tar -xz -C "$tmp" --strip-components=1; then
             rm -rf "$tmp"
-            ;;
-    esac
+            fatal "Failed to download etcd from ${url}"
+        fi
+        mv "$tmp/etcd" "$tmp/etcdctl" "${INSTALL_DIR}/"
+        rm -rf "$tmp"
+    fi
 
     info "etcd installed."
 }
@@ -142,15 +205,15 @@ install_containerd() {
     else
         info "Installing containerd..."
 
-        case "$OS" in
-            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-                $PKG_UPDATE
-                $PKG_INSTALL containerd
-                ;;
-            *)
-                $PKG_INSTALL containerd.io 2>/dev/null || $PKG_INSTALL containerd
-                ;;
-        esac
+        local family
+        family=$(get_family)
+
+        if [ "$family" = "debian" ]; then
+            $PKG_UPDATE
+            install_pkg "containerd"
+        else
+            $PKG_INSTALL containerd.io 2>/dev/null || install_pkg "containerd"
+        fi
     fi
 
     if systemctl is-active --quiet containerd 2>/dev/null; then
@@ -214,17 +277,14 @@ install_wireguard() {
     else
         info "Installing wireguard-tools..."
 
-        case "$OS" in
-            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-                $PKG_UPDATE
-                $PKG_INSTALL wireguard-tools
-                ;;
-            *)
-                $PKG_INSTALL wireguard-tools
-                ;;
-        esac
+        local family
+        family=$(get_family)
 
-        info "wireguard-tools installed."
+        if [ "$family" = "debian" ]; then
+            $PKG_UPDATE
+        fi
+
+        install_pkg "wireguard"
     fi
 
     if ip link add wg-test type wireguard 2>/dev/null; then
@@ -453,15 +513,14 @@ install_nfs_client() {
 
     info "Installing NFS client tools..."
 
-    case "$OS" in
-        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-            $PKG_UPDATE
-            $PKG_INSTALL nfs-common
-            ;;
-        *)
-            $PKG_INSTALL nfs-utils
-            ;;
-    esac
+    local family
+    family=$(get_family)
+
+    if [ "$family" = "debian" ]; then
+        $PKG_UPDATE
+    fi
+
+    install_pkg "nfs"
 
     info "NFS client installed."
 }

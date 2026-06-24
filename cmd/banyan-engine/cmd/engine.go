@@ -282,6 +282,55 @@ func runEngineInit(cmd *cobra.Command, args []string) error {
 		fmt.Println(styleInfo.Render("Share this public key with agents and CLI clients during their init."))
 	}
 
+	// --- VPC CIDR selection ---
+	fmt.Println()
+	fmt.Println(styleInfo.Render("Configuring VPC CIDR (internal network range for containers)..."))
+
+	suggested, _ := engine.SuggestFreeVPCCIDR()
+	flagCIDR, _ := cmd.Flags().GetString("vpc-cidr")
+	cidrFlagSet := cmd.Flags().Changed("vpc-cidr")
+
+	if nonInteractive {
+		chosen := flagCIDR
+		if !cidrFlagSet {
+			chosen = suggested
+		}
+		if chosen == "" {
+			return fmt.Errorf("no free VPC CIDR found automatically; specify one with --vpc-cidr")
+		}
+		if err := engine.ValidateVPCCIDR(chosen); err != nil {
+			if suggested != "" {
+				return fmt.Errorf("%w (suggested free range: %s)", err, suggested)
+			}
+			return err
+		}
+		existingCfg.Engine.VPCCIDR = chosen
+		fmt.Printf("  %s VPC CIDR: %s\n", styleOK.Render("[OK]"), chosen)
+	} else {
+		vpcCIDR := suggested
+		if vpcCIDR == "" {
+			fmt.Printf("  %s No free range auto-detected; please enter one manually.\n", styleWarn.Render("[WARN]"))
+		}
+		cidrForm := huh.NewForm(
+			huh.NewGroup(
+				huh.NewInput().
+					Title("VPC CIDR (internal network range for containers)").
+					Description("Must not overlap any host interface. Avoid 10.0.0.0/16 on cloud VMs.").
+					Value(&vpcCIDR).
+					Validate(engine.ValidateVPCCIDR),
+			),
+		)
+		if err := cidrForm.Run(); err != nil {
+			if errors.Is(err, huh.ErrUserAborted) {
+				fmt.Println("\nInitialization cancelled.")
+				return nil
+			}
+			return fmt.Errorf("VPC CIDR form error: %w", err)
+		}
+		existingCfg.Engine.VPCCIDR = vpcCIDR
+		fmt.Printf("  %s VPC CIDR: %s\n", styleOK.Render("[OK]"), vpcCIDR)
+	}
+
 	// --- Deployment mode ---
 	// Ask first: single or multi-engine? This determines the etcd/registry flow.
 	fmt.Println()
@@ -774,6 +823,11 @@ func runEngineStart(cmd *cobra.Command, args []string) error {
 	// Read gRPC port from config if not overridden by flags
 	if !cmd.Flags().Changed("grpc-port") && cfg.Engine.GRPCPort != "" {
 		engineGRPCPort = cfg.Engine.GRPCPort
+	}
+
+	// Read VPC CIDR from config if not overridden by flags
+	if !cmd.Flags().Changed("vpc-cidr") && cfg.Engine.VPCCIDR != "" {
+		engineVPCCIDR = cfg.Engine.VPCCIDR
 	}
 
 	// Determine store backend and address

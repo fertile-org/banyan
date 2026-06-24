@@ -45,6 +45,7 @@ type EngineConfig struct {
 	MetricsPort         string `yaml:"metrics_port,omitempty"`
 	StoreBackend        string `yaml:"store_backend,omitempty"`
 	StoreAddress        string `yaml:"store_address,omitempty"`
+	VPCCIDR             string `yaml:"vpc_cidr,omitempty"`
 	EtcdUsername        string `yaml:"etcd_username,omitempty"`
 	EtcdPassword        string `yaml:"etcd_password,omitempty"`
 	EtcdCertFile        string `yaml:"etcd_cert_file,omitempty"`

@@ -510,6 +510,26 @@ verify() {
 
 # --- Install dependencies (called by both install scripts) ---
 
+# restore_selinux_context relabels installed binaries to their correct SELinux
+# context. Binaries are downloaded to a temp dir and moved into INSTALL_DIR,
+# which leaves them with a tmp_t label that prevents systemd from executing
+# them (status=203/EXEC). This is a no-op on non-SELinux systems (Debian/Ubuntu/
+# Arch/Alpine) and on systems where SELinux is disabled.
+restore_selinux_context() {
+    if ! command -v restorecon &>/dev/null; then
+        return 0
+    fi
+    if command -v selinuxenabled &>/dev/null && ! selinuxenabled; then
+        return 0
+    fi
+
+    info "Restoring SELinux contexts on installed binaries..."
+    restorecon -RF "$INSTALL_DIR" 2>/dev/null || true
+    if [ -d /opt/cni/bin ]; then
+        restorecon -RF /opt/cni/bin 2>/dev/null || true
+    fi
+}
+
 install_nfs_client() {
     if command -v mount.nfs &>/dev/null; then
         info "NFS client already installed, skipping."
@@ -545,4 +565,7 @@ install_deps() {
         install_buildkit
         install_nfs_client  # For NFS volume mounts
     fi
+
+    # Fix SELinux labels on binaries moved from the temp dir (RHEL/Oracle/etc.).
+    restore_selinux_context
 }

@@ -398,7 +398,12 @@ verify() {
 
     local ok=true
 
-    if command -v banyan-cli &>/dev/null; then
+    # A binary counts as installed if it is on PATH OR present in INSTALL_DIR.
+    # Under sudo, secure_path often excludes INSTALL_DIR (e.g. /usr/local/bin),
+    # so a PATH-only check (command -v) gives false negatives.
+    have() { command -v "$1" &>/dev/null || [ -x "${INSTALL_DIR}/$1" ]; }
+
+    if have banyan-cli; then
         info "  banyan-cli: OK"
     else
         error "  banyan-cli: NOT FOUND"
@@ -406,28 +411,28 @@ verify() {
     fi
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
-        if command -v banyan-engine &>/dev/null; then
+        if have banyan-engine; then
             info "  banyan-engine: OK"
         else
             error "  banyan-engine: NOT FOUND"
             ok=false
         fi
 
-        if command -v etcd &>/dev/null; then
+        if have etcd; then
             info "  etcd: OK"
         else
             error "  etcd: NOT FOUND"
             ok=false
         fi
 
-        if command -v registry &>/dev/null; then
+        if have registry; then
             info "  registry: OK"
         else
             error "  registry: NOT FOUND"
             ok=false
         fi
 
-        if command -v wg &>/dev/null; then
+        if have wg; then
             info "  wireguard-tools: OK (for control tunnel)"
         else
             error "  wireguard-tools: NOT FOUND (required for control tunnel)"
@@ -436,35 +441,35 @@ verify() {
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
-        if command -v banyan-agent &>/dev/null; then
+        if have banyan-agent; then
             info "  banyan-agent: OK"
         else
             error "  banyan-agent: NOT FOUND"
             ok=false
         fi
 
-        if command -v containerd &>/dev/null; then
+        if have containerd; then
             info "  containerd: OK"
         else
             error "  containerd: NOT FOUND"
             ok=false
         fi
 
-        if command -v nerdctl &>/dev/null; then
+        if have nerdctl; then
             info "  nerdctl: OK"
         else
             error "  nerdctl: NOT FOUND"
             ok=false
         fi
 
-        if command -v buildkitd &>/dev/null; then
+        if have buildkitd; then
             info "  buildkit: OK"
         else
             error "  buildkit: NOT FOUND"
             ok=false
         fi
 
-        if command -v wg &>/dev/null; then
+        if have wg; then
             info "  wireguard-tools: OK"
         else
             error "  wireguard-tools: NOT FOUND (required for overlay networking and control tunnel)"

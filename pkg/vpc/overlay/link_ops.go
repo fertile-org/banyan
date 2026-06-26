@@ -35,6 +35,12 @@ func (e *ExecLinkOps) AddRoute(dst net.IPNet, gw net.IP, dev string) error {
 	return runCmd("ip", "route", "replace", dst.String(), "via", gw.String(), "dev", dev, "onlink")
 }
 
+// AddDeviceRoute adds a route to dst reachable directly on dev, with no gateway.
+// Used for per-peer control-tunnel routes (e.g. 10.200.108.133/32 dev wg-ctl-eng).
+func (e *ExecLinkOps) AddDeviceRoute(dst net.IPNet, dev string) error {
+	return runCmd("ip", "route", "replace", dst.String(), "dev", dev)
+}
+
 func (e *ExecLinkOps) DeleteLink(name string) error {
 	return runCmd("ip", "link", "del", name)
 }

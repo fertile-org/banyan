@@ -7,13 +7,10 @@ import (
 	"github.com/fertile-org/banyan/pkg/logging"
 )
 
-const (
-	controlTunnelCIDR = 16
-	controlKeepalive  = 25
-)
+const controlKeepalive = 25
 
 // SetupControlTunnel creates and configures a WireGuard control tunnel interface
-// for control plane encryption. The interface is assigned myIP with a /16 mask.
+// for control plane encryption. The interface is assigned myIP with a /32 mask.
 // If the interface already exists, it is removed and recreated.
 func SetupControlTunnel(wgOps WireGuardOps, linkOps LinkOperations, iface, privateKey string, myIP net.IP, listenPort int) error {
 	// Clean up any existing interface from a previous init
@@ -35,10 +32,13 @@ func SetupControlTunnel(wgOps WireGuardOps, linkOps LinkOperations, iface, priva
 		return fmt.Errorf("configure %s: %w", iface, err)
 	}
 
-	// Assign tunnel IP with /16 mask
+	// Assign tunnel IP with a /32 mask: the interface owns only its own IP and
+	// does NOT install a broad 10.200.0.0/16 connected route. Routes to peers are
+	// added per-peer in AddControlPeer. This lets multiple control tunnels
+	// (e.g. engine + co-located CLI) coexist on one host without route conflicts.
 	addr := &net.IPNet{
 		IP:   myIP,
-		Mask: net.CIDRMask(controlTunnelCIDR, 32),
+		Mask: net.CIDRMask(32, 32),
 	}
 	if err := linkOps.AddAddress(iface, addr); err != nil {
 		return fmt.Errorf("assign IP to %s: %w", iface, err)
@@ -52,12 +52,18 @@ func SetupControlTunnel(wgOps WireGuardOps, linkOps LinkOperations, iface, priva
 	return nil
 }
 
-// AddControlPeer adds a peer to the specified control tunnel interface.
+// AddControlPeer adds a peer to the specified control tunnel interface and
+// installs a /32 route to the peer's tunnel IP via that interface.
 // Endpoint may be empty (engine learns agent endpoints from incoming packets).
-func AddControlPeer(wgOps WireGuardOps, iface, pubKey, endpoint string, tunnelIP net.IP) error {
+func AddControlPeer(wgOps WireGuardOps, linkOps LinkOperations, iface, pubKey, endpoint string, tunnelIP net.IP) error {
 	allowedIPs := []string{tunnelIP.String() + "/32"}
 	if err := wgOps.AddPeer(iface, pubKey, endpoint, allowedIPs, controlKeepalive); err != nil {
 		return fmt.Errorf("add control peer %s: %w", pubKey[:8], err)
+	}
+
+	route := net.IPNet{IP: tunnelIP, Mask: net.CIDRMask(32, 32)}
+	if err := linkOps.AddDeviceRoute(route, iface); err != nil {
+		return fmt.Errorf("add control peer route %s: %w", tunnelIP, err)
 	}
 	return nil
 }
@@ -84,7 +90,7 @@ func SetupControlTunnelExec(iface, privateKey string, myIP net.IP, listenPort in
 
 // AddControlPeerExec is a convenience wrapper using exec-based operations.
 func AddControlPeerExec(iface, pubKey, endpoint string, tunnelIP net.IP) error {
-	return AddControlPeer(&ExecWireGuardOps{}, iface, pubKey, endpoint, tunnelIP)
+	return AddControlPeer(&ExecWireGuardOps{}, &ExecLinkOps{}, iface, pubKey, endpoint, tunnelIP)
 }
 
 // CleanupControlTunnelExec is a convenience wrapper using exec-based operations.

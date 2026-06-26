@@ -15,6 +15,7 @@ type LinkOperations interface {
 	SetLinkAddress(name string, mac net.HardwareAddr) error
 	AddAddress(name string, addr *net.IPNet) error
 	AddRoute(dst net.IPNet, gw net.IP, dev string) error
+	AddDeviceRoute(dst net.IPNet, dev string) error
 	DeleteLink(name string) error
 	LinkExists(name string) (bool, error)
 }

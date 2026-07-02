@@ -48,8 +48,8 @@ func TestSetupControlTunnel(t *testing.T) {
 	if linkOps.calls[2].args[0] != "wg-ctl-eng" {
 		t.Errorf("expected AddAddress on 'wg-ctl-eng', got %q", linkOps.calls[2].args[0])
 	}
-	if linkOps.calls[2].args[1] != "10.200.0.1/16" {
-		t.Errorf("expected IP '10.200.0.1/16', got %q", linkOps.calls[2].args[1])
+	if linkOps.calls[2].args[1] != "10.200.0.1/32" {
+		t.Errorf("expected IP '10.200.0.1/32', got %q", linkOps.calls[2].args[1])
 	}
 
 	if linkOps.calls[3].method != "SetLinkUp" {
@@ -70,17 +70,18 @@ func TestSetupControlTunnel_AgentIP(t *testing.T) {
 		t.Fatalf("SetupControlTunnel failed: %v", err)
 	}
 
-	// Verify IP assignment uses /16 mask (index 2: after LinkExists + DeleteLink)
-	if linkOps.calls[2].args[1] != "10.200.173.42/16" {
-		t.Errorf("expected IP '10.200.173.42/16', got %q", linkOps.calls[2].args[1])
+	// Verify IP assignment uses /32 mask (index 2: after LinkExists + DeleteLink)
+	if linkOps.calls[2].args[1] != "10.200.173.42/32" {
+		t.Errorf("expected IP '10.200.173.42/32', got %q", linkOps.calls[2].args[1])
 	}
 }
 
 func TestAddControlPeer(t *testing.T) {
 	wgOps := &mockWireGuardOps{}
+	linkOps := &mockLinkOps{}
 	tunnelIP := net.ParseIP("10.200.0.1")
 
-	err := AddControlPeer(wgOps, "wg-ctl-eng", "peer-pubkey-base64", "192.168.1.100:51821", tunnelIP)
+	err := AddControlPeer(wgOps, linkOps, "wg-ctl-eng", "peer-pubkey-base64", "192.168.1.100:51821", tunnelIP)
 	if err != nil {
 		t.Fatalf("AddControlPeer failed: %v", err)
 	}
@@ -98,13 +99,31 @@ func TestAddControlPeer(t *testing.T) {
 	if call.args[2] != "192.168.1.100:51821" {
 		t.Errorf("expected endpoint '192.168.1.100:51821', got %q", call.args[2])
 	}
+
+	// A /32 device route to the peer's tunnel IP must be added.
+	if linkOps.callCount("AddDeviceRoute") != 1 {
+		t.Fatalf("expected 1 AddDeviceRoute call, got %d", linkOps.callCount("AddDeviceRoute"))
+	}
+	var routeCall mockCall
+	for _, c := range linkOps.calls {
+		if c.method == "AddDeviceRoute" {
+			routeCall = c
+		}
+	}
+	if routeCall.args[0] != "10.200.0.1/32" {
+		t.Errorf("expected route '10.200.0.1/32', got %q", routeCall.args[0])
+	}
+	if routeCall.args[1] != "wg-ctl-eng" {
+		t.Errorf("expected route dev 'wg-ctl-eng', got %q", routeCall.args[1])
+	}
 }
 
 func TestAddControlPeer_NoEndpoint(t *testing.T) {
 	wgOps := &mockWireGuardOps{}
+	linkOps := &mockLinkOps{}
 	tunnelIP := net.ParseIP("10.200.42.5")
 
-	err := AddControlPeer(wgOps, "wg-ctl-agt", "agent-pubkey", "", tunnelIP)
+	err := AddControlPeer(wgOps, linkOps, "wg-ctl-agt", "agent-pubkey", "", tunnelIP)
 	if err != nil {
 		t.Fatalf("AddControlPeer failed: %v", err)
 	}
@@ -115,6 +134,23 @@ func TestAddControlPeer_NoEndpoint(t *testing.T) {
 	// Empty endpoint is valid (engine learns from incoming packets)
 	if wgOps.calls[0].args[2] != "" {
 		t.Errorf("expected empty endpoint, got %q", wgOps.calls[0].args[2])
+	}
+
+	// Route to the peer's tunnel IP is added regardless of endpoint.
+	if linkOps.callCount("AddDeviceRoute") != 1 {
+		t.Fatalf("expected 1 AddDeviceRoute call, got %d", linkOps.callCount("AddDeviceRoute"))
+	}
+	var routeCall mockCall
+	for _, c := range linkOps.calls {
+		if c.method == "AddDeviceRoute" {
+			routeCall = c
+		}
+	}
+	if routeCall.args[0] != "10.200.42.5/32" {
+		t.Errorf("expected route '10.200.42.5/32', got %q", routeCall.args[0])
+	}
+	if routeCall.args[1] != "wg-ctl-agt" {
+		t.Errorf("expected route dev 'wg-ctl-agt', got %q", routeCall.args[1])
 	}
 }
 

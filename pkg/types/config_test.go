@@ -836,3 +836,28 @@ func TestEngineEndpoint_Serialization(t *testing.T) {
 		t.Errorf("expected wg key abc123, got %s", loaded.Agent.Engines[0].WGPublicKey)
 	}
 }
+
+func TestEngineConfigVPCCIDRRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgPath := filepath.Join(tmpDir, "banyan.yaml")
+
+	cfg := BanyanConfig{
+		Engine: EngineConfig{
+			GRPCPort: "50051",
+			VPCCIDR:  "10.20.0.0/16",
+		},
+	}
+
+	if err := SaveConfig(cfgPath, &cfg); err != nil {
+		t.Fatalf("SaveConfig failed: %v", err)
+	}
+
+	loaded, err := LoadConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+
+	if loaded.Engine.VPCCIDR != "10.20.0.0/16" {
+		t.Errorf("expected vpc_cidr=10.20.0.0/16, got %q", loaded.Engine.VPCCIDR)
+	}
+}

@@ -187,7 +187,16 @@ func (e *Engine) Run(ctx context.Context) error {
 	var peerTracker overlay.PeerTrackerInterface
 	if e.opts.VPCCIDR != "" {
 		if err := checkCIDRConflict(e.opts.VPCCIDR); err != nil {
-			return fmt.Errorf("VPC CIDR conflict: %w", err)
+			suggestion, _ := suggestFreeCIDR()
+			if suggestion != "" {
+				return fmt.Errorf("VPC CIDR conflict: %w\n"+
+					"  → Suggested free range: %s\n"+
+					"  → Fix: re-run `sudo banyan-engine init` to choose a range, "+
+					"or start with --vpc-cidr %s",
+					err, suggestion, suggestion)
+			}
+			return fmt.Errorf("VPC CIDR conflict: %w\n"+
+				"  → No free candidate range found; specify one with --vpc-cidr", err)
 		}
 
 		if e.multiEngine {
@@ -1087,4 +1096,40 @@ func checkCIDRConflict(vpcCIDR string) error {
 		}
 	}
 	return nil
+}
+
+// candidateCIDRs are private ranges tried in order when suggesting a
+// conflict-free VPC CIDR. 10.0.0.0/16 is excluded (it is the common cloud
+// default and frequently collides with the host subnet), and 10.200.0.0/16 is
+// excluded (reserved for the control tunnel, see pkg/types.ControlTunnelCIDR).
+var candidateCIDRs = []string{
+	"10.10.0.0/16", "10.20.0.0/16", "10.30.0.0/16",
+	"10.50.0.0/16", "10.100.0.0/16",
+	"172.20.0.0/16", "172.30.0.0/16",
+}
+
+// suggestFreeCIDR returns the first candidate range that does not overlap any
+// host network interface, or "" if every candidate conflicts.
+func suggestFreeCIDR() (string, error) {
+	for _, candidate := range candidateCIDRs {
+		if err := checkCIDRConflict(candidate); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", nil
+}
+
+// SuggestFreeVPCCIDR returns the first candidate VPC CIDR that does not overlap
+// any host interface, or "" if none is free. Exported for the engine CLI.
+func SuggestFreeVPCCIDR() (string, error) {
+	return suggestFreeCIDR()
+}
+
+// ValidateVPCCIDR returns an error if cidr is not a valid CIDR or overlaps a
+// host network interface. Exported for the engine CLI.
+func ValidateVPCCIDR(cidr string) error {
+	if cidr == "" {
+		return fmt.Errorf("VPC CIDR cannot be empty")
+	}
+	return checkCIDRConflict(cidr)
 }

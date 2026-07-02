@@ -26,6 +26,70 @@ warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 fatal() { error "$*"; exit 1; }
 
+# --- OS Family Registry ---
+
+# Map OS ID -> family
+declare -A OS_FAMILY=(
+    [ubuntu]="debian"       [debian]="debian"       [pop]="debian"
+    [linuxmint]="debian"    [zorin]="debian"        [elementary]="debian"
+    [neon]="debian"
+    [rhel]="rhel"           [centos]="rhel"         [fedora]="rhel"
+    [rocky]="rhel"          [almalinux]="rhel"      [ol]="rhel"
+    [amazon]="rhel"
+    [arch]="arch"
+    [sles]="suse"           [opensuse-leap]="suse"
+    [alpine]="alpine"
+)
+
+# Package name overrides: family -> package name
+# If an OS needs a different name than its family default, add OS-specific entry
+declare -A PKG_ETCD=(
+    [debian]="etcd-server"
+)
+
+declare -A PKG_CONTAINERD=(
+    [debian]="containerd"
+    [rhel]="containerd"
+)
+
+declare -A PKG_NFS=(
+    [debian]="nfs-common"
+    [rhel]="nfs-utils"
+)
+
+declare -A PKG_WIREGUARD=(
+    [debian]="wireguard-tools"
+    [rhel]="wireguard-tools"
+    [alpine]="wireguard-tools"
+)
+
+get_family() {
+    echo "${OS_FAMILY[$OS]:-unknown}"
+}
+
+# install_pkg <key>
+# Looks up PKG_<KEY>[$OS], then PKG_<KEY>[$FAMILY], then falls back to <key>
+install_pkg() {
+    local key=$1
+    local var_name="PKG_${key^^}"
+    local pkg_name=""
+
+    # OS-specific override
+    eval "pkg_name=\${${var_name}[$OS]:-}"
+
+    # Family default
+    if [ -z "$pkg_name" ]; then
+        local family
+        family=$(get_family)
+        eval "pkg_name=\${${var_name}[$family]:-}"
+    fi
+
+    # Fallback to key itself
+    pkg_name="${pkg_name:-$key}"
+
+    $PKG_INSTALL "$pkg_name"
+}
+
 # --- Detection ---
 
 detect_os() {
@@ -92,24 +156,23 @@ install_etcd() {
 
     info "Installing etcd..."
 
-    case "$OS" in
-        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-            $PKG_UPDATE
-            $PKG_INSTALL etcd-server
-            ;;
-        *)
-            info "Downloading etcd v${ETCD_VERSION} binary..."
-            local url="https://github.com/etcd-io/etcd/releases/download/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-${ARCH}.tar.gz"
-            local tmp
-            tmp=$(mktemp -d)
-            if ! curl -fsSL "$url" | tar -xz -C "$tmp" --strip-components=1; then
-                rm -rf "$tmp"
-                fatal "Failed to download etcd from ${url}"
-            fi
-            mv "$tmp/etcd" "$tmp/etcdctl" "${INSTALL_DIR}/"
+    local family
+    family=$(get_family)
+
+    if [ "$family" = "debian" ]; then
+        install_pkg "etcd"
+    else
+        info "Downloading etcd v${ETCD_VERSION} binary..."
+        local url="https://github.com/etcd-io/etcd/releases/download/v${ETCD_VERSION}/etcd-v${ETCD_VERSION}-linux-${ARCH}.tar.gz"
+        local tmp
+        tmp=$(mktemp -d)
+        if ! curl -fsSL "$url" | tar -xz -C "$tmp" --strip-components=1; then
             rm -rf "$tmp"
-            ;;
-    esac
+            fatal "Failed to download etcd from ${url}"
+        fi
+        mv "$tmp/etcd" "$tmp/etcdctl" "${INSTALL_DIR}/"
+        rm -rf "$tmp"
+    fi
 
     info "etcd installed."
 }
@@ -142,15 +205,15 @@ install_containerd() {
     else
         info "Installing containerd..."
 
-        case "$OS" in
-            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-                $PKG_UPDATE
-                $PKG_INSTALL containerd
-                ;;
-            *)
-                $PKG_INSTALL containerd.io 2>/dev/null || $PKG_INSTALL containerd
-                ;;
-        esac
+        local family
+        family=$(get_family)
+
+        if [ "$family" = "debian" ]; then
+            $PKG_UPDATE
+            install_pkg "containerd"
+        else
+            $PKG_INSTALL containerd.io 2>/dev/null || install_pkg "containerd"
+        fi
     fi
 
     if systemctl is-active --quiet containerd 2>/dev/null; then
@@ -214,17 +277,14 @@ install_wireguard() {
     else
         info "Installing wireguard-tools..."
 
-        case "$OS" in
-            ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-                $PKG_UPDATE
-                $PKG_INSTALL wireguard-tools
-                ;;
-            *)
-                $PKG_INSTALL wireguard-tools
-                ;;
-        esac
+        local family
+        family=$(get_family)
 
-        info "wireguard-tools installed."
+        if [ "$family" = "debian" ]; then
+            $PKG_UPDATE
+        fi
+
+        install_pkg "wireguard"
     fi
 
     if ip link add wg-test type wireguard 2>/dev/null; then
@@ -338,7 +398,12 @@ verify() {
 
     local ok=true
 
-    if command -v banyan-cli &>/dev/null; then
+    # A binary counts as installed if it is on PATH OR present in INSTALL_DIR.
+    # Under sudo, secure_path often excludes INSTALL_DIR (e.g. /usr/local/bin),
+    # so a PATH-only check (command -v) gives false negatives.
+    have() { command -v "$1" &>/dev/null || [ -x "${INSTALL_DIR}/$1" ]; }
+
+    if have banyan-cli; then
         info "  banyan-cli: OK"
     else
         error "  banyan-cli: NOT FOUND"
@@ -346,28 +411,28 @@ verify() {
     fi
 
     if [ "$ROLE" = "engine" ] || [ "$ROLE" = "all" ]; then
-        if command -v banyan-engine &>/dev/null; then
+        if have banyan-engine; then
             info "  banyan-engine: OK"
         else
             error "  banyan-engine: NOT FOUND"
             ok=false
         fi
 
-        if command -v etcd &>/dev/null; then
+        if have etcd; then
             info "  etcd: OK"
         else
             error "  etcd: NOT FOUND"
             ok=false
         fi
 
-        if command -v registry &>/dev/null; then
+        if have registry; then
             info "  registry: OK"
         else
             error "  registry: NOT FOUND"
             ok=false
         fi
 
-        if command -v wg &>/dev/null; then
+        if have wg; then
             info "  wireguard-tools: OK (for control tunnel)"
         else
             error "  wireguard-tools: NOT FOUND (required for control tunnel)"
@@ -376,35 +441,35 @@ verify() {
     fi
 
     if [ "$ROLE" = "agent" ] || [ "$ROLE" = "all" ]; then
-        if command -v banyan-agent &>/dev/null; then
+        if have banyan-agent; then
             info "  banyan-agent: OK"
         else
             error "  banyan-agent: NOT FOUND"
             ok=false
         fi
 
-        if command -v containerd &>/dev/null; then
+        if have containerd; then
             info "  containerd: OK"
         else
             error "  containerd: NOT FOUND"
             ok=false
         fi
 
-        if command -v nerdctl &>/dev/null; then
+        if have nerdctl; then
             info "  nerdctl: OK"
         else
             error "  nerdctl: NOT FOUND"
             ok=false
         fi
 
-        if command -v buildkitd &>/dev/null; then
+        if have buildkitd; then
             info "  buildkit: OK"
         else
             error "  buildkit: NOT FOUND"
             ok=false
         fi
 
-        if command -v wg &>/dev/null; then
+        if have wg; then
             info "  wireguard-tools: OK"
         else
             error "  wireguard-tools: NOT FOUND (required for overlay networking and control tunnel)"
@@ -445,6 +510,26 @@ verify() {
 
 # --- Install dependencies (called by both install scripts) ---
 
+# restore_selinux_context relabels installed binaries to their correct SELinux
+# context. Binaries are downloaded to a temp dir and moved into INSTALL_DIR,
+# which leaves them with a tmp_t label that prevents systemd from executing
+# them (status=203/EXEC). This is a no-op on non-SELinux systems (Debian/Ubuntu/
+# Arch/Alpine) and on systems where SELinux is disabled.
+restore_selinux_context() {
+    if ! command -v restorecon &>/dev/null; then
+        return 0
+    fi
+    if command -v selinuxenabled &>/dev/null && ! selinuxenabled; then
+        return 0
+    fi
+
+    info "Restoring SELinux contexts on installed binaries..."
+    restorecon -RF "$INSTALL_DIR" 2>/dev/null || true
+    if [ -d /opt/cni/bin ]; then
+        restorecon -RF /opt/cni/bin 2>/dev/null || true
+    fi
+}
+
 install_nfs_client() {
     if command -v mount.nfs &>/dev/null; then
         info "NFS client already installed, skipping."
@@ -453,15 +538,14 @@ install_nfs_client() {
 
     info "Installing NFS client tools..."
 
-    case "$OS" in
-        ubuntu|debian|pop|linuxmint|zorin|elementary|neon)
-            $PKG_UPDATE
-            $PKG_INSTALL nfs-common
-            ;;
-        *)
-            $PKG_INSTALL nfs-utils
-            ;;
-    esac
+    local family
+    family=$(get_family)
+
+    if [ "$family" = "debian" ]; then
+        $PKG_UPDATE
+    fi
+
+    install_pkg "nfs"
 
     info "NFS client installed."
 }
@@ -481,4 +565,7 @@ install_deps() {
         install_buildkit
         install_nfs_client  # For NFS volume mounts
     fi
+
+    # Fix SELinux labels on binaries moved from the temp dir (RHEL/Oracle/etc.).
+    restore_selinux_context
 }

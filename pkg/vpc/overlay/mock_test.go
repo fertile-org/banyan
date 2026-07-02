@@ -42,6 +42,11 @@ func (m *mockLinkOps) AddRoute(dst net.IPNet, gw net.IP, dev string) error {
 	return nil
 }
 
+func (m *mockLinkOps) AddDeviceRoute(dst net.IPNet, dev string) error {
+	m.record("AddDeviceRoute", dst.String(), dev)
+	return nil
+}
+
 func (m *mockLinkOps) DeleteLink(name string) error {
 	m.record("DeleteLink", name)
 	return nil

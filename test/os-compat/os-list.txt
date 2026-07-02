@@ -1,0 +1,11 @@
+ubuntu:24.04
+ubuntu:22.04
+debian:12
+oraclelinux:9
+rockylinux:9
+almalinux:9
+fedora:40
+amazonlinux:2023
+archlinux:latest
+opensuse/leap:15
+alpine:3.20

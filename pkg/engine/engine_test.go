@@ -2597,3 +2597,79 @@ func TestClose(t *testing.T) {
 	// Should not panic
 	e.Close()
 }
+
+func TestSuggestFreeCIDR(t *testing.T) {
+	origFunc := listInterfaceAddrsFunc
+	t.Cleanup(func() { listInterfaceAddrsFunc = origFunc })
+
+	t.Run("returns first candidate when nothing conflicts", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				{Name: "eth0", Addr: &net.IPNet{IP: net.ParseIP("192.168.1.5"), Mask: net.CIDRMask(24, 32)}},
+			}, nil
+		}
+
+		got, err := suggestFreeCIDR()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "10.10.0.0/16" {
+			t.Errorf("expected first candidate 10.10.0.0/16, got %q", got)
+		}
+	})
+
+	t.Run("skips occupied candidates", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				{Name: "eth0", Addr: &net.IPNet{IP: net.ParseIP("10.10.0.5"), Mask: net.CIDRMask(24, 32)}},
+				{Name: "eth1", Addr: &net.IPNet{IP: net.ParseIP("10.20.0.5"), Mask: net.CIDRMask(24, 32)}},
+			}, nil
+		}
+
+		got, err := suggestFreeCIDR()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "10.30.0.0/16" {
+			t.Errorf("expected 10.30.0.0/16 (first two occupied), got %q", got)
+		}
+	})
+
+	t.Run("returns empty string when all candidates conflict", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			var addrs []ifaceAddr
+			for i, c := range candidateCIDRs {
+				ip, _, _ := net.ParseCIDR(c)
+				addrs = append(addrs, ifaceAddr{
+					Name: "eth" + string(rune('0'+i)),
+					Addr: &net.IPNet{IP: ip, Mask: net.CIDRMask(24, 32)},
+				})
+			}
+			return addrs, nil
+		}
+
+		got, err := suggestFreeCIDR()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "" {
+			t.Errorf("expected empty string when all conflict, got %q", got)
+		}
+	})
+
+	t.Run("ignores banyan-managed interfaces", func(t *testing.T) {
+		listInterfaceAddrsFunc = func() ([]ifaceAddr, error) {
+			return []ifaceAddr{
+				{Name: "banyan0", Addr: &net.IPNet{IP: net.ParseIP("10.10.0.1"), Mask: net.CIDRMask(24, 32)}},
+			}, nil
+		}
+
+		got, err := suggestFreeCIDR()
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != "10.10.0.0/16" {
+			t.Errorf("expected 10.10.0.0/16 (banyan0 ignored), got %q", got)
+		}
+	})
+}

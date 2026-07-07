@@ -41,6 +41,11 @@ fi
 source "$DEPS_FILE"
 [ -n "$DEPS_TMP" ] && rm -f "$DEPS_TMP"
 
+# INSTALL_DIR / LINK_DIR are provided by install-deps.sh; re-assert defaults
+# here so this script is correct on its own even if sourcing is reordered.
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+LINK_DIR="${LINK_DIR:-/usr/sbin}"
+
 # --- Build from source ---
 
 build_binary() {
@@ -65,6 +70,7 @@ build_binary() {
     mv "$tmp" "${INSTALL_DIR}/${name}"
 
     info "${name} installed to ${INSTALL_DIR}/${name} (built from source)"
+    link_secure_path "$name"
 }
 
 build_web_dashboard() {

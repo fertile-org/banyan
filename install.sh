@@ -44,6 +44,11 @@ fi
 source "$DEPS_FILE"
 [ -n "$DEPS_TMP" ] && rm -f "$DEPS_TMP"
 
+# INSTALL_DIR / LINK_DIR are provided by install-deps.sh; re-assert defaults
+# here so this script is correct on its own even if sourcing is reordered.
+INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+LINK_DIR="${LINK_DIR:-/usr/sbin}"
+
 # --- Release binary installation ---
 
 get_latest_version() {
@@ -108,6 +113,7 @@ install_binary() {
     mv "$tmp" "${INSTALL_DIR}/${name}"
 
     info "${name} ${BANYAN_VERSION} installed to ${INSTALL_DIR}/${name}"
+    link_secure_path "$name"
 }
 
 install_banyan() {

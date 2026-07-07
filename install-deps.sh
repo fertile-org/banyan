@@ -5,6 +5,10 @@
 # This file is NOT meant to be run directly.
 
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+# Directory on sudo's secure_path where the banyan commands are exposed via
+# symlink, so `sudo banyan-*` resolves even when INSTALL_DIR (e.g.
+# /usr/local/bin) is not on sudo's secure_path (default on RHEL/Oracle/Fedora).
+LINK_DIR="${LINK_DIR:-/usr/sbin}"
 
 # Dependency versions
 NERDCTL_VERSION="2.1.3"
@@ -25,6 +29,28 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 fatal() { error "$*"; exit 1; }
+
+# link_secure_path exposes an installed binary on sudo's secure_path by
+# symlinking it from INSTALL_DIR into LINK_DIR (default /usr/sbin). On RHEL/
+# Oracle/Fedora, sudo's secure_path excludes /usr/local/bin, so `sudo banyan-*`
+# fails with command-not-found even though the binary is installed. /usr/sbin
+# and /usr/bin are on the default secure_path of every supported OS.
+#
+# It never clobbers a real file: if LINK_DIR/<name> already exists as a regular
+# file (distro package, user-placed), it is left untouched with a warning. An
+# existing symlink (ours) is refreshed idempotently.
+link_secure_path() {
+    local name=$1
+    [ "$LINK_DIR" = "$INSTALL_DIR" ] && return 0   # avoid self-referential link
+    [ -d "$LINK_DIR" ] || return 0                 # skip if target dir absent
+    local target="${LINK_DIR}/${name}"
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        warn "${target} is a real file — skipping symlink; use ${INSTALL_DIR}/${name} or the full path"
+        return 0
+    fi
+    ln -sf "${INSTALL_DIR}/${name}" "$target"
+    info "Linked ${target} -> ${INSTALL_DIR}/${name} (so 'sudo ${name}' works)"
+}
 
 # --- OS Family Registry ---
 

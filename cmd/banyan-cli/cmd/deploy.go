@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -259,8 +260,17 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 	for {
 		select {
 		case <-ctx.Done():
-			logging.Warn("Timeout waiting for deployment")
-			return fmt.Errorf("deployment timed out")
+			// A deadline here means we stopped waiting, NOT that the deployment
+			// failed — the engine keeps working on it asynchronously. Report it
+			// as progress info (exit 0) so it doesn't read as an error.
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				logging.Info("Still deploying — stopped waiting, the engine is finishing this in the background",
+					"name", appName,
+					"hint", "check status with 'banyan-cli deployment' or 'banyan-cli logs <container>'")
+				return nil
+			}
+			// Cancelled/interrupted (e.g. Ctrl-C) — propagate.
+			return ctx.Err()
 		case <-ticker.C:
 			status, err := client.Status(ctx)
 			if err != nil {

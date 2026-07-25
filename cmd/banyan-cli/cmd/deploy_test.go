@@ -726,12 +726,11 @@ func TestWaitForDeployment_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	// A wait timeout is not a failure — the engine keeps deploying in the
+	// background — so waitForDeployment returns nil (informational, exit 0).
 	err := waitForDeployment(ctx, client, "my-app")
-	if err == nil {
-		t.Fatal("expected timeout error")
-	}
-	if !strings.Contains(err.Error(), "timed out") {
-		t.Errorf("unexpected error: %v", err)
+	if err != nil {
+		t.Errorf("expected nil on wait timeout (deployment continues on engine), got: %v", err)
 	}
 }
 
@@ -740,14 +739,15 @@ func TestWaitForDeployment_Deploying(t *testing.T) {
 	t.Cleanup(func() { deployTags = origTags })
 	deployTags = nil
 
-	// StatusDeploying should be logged but not returned — will eventually timeout
+	// StatusDeploying should be logged but not returned — will eventually hit the
+	// wait deadline, which returns nil (deployment still progressing on engine).
 	client := setupBufconnClientWithStatus(t, types.StatusDeploying)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
 	err := waitForDeployment(ctx, client, "my-app")
-	if err == nil {
-		t.Fatal("expected timeout error")
+	if err != nil {
+		t.Errorf("expected nil on wait timeout, got: %v", err)
 	}
 }
 

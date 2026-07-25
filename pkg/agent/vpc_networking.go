@@ -113,6 +113,31 @@ func defaultSetupOverlayForwarding() error {
 	return nil
 }
 
+// dnsInputRules returns the two INPUT rulespecs (udp + tcp) that accept DNS
+// queries addressed to the bridge gateway IP, where the in-agent DNS server
+// listens. Kept in one place so setup and teardown stay in sync.
+func dnsInputRules(gatewayIP string) [][]string {
+	rules := make([][]string, 0, 2)
+	for _, proto := range []string{"udp", "tcp"} {
+		rules = append(rules, []string{
+			"-i", "banyan0", "-d", gatewayIP, "-p", proto, "--dport", "53", "-j", "ACCEPT",
+		})
+	}
+	return rules
+}
+
+// ensureDNSInputAccept idempotently inserts the INPUT ACCEPT rules for
+// container→gateway DNS. Inserted at the top of INPUT so it wins over a
+// restrictive host firewall's reject rule. Safe to call repeatedly.
+func ensureDNSInputAccept(ipt iptablesHandle, gatewayIP string) {
+	for _, rule := range dnsInputRules(gatewayIP) {
+		exists, _ := ipt.Exists("filter", "INPUT", rule...)
+		if !exists {
+			_ = ipt.Insert("filter", "INPUT", 1, rule...)
+		}
+	}
+}
+
 // depChainName returns the iptables chain name for a deployment.
 // Truncates to fit the 28-character iptables chain name limit.
 func depChainName(deploymentName string) string {
@@ -170,12 +195,26 @@ func (a *Agent) reconcileNetworkIsolation(ctx context.Context, backends []Servic
 		return
 	}
 
-	// 4. Allow DNS to gateway IP
+	// 4. Allow DNS to gateway IP.
+	//
+	// Two distinct rules are needed for two distinct packet paths:
+	//   - BANYAN-ISOLATION (reached only from FORWARD) covers DNS queries that
+	//     traverse the host between banyan0 and banyan-wg (cross-node overlay).
+	//   - INPUT covers DNS queries a container sends to the in-agent DNS server,
+	//     which is bound to the bridge gateway IP. That IP is local to the host,
+	//     so the packet is delivered locally and hits INPUT — it never passes
+	//     through FORWARD/BANYAN-ISOLATION. Without an explicit INPUT ACCEPT, a
+	//     restrictive host firewall (e.g. firewalld's default reject-with
+	//     icmp-host-prohibited on RHEL/Oracle Linux) drops it and containers
+	//     cannot resolve *.internal names.
 	if a.gatewayIP != "" {
 		for _, proto := range []string{"udp", "tcp"} {
 			_ = ipt.Append("filter", isolationChainName,
 				"-d", a.gatewayIP, "-p", proto, "--dport", "53", "-j", "ACCEPT")
 		}
+		// Ensure the INPUT ACCEPT idempotently. reconcileNetworkIsolation runs
+		// on every heartbeat, so this self-heals if a firewalld reload flushes it.
+		ensureDNSInputAccept(ipt, a.gatewayIP)
 	}
 
 	// 5. Create per-deployment chains and populate
@@ -286,6 +325,13 @@ func (a *Agent) cleanupStaleNetworking() {
 	// Clear and delete BANYAN-ISOLATION chain
 	ipt.ClearChain("filter", isolationChainName) //nolint:errcheck // best-effort
 	ipt.DeleteChain("filter", isolationChainName) //nolint:errcheck // best-effort
+
+	// NOTE: the DNS INPUT ACCEPT rules (see ensureDNSInputAccept) are intentionally
+	// not force-removed here. The gateway IP of the *previous* run is unknown at this
+	// point (it is derived from the allocated subnet, assigned later), so there is
+	// nothing precise to delete. The rules are idempotent and re-asserted every
+	// heartbeat by reconcileNetworkIsolation, and the gateway IP is stable for a
+	// given subnet, so they neither duplicate nor leak on a normal restart.
 
 	// Clean up BN-DEP-* chains
 	chains, listErr := ipt.ListChains("filter")

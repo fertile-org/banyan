@@ -498,6 +498,19 @@ func TestReconcileNetworkIsolation(t *testing.T) {
 			t.Error("expected DNS allow rule for gateway IP")
 		}
 
+		// Verify DNS is also allowed on the INPUT chain (container→gateway path).
+		// This is inserted (not appended to the isolation chain), so scan inserts.
+		foundInputDNS := false
+		for _, rule := range mock.inserted {
+			if containsAll(rule, "-i", "banyan0", "-d", "10.0.1.1", "-p", "udp", "--dport", "53", "-j", "ACCEPT") {
+				foundInputDNS = true
+				break
+			}
+		}
+		if !foundInputDNS {
+			t.Error("expected INPUT ACCEPT rule for container→gateway DNS")
+		}
+
 		// Verify deployment chains have the right allow rules
 		myappRules := mock.appended[depMyapp]
 		foundWeb1 := false
@@ -665,6 +678,40 @@ func TestAddContainerToIsolation(t *testing.T) {
 		// First insert: allow rule in deployment chain
 		if !containsAll(mock.inserted[0], "-d", "10.0.1.6", "-j", "ACCEPT") {
 			t.Errorf("expected allow rule in dep chain, got: %v", mock.inserted[0])
+		}
+	})
+}
+
+func TestEnsureDNSInputAccept(t *testing.T) {
+	t.Run("inserts udp and tcp rules when absent", func(t *testing.T) {
+		mock := &mockIPTables{} // existsResult false → both rules inserted
+
+		ensureDNSInputAccept(mock, "10.0.1.1")
+
+		if len(mock.inserted) != 2 {
+			t.Fatalf("expected 2 Insert calls, got %d", len(mock.inserted))
+		}
+		foundUDP, foundTCP := false, false
+		for _, rule := range mock.inserted {
+			if containsAll(rule, "-i", "banyan0", "-d", "10.0.1.1", "-p", "udp", "--dport", "53", "-j", "ACCEPT") {
+				foundUDP = true
+			}
+			if containsAll(rule, "-i", "banyan0", "-d", "10.0.1.1", "-p", "tcp", "--dport", "53", "-j", "ACCEPT") {
+				foundTCP = true
+			}
+		}
+		if !foundUDP || !foundTCP {
+			t.Errorf("expected both udp and tcp INPUT rules, udp=%v tcp=%v", foundUDP, foundTCP)
+		}
+	})
+
+	t.Run("is idempotent when rules already exist", func(t *testing.T) {
+		mock := &mockIPTables{existsResult: true}
+
+		ensureDNSInputAccept(mock, "10.0.1.1")
+
+		if len(mock.inserted) != 0 {
+			t.Errorf("expected 0 Insert calls when rules exist, got %d", len(mock.inserted))
 		}
 	})
 }

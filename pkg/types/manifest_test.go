@@ -1031,3 +1031,27 @@ func TestVolumeMount_BuildServiceRecords(t *testing.T) {
 		t.Error("expected second volume to be read-only")
 	}
 }
+
+func TestManifestService_PlatformParses(t *testing.T) {
+	src := `
+image: myimg:latest
+platform: linux/arm64
+`
+	var svc ManifestService
+	if err := yaml.Unmarshal([]byte(src), &svc); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if svc.Platform != "linux/arm64" {
+		t.Errorf("expected platform linux/arm64, got %q", svc.Platform)
+	}
+}
+
+func TestManifestService_PlatformOmittedIsEmpty(t *testing.T) {
+	var svc ManifestService
+	if err := yaml.Unmarshal([]byte("image: myimg:latest\n"), &svc); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if svc.Platform != "" {
+		t.Errorf("expected empty platform, got %q", svc.Platform)
+	}
+}

@@ -367,6 +367,36 @@ UNIT
     fi
 }
 
+install_qemu_binfmt() {
+    # Cross-arch image builds run foreign binaries under QEMU user emulation,
+    # registered via binfmt_misc. Needed on any box that cross-builds (e.g. an
+    # amd64 build host targeting arm64 agents).
+    if [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] && [ -e /proc/sys/fs/binfmt_misc/qemu-x86_64 ]; then
+        info "QEMU binfmt handlers already registered, skipping."
+        return
+    fi
+
+    info "Installing QEMU user-static emulation (for cross-arch builds)..."
+
+    local family
+    family=$(get_family)
+    if [ "$family" = "debian" ]; then
+        $PKG_UPDATE
+        $PKG_INSTALL qemu-user-static binfmt-support
+    else
+        $PKG_INSTALL qemu-user-static
+    fi
+
+    # Register handlers for all arches with the buildkit/containerd worker.
+    # tonistiigi/binfmt is the most reliable cross-distro registrar.
+    if command -v nerdctl &>/dev/null; then
+        nerdctl run --privileged --rm tonistiigi/binfmt --install all >/dev/null 2>&1 || \
+            warn "tonistiigi/binfmt registration failed; qemu-user-static package handlers will be used."
+    fi
+
+    info "QEMU binfmt emulation installed."
+}
+
 # --- Systemd services ---
 
 install_systemd_services() {
@@ -589,6 +619,7 @@ install_deps() {
         install_cni
         install_wireguard
         install_buildkit
+        install_qemu_binfmt  # For cross-arch image builds
         install_nfs_client  # For NFS volume mounts
     fi
 

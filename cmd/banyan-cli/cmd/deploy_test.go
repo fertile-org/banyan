@@ -107,32 +107,42 @@ func TestValidateServiceArgs(t *testing.T) {
 }
 
 func TestBuildImageArgs(t *testing.T) {
-	t.Run("without dockerfile", func(t *testing.T) {
-		args := buildImageArgs("my-app:latest", "./web", "")
+	t.Run("without dockerfile, no platform", func(t *testing.T) {
+		args := buildImageArgs("my-app:latest", "./web", "", "")
 		expected := []string{"build", "-t", "my-app:latest", "./web"}
-		if len(args) != len(expected) {
-			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
-		}
-		for i, exp := range expected {
-			if args[i] != exp {
-				t.Errorf("arg[%d]: expected %q, got %q", i, exp, args[i])
-			}
-		}
+		assertArgs(t, expected, args)
 	})
 
-	t.Run("with dockerfile", func(t *testing.T) {
-		args := buildImageArgs("my-app:latest", "./web", "Dockerfile.prod")
+	t.Run("with dockerfile, no platform", func(t *testing.T) {
+		args := buildImageArgs("my-app:latest", "./web", "Dockerfile.prod", "")
 		expectedPath := filepath.Join("./web", "Dockerfile.prod")
 		expected := []string{"build", "-t", "my-app:latest", "-f", expectedPath, "./web"}
-		if len(args) != len(expected) {
-			t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
-		}
-		for i, exp := range expected {
-			if args[i] != exp {
-				t.Errorf("arg[%d]: expected %q, got %q", i, exp, args[i])
-			}
-		}
+		assertArgs(t, expected, args)
 	})
+
+	t.Run("with platform", func(t *testing.T) {
+		args := buildImageArgs("my-app:latest", "./web", "", "linux/arm64")
+		expected := []string{"build", "-t", "my-app:latest", "--platform", "linux/arm64", "./web"}
+		assertArgs(t, expected, args)
+	})
+
+	t.Run("with multiple platforms", func(t *testing.T) {
+		args := buildImageArgs("my-app:latest", "./web", "", "linux/amd64,linux/arm64")
+		expected := []string{"build", "-t", "my-app:latest", "--platform", "linux/amd64,linux/arm64", "./web"}
+		assertArgs(t, expected, args)
+	})
+}
+
+func assertArgs(t *testing.T, expected, args []string) {
+	t.Helper()
+	if len(args) != len(expected) {
+		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
+	}
+	for i, exp := range expected {
+		if args[i] != exp {
+			t.Errorf("arg[%d]: expected %q, got %q", i, exp, args[i])
+		}
+	}
 }
 
 func TestBuildServiceImages_NoBuildNeeded(t *testing.T) {
@@ -245,7 +255,7 @@ func TestBuildServiceImages_WithBuild(t *testing.T) {
 	t.Cleanup(func() { buildImageFunc = origBuildImageFunc })
 
 	var calls []string
-	buildImageFunc = func(imageName, contextPath, dockerfile string) error {
+	buildImageFunc = func(imageName, contextPath, dockerfile, platform string) error {
 		calls = append(calls, imageName)
 		return nil
 	}
@@ -275,7 +285,7 @@ func TestBuildServiceImages_BuildFails(t *testing.T) {
 	origBuildImageFunc := buildImageFunc
 	t.Cleanup(func() { buildImageFunc = origBuildImageFunc })
 
-	buildImageFunc = func(imageName, contextPath, dockerfile string) error {
+	buildImageFunc = func(imageName, contextPath, dockerfile, platform string) error {
 		return fmt.Errorf("build failed")
 	}
 
@@ -299,7 +309,7 @@ func TestBuildServiceImages_SetsDefaultImage(t *testing.T) {
 	origBuildImageFunc := buildImageFunc
 	t.Cleanup(func() { buildImageFunc = origBuildImageFunc })
 
-	buildImageFunc = func(imageName, contextPath, dockerfile string) error {
+	buildImageFunc = func(imageName, contextPath, dockerfile, platform string) error {
 		return nil
 	}
 
@@ -333,7 +343,7 @@ func TestPushServiceImages_WithBuild(t *testing.T) {
 		tagCalls = append(tagCalls, [2]string{src, dst})
 		return nil
 	}
-	pushImageFunc = func(image string) error {
+	pushImageFunc = func(image string, allPlatforms bool) error {
 		pushCalls = append(pushCalls, image)
 		return nil
 	}
@@ -384,7 +394,7 @@ func TestPushServiceImages_TagFails(t *testing.T) {
 	tagImageFunc = func(src, dst string) error {
 		return fmt.Errorf("tag failed")
 	}
-	pushImageFunc = func(image string) error {
+	pushImageFunc = func(image string, allPlatforms bool) error {
 		t.Error("push should not be called when tag fails")
 		return nil
 	}
@@ -416,7 +426,7 @@ func TestPushServiceImages_PushFails(t *testing.T) {
 	tagImageFunc = func(src, dst string) error {
 		return nil
 	}
-	pushImageFunc = func(image string) error {
+	pushImageFunc = func(image string, allPlatforms bool) error {
 		return fmt.Errorf("push failed")
 	}
 
@@ -823,4 +833,48 @@ func TestRunDeploy_WithServiceArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
+}
+
+func TestApplyPlatformOverride(t *testing.T) {
+	services := map[string]types.ManifestService{
+		"web": {Build: &types.ManifestBuild{Context: "./web"}},
+		"api": {Build: &types.ManifestBuild{Context: "./api"}, Platform: "linux/amd64"},
+		"db":  {Image: "mysql:8.0"}, // no build — untouched
+	}
+	applyPlatformOverride(services, "linux/arm64")
+	if services["web"].Platform != "linux/arm64" {
+		t.Errorf("web: override should set empty platform, got %q", services["web"].Platform)
+	}
+	if services["api"].Platform != "linux/arm64" {
+		t.Errorf("api: global flag should win over per-service, got %q", services["api"].Platform)
+	}
+	if services["db"].Platform != "" {
+		t.Errorf("db: non-build service must be untouched, got %q", services["db"].Platform)
+	}
+}
+
+func TestCollectBuildPlatforms(t *testing.T) {
+	services := map[string]types.ManifestService{
+		"web": {Build: &types.ManifestBuild{Context: "./web"}, Platform: "linux/arm64"},
+		"api": {Build: &types.ManifestBuild{Context: "./api"}}, // no platform
+		"db":  {Image: "mysql:8.0", Platform: "linux/arm64"},   // no build — ignored
+	}
+	got := collectBuildPlatforms(services)
+	if len(got) != 1 || got[0] != "linux/arm64" {
+		t.Errorf("expected [linux/arm64], got %v", got)
+	}
+}
+
+func TestPushImageArgs(t *testing.T) {
+	t.Run("single host arch", func(t *testing.T) {
+		args := pushImageArgs("reg:5000/app:latest", false)
+		expected := []string{"push", "--insecure-registry", "reg:5000/app:latest"}
+		assertArgs(t, expected, args)
+	})
+
+	t.Run("all platforms", func(t *testing.T) {
+		args := pushImageArgs("reg:5000/app:latest", true)
+		expected := []string{"push", "--insecure-registry", "--all-platforms", "reg:5000/app:latest"}
+		assertArgs(t, expected, args)
+	})
 }

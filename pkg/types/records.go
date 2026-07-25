@@ -137,6 +137,7 @@ type NodeRecord struct {
 	Name             string    `json:"name"`
 	Status           string    `json:"status"`
 	APIAddress       string    `json:"api_address,omitempty"`
+	Arch             string    `json:"arch,omitempty"`
 	Tags             []string  `json:"tags,omitempty"`
 	MemoryTotalBytes uint64    `json:"memory_total_bytes,omitempty"`
 	MemoryUsedBytes  uint64    `json:"memory_used_bytes,omitempty"`

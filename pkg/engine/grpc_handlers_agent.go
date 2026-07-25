@@ -43,6 +43,7 @@ func (s *engineGRPCServer) Register(ctx context.Context, req *banyanpb.RegisterR
 		Name:       req.AgentName,
 		Status:     "ready",
 		APIAddress: req.ApiAddress,
+		Arch:       req.Arch,
 		Tags:       req.Tags,
 		LastSeen:   time.Now(),
 		CreatedAt:  time.Now(),

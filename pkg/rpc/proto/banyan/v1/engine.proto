@@ -85,6 +85,7 @@ message RegisterRequest {
   repeated string tags = 4;
   string wg_public_key = 5;       // agent's WireGuard public key
   string host_ip = 6;             // agent's data-plane host IP (for overlay peer endpoint)
+  string arch = 7;                // agent's CPU arch (runtime.GOARCH: "amd64" | "arm64")
 }
 
 message RegisterResponse {
@@ -327,6 +328,7 @@ message AgentInfo {
   int64 last_seen_unix = 4;
   int64 created_at_unix = 5;
   repeated string tags = 6;
+  string arch = 7;                // agent's CPU arch, empty if agent predates arch reporting
 }
 
 message DeploymentInfo {

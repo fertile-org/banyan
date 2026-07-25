@@ -230,6 +230,7 @@ func (s *engineGRPCServer) GetStatus(ctx context.Context, req *banyanpb.GetStatu
 			LastSeenUnix:  node.LastSeen.Unix(),
 			CreatedAtUnix: node.CreatedAt.Unix(),
 			Tags:          node.Tags,
+			Arch:          node.Arch,
 		})
 	}
 

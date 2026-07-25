@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"runtime"
 	"testing"
 	"time"
 
@@ -608,4 +609,64 @@ func TestEngineClient_ErrorPaths(t *testing.T) {
 			t.Error("expected error from Health on stopped server")
 		}
 	})
+}
+
+// archCaptureTestEngineServer records the Arch field of the last RegisterRequest it received.
+type archCaptureTestEngineServer struct {
+	banyanpb.UnimplementedEngineServiceServer
+	registryURL string
+	gotArch     string
+}
+
+func (s *archCaptureTestEngineServer) Register(ctx context.Context, req *banyanpb.RegisterRequest) (*banyanpb.RegisterResponse, error) {
+	s.gotArch = req.Arch
+	return &banyanpb.RegisterResponse{RegistryUrl: s.registryURL}, nil
+}
+
+func (s *archCaptureTestEngineServer) Health(ctx context.Context, req *banyanpb.HealthRequest) (*banyanpb.HealthResponse, error) {
+	return &banyanpb.HealthResponse{Status: "ok"}, nil
+}
+
+func TestEngineClient_Register_SendsArch(t *testing.T) {
+	lis := bufconn.Listen(testBufSize)
+	srv := grpc.NewServer()
+
+	engineSrv := &archCaptureTestEngineServer{registryURL: "localhost:5000"}
+	banyanpb.RegisterEngineServiceServer(srv, engineSrv)
+
+	go func() {
+		if err := srv.Serve(lis); err != nil {
+			t.Logf("server error: %v", err)
+		}
+	}()
+
+	conn, err := grpc.NewClient("passthrough:///bufnet",
+		grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("failed to dial: %v", err)
+	}
+	defer func() {
+		conn.Close()
+		srv.Stop()
+	}()
+
+	client := &EngineClient{
+		endpoints: []string{"passthrough:///bufnet"},
+		conn:      conn,
+		client:    banyanpb.NewEngineServiceClient(conn),
+	}
+
+	_, _, _, err = client.Register(context.Background(), RegisterRequest{
+		Name: "worker-1", APIAddr: "worker-1:50052",
+	})
+	if err != nil {
+		t.Fatalf("Register failed: %v", err)
+	}
+	if engineSrv.gotArch != runtime.GOARCH {
+		t.Errorf("expected arch %q, got %q", runtime.GOARCH, engineSrv.gotArch)
+	}
 }

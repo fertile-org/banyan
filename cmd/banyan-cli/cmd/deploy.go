@@ -16,10 +16,11 @@ import (
 )
 
 var (
-	deployFile   string
-	deployDryRun bool
-	deployNoWait bool
-	deployTags   []string
+	deployFile     string
+	deployDryRun   bool
+	deployNoWait   bool
+	deployTags     []string
+	deployPlatform string
 )
 
 // Function variables for external commands, enabling test mocking.
@@ -70,6 +71,7 @@ func init() {
 	deployCmd.Flags().BoolVar(&deployDryRun, "dry-run", false, "Validate manifest without deploying")
 	deployCmd.Flags().BoolVar(&deployNoWait, "no-wait", false, "Don't wait for deployment to complete")
 	deployCmd.Flags().StringSliceVar(&deployTags, "tags", nil, "Deployment tags for agent matching")
+	deployCmd.Flags().StringVar(&deployPlatform, "platform", "", "Override build platform for all build services (e.g., linux/arm64)")
 }
 
 // validateServiceArgs checks that all requested service names exist in the manifest.
@@ -105,10 +107,13 @@ func validateManifest(manifest types.BanyanManifest) error {
 }
 
 // buildImageArgs constructs nerdctl build arguments.
-func buildImageArgs(imageName, contextPath, dockerfile string) []string {
+func buildImageArgs(imageName, contextPath, dockerfile, platform string) []string {
 	args := []string{"build", "-t", imageName}
 	if dockerfile != "" {
 		args = append(args, "-f", filepath.Join(contextPath, dockerfile))
+	}
+	if platform != "" {
+		args = append(args, "--platform", platform)
 	}
 	args = append(args, contextPath)
 	return args
@@ -142,11 +147,9 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Build images for services with build config
+	// Resolve manifest-relative paths (build happens later, after we know the
+	// target agents' architecture — see below).
 	manifestDir := filepath.Dir(deployFile)
-	if buildErr := buildServiceImages(manifestDir, manifest.Name, manifest.Services); buildErr != nil {
-		return buildErr
-	}
 
 	// Resolve env_file references
 	if resolveErr := types.ResolveEnvFiles(manifestDir, manifest.Services); resolveErr != nil {
@@ -157,6 +160,14 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	types.ResolveManifestVolumes(manifestDir, &manifest)
 
 	if deployDryRun {
+		// Offline: no engine to ask, so build for host arch. --platform still honored.
+		applyPlatformOverride(manifest.Services, deployPlatform)
+		if emuErr := checkEmulation(collectBuildPlatforms(manifest.Services)); emuErr != nil {
+			return emuErr
+		}
+		if buildErr := buildServiceImages(manifestDir, manifest.Name, manifest.Services); buildErr != nil {
+			return buildErr
+		}
 		services := types.BuildServiceRecords(manifest.Services)
 		fmt.Printf("Application: %s\n", manifest.Name)
 		fmt.Printf("Services: %d\n", len(manifest.Services))
@@ -186,6 +197,23 @@ func runDeploy(cmd *cobra.Command, args []string) error {
 	info, err := client.Info(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to connect to engine: %w", err)
+	}
+
+	// Resolve each build service's target platform from the cluster's agents,
+	// then build. --platform flag overrides everything; missing arch info falls
+	// back to host arch (with a warning) so older/offline-ish clusters still work.
+	st, statusErr := client.Status(ctx)
+	if statusErr != nil {
+		logging.Warn("Could not list agents; building for host arch", "err", statusErr)
+	} else {
+		applyResolvedPlatforms(manifest.Services, st.Agents)
+	}
+	applyPlatformOverride(manifest.Services, deployPlatform)
+	if emuErr := checkEmulation(collectBuildPlatforms(manifest.Services)); emuErr != nil {
+		return emuErr
+	}
+	if buildErr := buildServiceImages(manifestDir, manifest.Name, manifest.Services); buildErr != nil {
+		return buildErr
 	}
 
 	// Push built images to registry
@@ -269,6 +297,38 @@ func waitForDeployment(ctx context.Context, client *EngineClient, appName string
 	}
 }
 
+// applyPlatformOverride sets Platform on every build service to the given value.
+// Used by the global --platform flag; wins over per-service platform:.
+func applyPlatformOverride(services map[string]types.ManifestService, platform string) {
+	if platform == "" {
+		return
+	}
+	for name, svc := range services { //nolint:gocritic // map iteration
+		if svc.Build == nil {
+			continue
+		}
+		svc.Platform = platform
+		services[name] = svc
+	}
+}
+
+// collectBuildPlatforms returns the distinct platform strings across all build
+// services (skipping empty ones). Used for the emulation preflight.
+func collectBuildPlatforms(services map[string]types.ManifestService) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, svc := range services { //nolint:gocritic // map iteration
+		if svc.Build == nil || svc.Platform == "" {
+			continue
+		}
+		if !seen[svc.Platform] {
+			seen[svc.Platform] = true
+			out = append(out, svc.Platform)
+		}
+	}
+	return out
+}
+
 // buildServiceImages builds Docker images for services that have a build config.
 func buildServiceImages(manifestDir, appName string, services map[string]types.ManifestService) error {
 	needsBuild := false
@@ -302,7 +362,7 @@ func buildServiceImages(manifestDir, appName string, services map[string]types.M
 		}
 
 		logging.Info("Building image", "service", name, "image", imageName)
-		if err := buildImageFunc(imageName, contextPath, svc.Build.Dockerfile); err != nil {
+		if err := buildImageFunc(imageName, contextPath, svc.Build.Dockerfile, svc.Platform); err != nil {
 			return fmt.Errorf("failed to build image for service %q: %w", name, err)
 		}
 	}
@@ -311,12 +371,8 @@ func buildServiceImages(manifestDir, appName string, services map[string]types.M
 	return nil
 }
 
-func buildImage(imageName, contextPath, dockerfile string) error {
-	args := []string{"build", "-t", imageName}
-	if dockerfile != "" {
-		args = append(args, "-f", filepath.Join(contextPath, dockerfile))
-	}
-	args = append(args, contextPath)
+func buildImage(imageName, contextPath, dockerfile, platform string) error {
+	args := buildImageArgs(imageName, contextPath, dockerfile, platform)
 
 	buildCmd := exec.Command("nerdctl", args...)
 	buildCmd.Stdout = os.Stdout
@@ -361,7 +417,7 @@ func pushServiceImages(registryURL string, services map[string]types.ManifestSer
 		}
 
 		logging.Info("Pushing image", "image", registryImage)
-		if err := pushImageFunc(registryImage); err != nil {
+		if err := pushImageFunc(registryImage, svc.Platform != ""); err != nil {
 			return fmt.Errorf("failed to push image for service %q: %w", name, err)
 		}
 
@@ -384,8 +440,18 @@ func tagImage(src, dst string) error {
 	return nil
 }
 
-func pushImage(image string) error {
-	cmd := exec.Command("nerdctl", "push", "--insecure-registry", image)
+// pushImageArgs constructs nerdctl push arguments. allPlatforms pushes the full
+// multi-arch image index (needed when the image was built for a non-host arch).
+func pushImageArgs(image string, allPlatforms bool) []string {
+	args := []string{"push", "--insecure-registry"}
+	if allPlatforms {
+		args = append(args, "--all-platforms")
+	}
+	return append(args, image)
+}
+
+func pushImage(image string, allPlatforms bool) error {
+	cmd := exec.Command("nerdctl", pushImageArgs(image, allPlatforms)...) //nolint:gosec // args are constructed internally
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

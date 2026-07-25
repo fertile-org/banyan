@@ -615,6 +615,21 @@ func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error
 	return nil
 }
 
+// effectiveBackendIP returns the IP to register in DNS for a backend. For a
+// container running on THIS agent it re-inspects the live container so DNS
+// reflects the real current IP (the engine's stored task IP is set at create
+// time and can go stale after the container's network is recreated, e.g. across
+// an agent or container restart). Remote backends, and locals we can't inspect,
+// fall back to the engine-reported IP.
+func (a *Agent) effectiveBackendIP(ctx context.Context, b ServiceBackend) string {
+	if b.AgentName == a.opts.AgentName && b.ContainerName != "" {
+		if ip, err := containerIPGetter(ctx, b.ContainerName); err == nil && ip != "" {
+			return ip
+		}
+	}
+	return b.ContainerIP
+}
+
 // reconcileDNS updates the DNS manager with the current set of service backends.
 // DNS entries are scoped by deployment: each service registers as
 // <service>.<deployment>.internal (fully qualified). The short name
@@ -629,7 +644,16 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 	// Register both deployment-scoped and short names
 	desired := map[string]map[string]bool{}
 	for _, b := range backends {
-		if b.ServiceName == "" || b.ContainerIP == "" {
+		if b.ServiceName == "" {
+			continue
+		}
+
+		// Use the container's REAL current IP for backends on this agent (the
+		// engine-reported task IP is captured at create time and goes stale if
+		// the container's network is later recreated); remote backends keep the
+		// engine-reported IP. This makes DNS self-heal every heartbeat.
+		ip := a.effectiveBackendIP(ctx, b)
+		if ip == "" {
 			continue
 		}
 
@@ -639,7 +663,7 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 			if desired[fqdn] == nil {
 				desired[fqdn] = map[string]bool{}
 			}
-			desired[fqdn][b.ContainerIP] = true
+			desired[fqdn][ip] = true
 		}
 
 		// Register the short name <service>.internal only if there's no conflict
@@ -648,7 +672,7 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 		if desired[shortName] == nil {
 			desired[shortName] = map[string]bool{}
 		}
-		desired[shortName][b.ContainerIP] = true
+		desired[shortName][ip] = true
 	}
 
 	// Check for short name conflicts: if multiple deployments have the same

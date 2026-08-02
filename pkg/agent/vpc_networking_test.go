@@ -498,6 +498,19 @@ func TestReconcileNetworkIsolation(t *testing.T) {
 			t.Error("expected DNS allow rule for gateway IP")
 		}
 
+		// Verify DNS is also allowed on the INPUT chain (container→gateway path).
+		// This is inserted (not appended to the isolation chain), so scan inserts.
+		foundInputDNS := false
+		for _, rule := range mock.inserted {
+			if containsAll(rule, "-i", "banyan0", "-d", "10.0.1.1", "-p", "udp", "--dport", "53", "-j", "ACCEPT") {
+				foundInputDNS = true
+				break
+			}
+		}
+		if !foundInputDNS {
+			t.Error("expected INPUT ACCEPT rule for container→gateway DNS")
+		}
+
 		// Verify deployment chains have the right allow rules
 		myappRules := mock.appended[depMyapp]
 		foundWeb1 := false
@@ -665,6 +678,40 @@ func TestAddContainerToIsolation(t *testing.T) {
 		// First insert: allow rule in deployment chain
 		if !containsAll(mock.inserted[0], "-d", "10.0.1.6", "-j", "ACCEPT") {
 			t.Errorf("expected allow rule in dep chain, got: %v", mock.inserted[0])
+		}
+	})
+}
+
+func TestEnsureDNSInputAccept(t *testing.T) {
+	t.Run("inserts udp and tcp rules when absent", func(t *testing.T) {
+		mock := &mockIPTables{} // existsResult false → both rules inserted
+
+		ensureDNSInputAccept(mock, "10.0.1.1")
+
+		if len(mock.inserted) != 2 {
+			t.Fatalf("expected 2 Insert calls, got %d", len(mock.inserted))
+		}
+		foundUDP, foundTCP := false, false
+		for _, rule := range mock.inserted {
+			if containsAll(rule, "-i", "banyan0", "-d", "10.0.1.1", "-p", "udp", "--dport", "53", "-j", "ACCEPT") {
+				foundUDP = true
+			}
+			if containsAll(rule, "-i", "banyan0", "-d", "10.0.1.1", "-p", "tcp", "--dport", "53", "-j", "ACCEPT") {
+				foundTCP = true
+			}
+		}
+		if !foundUDP || !foundTCP {
+			t.Errorf("expected both udp and tcp INPUT rules, udp=%v tcp=%v", foundUDP, foundTCP)
+		}
+	})
+
+	t.Run("is idempotent when rules already exist", func(t *testing.T) {
+		mock := &mockIPTables{existsResult: true}
+
+		ensureDNSInputAccept(mock, "10.0.1.1")
+
+		if len(mock.inserted) != 0 {
+			t.Errorf("expected 0 Insert calls when rules exist, got %d", len(mock.inserted))
 		}
 	})
 }
@@ -1319,6 +1366,50 @@ func TestReconcileDNS(t *testing.T) {
 		}
 		if !a.registeredDNS["api.internal"] {
 			t.Error("expected api.internal in registeredDNS")
+		}
+	})
+
+	t.Run("uses real inspected IP for local backends", func(t *testing.T) {
+		origGetter := containerIPGetter
+		t.Cleanup(func() { containerIPGetter = origGetter })
+		// Local container's real current IP differs from the stale engine-reported one.
+		containerIPGetter = func(_ context.Context, name string) (string, error) {
+			if name == "taka-backend-0" {
+				return "10.0.1.50", nil
+			}
+			return "", os.ErrNotExist
+		}
+
+		manager := dns.NewManager()
+		a := &Agent{
+			opts:          Options{AgentName: "agent-local"},
+			dnsManager:    manager,
+			registeredDNS: make(map[string]bool),
+		}
+
+		backends := []ServiceBackend{
+			// local: engine says .78 (stale) but real is .50 → DNS must use .50
+			{ContainerName: "taka-backend-0", ContainerIP: "10.0.1.78", ServiceName: "backend", DeploymentName: "taka", AgentName: "agent-local"},
+			// remote: keep the engine-reported IP as-is
+			{ContainerName: "taka-web-0", ContainerIP: "10.0.9.9", ServiceName: "web", DeploymentName: "taka", AgentName: "agent-remote"},
+		}
+
+		a.reconcileDNS(context.Background(), backends)
+
+		ctx := context.Background()
+		ips, err := manager.LookupHost(ctx, "backend.taka.internal")
+		if err != nil {
+			t.Fatalf("LookupHost backend.taka.internal failed: %v", err)
+		}
+		if len(ips) != 1 || ips[0].String() != "10.0.1.50" {
+			t.Fatalf("expected local backend to resolve to real IP [10.0.1.50], got %v", ips)
+		}
+		ips, err = manager.LookupHost(ctx, "web.taka.internal")
+		if err != nil {
+			t.Fatalf("LookupHost web.taka.internal failed: %v", err)
+		}
+		if len(ips) != 1 || ips[0].String() != "10.0.9.9" {
+			t.Fatalf("expected remote backend to keep engine IP [10.0.9.9], got %v", ips)
 		}
 	})
 

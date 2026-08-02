@@ -113,6 +113,7 @@ type BanyanManifest struct {
 type ManifestService struct {
 	Image       string               `yaml:"image"`
 	Build       *ManifestBuild       `yaml:"build,omitempty"`
+	Platform    string               `yaml:"platform,omitempty"` // e.g., "linux/arm64"; empty = build host arch (or auto-detect)
 	Deploy      *ManifestDeploy      `yaml:"deploy,omitempty"`
 	Healthcheck *ManifestHealthcheck `yaml:"healthcheck,omitempty"`
 	Ports       []string             `yaml:"ports,omitempty"`

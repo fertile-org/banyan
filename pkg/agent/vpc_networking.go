@@ -113,6 +113,31 @@ func defaultSetupOverlayForwarding() error {
 	return nil
 }
 
+// dnsInputRules returns the two INPUT rulespecs (udp + tcp) that accept DNS
+// queries addressed to the bridge gateway IP, where the in-agent DNS server
+// listens. Kept in one place so setup and teardown stay in sync.
+func dnsInputRules(gatewayIP string) [][]string {
+	rules := make([][]string, 0, 2)
+	for _, proto := range []string{"udp", "tcp"} {
+		rules = append(rules, []string{
+			"-i", "banyan0", "-d", gatewayIP, "-p", proto, "--dport", "53", "-j", "ACCEPT",
+		})
+	}
+	return rules
+}
+
+// ensureDNSInputAccept idempotently inserts the INPUT ACCEPT rules for
+// container→gateway DNS. Inserted at the top of INPUT so it wins over a
+// restrictive host firewall's reject rule. Safe to call repeatedly.
+func ensureDNSInputAccept(ipt iptablesHandle, gatewayIP string) {
+	for _, rule := range dnsInputRules(gatewayIP) {
+		exists, _ := ipt.Exists("filter", "INPUT", rule...)
+		if !exists {
+			_ = ipt.Insert("filter", "INPUT", 1, rule...)
+		}
+	}
+}
+
 // depChainName returns the iptables chain name for a deployment.
 // Truncates to fit the 28-character iptables chain name limit.
 func depChainName(deploymentName string) string {
@@ -170,12 +195,26 @@ func (a *Agent) reconcileNetworkIsolation(ctx context.Context, backends []Servic
 		return
 	}
 
-	// 4. Allow DNS to gateway IP
+	// 4. Allow DNS to gateway IP.
+	//
+	// Two distinct rules are needed for two distinct packet paths:
+	//   - BANYAN-ISOLATION (reached only from FORWARD) covers DNS queries that
+	//     traverse the host between banyan0 and banyan-wg (cross-node overlay).
+	//   - INPUT covers DNS queries a container sends to the in-agent DNS server,
+	//     which is bound to the bridge gateway IP. That IP is local to the host,
+	//     so the packet is delivered locally and hits INPUT — it never passes
+	//     through FORWARD/BANYAN-ISOLATION. Without an explicit INPUT ACCEPT, a
+	//     restrictive host firewall (e.g. firewalld's default reject-with
+	//     icmp-host-prohibited on RHEL/Oracle Linux) drops it and containers
+	//     cannot resolve *.internal names.
 	if a.gatewayIP != "" {
 		for _, proto := range []string{"udp", "tcp"} {
 			_ = ipt.Append("filter", isolationChainName,
 				"-d", a.gatewayIP, "-p", proto, "--dport", "53", "-j", "ACCEPT")
 		}
+		// Ensure the INPUT ACCEPT idempotently. reconcileNetworkIsolation runs
+		// on every heartbeat, so this self-heals if a firewalld reload flushes it.
+		ensureDNSInputAccept(ipt, a.gatewayIP)
 	}
 
 	// 5. Create per-deployment chains and populate
@@ -286,6 +325,13 @@ func (a *Agent) cleanupStaleNetworking() {
 	// Clear and delete BANYAN-ISOLATION chain
 	ipt.ClearChain("filter", isolationChainName) //nolint:errcheck // best-effort
 	ipt.DeleteChain("filter", isolationChainName) //nolint:errcheck // best-effort
+
+	// NOTE: the DNS INPUT ACCEPT rules (see ensureDNSInputAccept) are intentionally
+	// not force-removed here. The gateway IP of the *previous* run is unknown at this
+	// point (it is derived from the allocated subnet, assigned later), so there is
+	// nothing precise to delete. The rules are idempotent and re-asserted every
+	// heartbeat by reconcileNetworkIsolation, and the gateway IP is stable for a
+	// given subnet, so they neither duplicate nor leak on a normal restart.
 
 	// Clean up BN-DEP-* chains
 	chains, listErr := ipt.ListChains("filter")
@@ -569,6 +615,21 @@ func (a *Agent) initializeDNS(ctx context.Context, allocatedSubnet string) error
 	return nil
 }
 
+// effectiveBackendIP returns the IP to register in DNS for a backend. For a
+// container running on THIS agent it re-inspects the live container so DNS
+// reflects the real current IP (the engine's stored task IP is set at create
+// time and can go stale after the container's network is recreated, e.g. across
+// an agent or container restart). Remote backends, and locals we can't inspect,
+// fall back to the engine-reported IP.
+func (a *Agent) effectiveBackendIP(ctx context.Context, b ServiceBackend) string {
+	if b.AgentName == a.opts.AgentName && b.ContainerName != "" {
+		if ip, err := containerIPGetter(ctx, b.ContainerName); err == nil && ip != "" {
+			return ip
+		}
+	}
+	return b.ContainerIP
+}
+
 // reconcileDNS updates the DNS manager with the current set of service backends.
 // DNS entries are scoped by deployment: each service registers as
 // <service>.<deployment>.internal (fully qualified). The short name
@@ -583,7 +644,16 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 	// Register both deployment-scoped and short names
 	desired := map[string]map[string]bool{}
 	for _, b := range backends {
-		if b.ServiceName == "" || b.ContainerIP == "" {
+		if b.ServiceName == "" {
+			continue
+		}
+
+		// Use the container's REAL current IP for backends on this agent (the
+		// engine-reported task IP is captured at create time and goes stale if
+		// the container's network is later recreated); remote backends keep the
+		// engine-reported IP. This makes DNS self-heal every heartbeat.
+		ip := a.effectiveBackendIP(ctx, b)
+		if ip == "" {
 			continue
 		}
 
@@ -593,7 +663,7 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 			if desired[fqdn] == nil {
 				desired[fqdn] = map[string]bool{}
 			}
-			desired[fqdn][b.ContainerIP] = true
+			desired[fqdn][ip] = true
 		}
 
 		// Register the short name <service>.internal only if there's no conflict
@@ -602,7 +672,7 @@ func (a *Agent) reconcileDNS(ctx context.Context, backends []ServiceBackend) {
 		if desired[shortName] == nil {
 			desired[shortName] = map[string]bool{}
 		}
-		desired[shortName][b.ContainerIP] = true
+		desired[shortName][ip] = true
 	}
 
 	// Check for short name conflicts: if multiple deployments have the same

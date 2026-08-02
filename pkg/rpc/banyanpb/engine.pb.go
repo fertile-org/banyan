@@ -233,6 +233,7 @@ type RegisterRequest struct {
 	Tags          []string               `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty"`
 	WgPublicKey   string                 `protobuf:"bytes,5,opt,name=wg_public_key,json=wgPublicKey,proto3" json:"wg_public_key,omitempty"` // agent's WireGuard public key
 	HostIp        string                 `protobuf:"bytes,6,opt,name=host_ip,json=hostIp,proto3" json:"host_ip,omitempty"`                  // agent's data-plane host IP (for overlay peer endpoint)
+	Arch          string                 `protobuf:"bytes,7,opt,name=arch,proto3" json:"arch,omitempty"`                                    // agent's CPU arch (runtime.GOARCH: "amd64" | "arm64")
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -305,6 +306,13 @@ func (x *RegisterRequest) GetWgPublicKey() string {
 func (x *RegisterRequest) GetHostIp() string {
 	if x != nil {
 		return x.HostIp
+	}
+	return ""
+}
+
+func (x *RegisterRequest) GetArch() string {
+	if x != nil {
+		return x.Arch
 	}
 	return ""
 }
@@ -2589,6 +2597,7 @@ type AgentInfo struct {
 	LastSeenUnix  int64                  `protobuf:"varint,4,opt,name=last_seen_unix,json=lastSeenUnix,proto3" json:"last_seen_unix,omitempty"`
 	CreatedAtUnix int64                  `protobuf:"varint,5,opt,name=created_at_unix,json=createdAtUnix,proto3" json:"created_at_unix,omitempty"`
 	Tags          []string               `protobuf:"bytes,6,rep,name=tags,proto3" json:"tags,omitempty"`
+	Arch          string                 `protobuf:"bytes,7,opt,name=arch,proto3" json:"arch,omitempty"` // agent's CPU arch, empty if agent predates arch reporting
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2663,6 +2672,13 @@ func (x *AgentInfo) GetTags() []string {
 		return x.Tags
 	}
 	return nil
+}
+
+func (x *AgentInfo) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
 }
 
 type DeploymentInfo struct {
@@ -5911,7 +5927,7 @@ const file_engine_proto_rawDesc = "" +
 	"\x12memory_total_bytes\x18\x03 \x01(\x04R\x10memoryTotalBytes\x12&\n" +
 	"\x0fdisk_used_bytes\x18\x04 \x01(\x04R\rdiskUsedBytes\x12(\n" +
 	"\x10disk_total_bytes\x18\x05 \x01(\x04R\x0ediskTotalBytes\x12\x1b\n" +
-	"\tcpu_cores\x18\x06 \x01(\rR\bcpuCores\"\xc7\x01\n" +
+	"\tcpu_cores\x18\x06 \x01(\rR\bcpuCores\"\xdb\x01\n" +
 	"\x0fRegisterRequest\x12\x1d\n" +
 	"\n" +
 	"agent_name\x18\x01 \x01(\tR\tagentName\x12\x1f\n" +
@@ -5920,7 +5936,8 @@ const file_engine_proto_rawDesc = "" +
 	"\rsession_token\x18\x03 \x01(\tR\fsessionToken\x12\x12\n" +
 	"\x04tags\x18\x04 \x03(\tR\x04tags\x12\"\n" +
 	"\rwg_public_key\x18\x05 \x01(\tR\vwgPublicKey\x12\x17\n" +
-	"\ahost_ip\x18\x06 \x01(\tR\x06hostIp\"\x98\x02\n" +
+	"\ahost_ip\x18\x06 \x01(\tR\x06hostIp\x12\x12\n" +
+	"\x04arch\x18\a \x01(\tR\x04arch\"\x98\x02\n" +
 	"\x10RegisterResponse\x12!\n" +
 	"\fregistry_url\x18\x01 \x01(\tR\vregistryUrl\x12+\n" +
 	"\x0fstore_endpoints\x18\x02 \x03(\tB\x02\x18\x01R\x0estoreEndpoints\x12\x19\n" +
@@ -6122,7 +6139,7 @@ const file_engine_proto_rawDesc = "" +
 	"\x10GetStatusRequest\"~\n" +
 	"\x11GetStatusResponse\x12,\n" +
 	"\x06agents\x18\x01 \x03(\v2\x14.banyan.v1.AgentInfoR\x06agents\x12;\n" +
-	"\vdeployments\x18\x02 \x03(\v2\x19.banyan.v1.DeploymentInfoR\vdeployments\"\xba\x01\n" +
+	"\vdeployments\x18\x02 \x03(\v2\x19.banyan.v1.DeploymentInfoR\vdeployments\"\xce\x01\n" +
 	"\tAgentInfo\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x1f\n" +
@@ -6130,7 +6147,8 @@ const file_engine_proto_rawDesc = "" +
 	"apiAddress\x12$\n" +
 	"\x0elast_seen_unix\x18\x04 \x01(\x03R\flastSeenUnix\x12&\n" +
 	"\x0fcreated_at_unix\x18\x05 \x01(\x03R\rcreatedAtUnix\x12\x12\n" +
-	"\x04tags\x18\x06 \x03(\tR\x04tags\"\xe0\x03\n" +
+	"\x04tags\x18\x06 \x03(\tR\x04tags\x12\x12\n" +
+	"\x04arch\x18\a \x01(\tR\x04arch\"\xe0\x03\n" +
 	"\x0eDeploymentInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +

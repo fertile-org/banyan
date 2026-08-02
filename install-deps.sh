@@ -5,6 +5,10 @@
 # This file is NOT meant to be run directly.
 
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+# Directory on sudo's secure_path where the banyan commands are exposed via
+# symlink, so `sudo banyan-*` resolves even when INSTALL_DIR (e.g.
+# /usr/local/bin) is not on sudo's secure_path (default on RHEL/Oracle/Fedora).
+LINK_DIR="${LINK_DIR:-/usr/sbin}"
 
 # Dependency versions
 NERDCTL_VERSION="2.1.3"
@@ -25,6 +29,28 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 fatal() { error "$*"; exit 1; }
+
+# link_secure_path exposes an installed binary on sudo's secure_path by
+# symlinking it from INSTALL_DIR into LINK_DIR (default /usr/sbin). On RHEL/
+# Oracle/Fedora, sudo's secure_path excludes /usr/local/bin, so `sudo banyan-*`
+# fails with command-not-found even though the binary is installed. /usr/sbin
+# and /usr/bin are on the default secure_path of every supported OS.
+#
+# It never clobbers a real file: if LINK_DIR/<name> already exists as a regular
+# file (distro package, user-placed), it is left untouched with a warning. An
+# existing symlink (ours) is refreshed idempotently.
+link_secure_path() {
+    local name=$1
+    [ "$LINK_DIR" = "$INSTALL_DIR" ] && return 0   # avoid self-referential link
+    [ -d "$LINK_DIR" ] || return 0                 # skip if target dir absent
+    local target="${LINK_DIR}/${name}"
+    if [ -e "$target" ] && [ ! -L "$target" ]; then
+        warn "${target} is a real file — skipping symlink; use ${INSTALL_DIR}/${name} or the full path"
+        return 0
+    fi
+    ln -sf "${INSTALL_DIR}/${name}" "$target"
+    info "Linked ${target} -> ${INSTALL_DIR}/${name} (so 'sudo ${name}' works)"
+}
 
 # --- OS Family Registry ---
 
@@ -341,6 +367,36 @@ UNIT
     fi
 }
 
+install_qemu_binfmt() {
+    # Cross-arch image builds run foreign binaries under QEMU user emulation,
+    # registered via binfmt_misc. Needed on any box that cross-builds (e.g. an
+    # amd64 build host targeting arm64 agents).
+    if [ -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ] && [ -e /proc/sys/fs/binfmt_misc/qemu-x86_64 ]; then
+        info "QEMU binfmt handlers already registered, skipping."
+        return
+    fi
+
+    info "Installing QEMU user-static emulation (for cross-arch builds)..."
+
+    local family
+    family=$(get_family)
+    if [ "$family" = "debian" ]; then
+        $PKG_UPDATE
+        $PKG_INSTALL qemu-user-static binfmt-support
+    else
+        $PKG_INSTALL qemu-user-static
+    fi
+
+    # Register handlers for all arches with the buildkit/containerd worker.
+    # tonistiigi/binfmt is the most reliable cross-distro registrar.
+    if command -v nerdctl &>/dev/null; then
+        nerdctl run --privileged --rm tonistiigi/binfmt --install all >/dev/null 2>&1 || \
+            warn "tonistiigi/binfmt registration failed; qemu-user-static package handlers will be used."
+    fi
+
+    info "QEMU binfmt emulation installed."
+}
+
 # --- Systemd services ---
 
 install_systemd_services() {
@@ -563,6 +619,7 @@ install_deps() {
         install_cni
         install_wireguard
         install_buildkit
+        install_qemu_binfmt  # For cross-arch image builds
         install_nfs_client  # For NFS volume mounts
     fi
 

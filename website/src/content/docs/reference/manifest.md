@@ -124,6 +124,7 @@ services:
 | `deploy.stop_grace_period` | string | No | `5s` | Time to wait after removing from proxy/DNS before stopping a container during scale-down or drain. |
 | `volumes` | list | No | -- | Mount volumes into the container. Same syntax as Docker Compose. See [volumes](#volumes) below. |
 | `secrets` | list | No | -- | Secret names to inject as environment variables. Each name must match a secret created with `banyan-cli secret create`. See [Secrets](#secrets) below. |
+| `platform` | string | No | -- | Target architecture for `build:` services (e.g., `linux/arm64`). See [Building for a specific architecture](#building-for-a-specific-architecture-platform) below. |
 
 ## Container naming
 
@@ -274,6 +275,30 @@ services:
 Each service must have either `image` or `build` (or both).
 
 The [full example](#full-example-examplesbanyanyml) above demonstrates mixing `build:` and `image:` services. Services with `build:` are built locally and pushed to the Engine's registry. Services with only `image:` are pulled directly by agents.
+
+### Building for a specific architecture (`platform:`)
+
+`banyan-cli` builds images on the machine running the CLI. If your agents run a
+different CPU architecture (e.g. arm64 Ampere servers while you build on an
+amd64 laptop), set `platform:` on each build service:
+
+```yaml
+services:
+  api:
+    build: ./api
+    platform: linux/arm64
+```
+
+Or override all build services at once:
+
+```bash
+sudo banyan-cli up --platform linux/arm64
+```
+
+Cross-arch builds run under QEMU emulation, which must be installed on the build
+box (`install-deps.sh` installs it, or run
+`sudo nerdctl run --privileged --rm tonistiigi/binfmt --install all`). If it is
+missing, `banyan-cli up` fails fast with install instructions.
 
 ### env_file
 

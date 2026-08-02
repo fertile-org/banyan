@@ -822,6 +822,33 @@ func TestGetStatus(t *testing.T) {
 	})
 }
 
+func TestGetStatus_ReturnsAgentArch(t *testing.T) {
+	client, srv, cleanup := setupTestServer(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	node := &types.NodeRecord{Name: "worker-1", Status: "ready", Arch: "arm64", LastSeen: time.Now(), CreatedAt: time.Now()}
+	srv.store.Save(ctx, types.KeyNodes+"worker-1", node)
+
+	resp, err := client.GetStatus(ctx, &banyanpb.GetStatusRequest{})
+	if err != nil {
+		t.Fatalf("GetStatus failed: %v", err)
+	}
+	var found *banyanpb.AgentInfo
+	for _, a := range resp.Agents {
+		if a.Name == "worker-1" {
+			found = a
+		}
+	}
+	if found == nil {
+		t.Fatal("worker-1 not in agents")
+	}
+	if found.Arch != "arm64" {
+		t.Errorf("expected arch arm64, got %q", found.Arch)
+	}
+}
+
 func TestGetInfo(t *testing.T) {
 	client, _, cleanup := setupTestServer(t)
 	defer cleanup()
@@ -1747,6 +1774,29 @@ func TestRegister_SaveError(t *testing.T) {
 	}
 	if status.Code(err) != codes.Internal {
 		t.Errorf("expected Internal, got %v", status.Code(err))
+	}
+}
+
+func TestRegister_PersistsArch(t *testing.T) {
+	store := storage.NewMemoryStore()
+	srv := &engineGRPCServer{store: store, registryURL: "localhost:5000"}
+
+	ctx := context.Background()
+	_, err := srv.Register(ctx, &banyanpb.RegisterRequest{
+		AgentName:  "worker-1",
+		ApiAddress: "10.0.0.5:9100",
+		Arch:       "arm64",
+	})
+	if err != nil {
+		t.Fatalf("register failed: %v", err)
+	}
+
+	var node types.NodeRecord
+	if err := store.Get(ctx, types.KeyNodes+"worker-1", &node); err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if node.Arch != "arm64" {
+		t.Errorf("expected arch arm64, got %q", node.Arch)
 	}
 }
 

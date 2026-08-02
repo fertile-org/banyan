@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 
 	"google.golang.org/grpc"
@@ -113,6 +114,7 @@ func (ec *EngineClient) Register(ctx context.Context, req RegisterRequest) (stri
 		Tags:        req.Tags,
 		WgPublicKey: req.WGPublicKey,
 		HostIp:      req.HostIP,
+		Arch:        runtime.GOARCH,
 	})
 	if err != nil {
 		return "", nil, nil, fmt.Errorf("register failed: %w", err)
